@@ -119,7 +119,7 @@ async function setup() {
   await new Promise((r) => server.listen(0, r));
   const base = 'http://127.0.0.1:' + server.address().port;
   const env = { FD_KV: memoryKV(), PANEL_TOKEN: 'token-de-teste-com-mais-de-24-chars', ALLOWED_ORIGIN: 'https://sr-geovani.github.io',
-    NH_BASE: base + '/nh', BCH_REST: base + '/bch', PRICE_URL: base + '/cg/x', NH_API_KEY: MOCK_KEYS.key, NH_API_SECRET: MOCK_KEYS.secret, NH_ORG_ID: MOCK_KEYS.org,
+    NH_BASE: base + '/nh', BCH_REST: base + '/bch', PRICE_URL: base + '/cg/x', HL_URL: base + '/hl/info', NH_API_KEY: MOCK_KEYS.key, NH_API_SECRET: MOCK_KEYS.secret, NH_ORG_ID: MOCK_KEYS.org,
     MAX_ORDER_BTC: '0.01', MAX_LIMIT_PH: '100', MAX_DAILY_USD: '1000' };
   const call = async (method, path, body, token = env.PANEL_TOKEN) => {
     const r = await worker.fetch(new Request('https://api.example' + path, { method, headers: { Authorization: 'Bearer ' + token, Origin: 'https://sr-geovani.github.io', 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined }), env, {});
@@ -208,5 +208,35 @@ test('integração: modo ativo exige chaves; proxy público só nas rotas permit
     assert.equal(r.status, 400);
     const p = await worker.fetch(new Request('https://api.example/binance/fapi/v1/order'), t.env, {});
     assert.equal(p.status, 404, 'proxy não repassa rotas de ordem');
+  } finally { t.server.close(); }
+});
+
+test('integração: alertas de funding exigem persistência, respeitam o intervalo e aparecem no status', async () => {
+  const t = await setup();
+  try {
+    let r = await t.call('POST', '/api/tick');
+    assert.equal(r.body.alerts.filter((a) => a.area === 'funding').length, 0, 'primeira leitura não alerta');
+    r = await t.call('POST', '/api/tick');
+    const fe = r.body.alerts.filter((a) => a.kind === 'entrada' && a.area === 'funding');
+    assert.equal(fe.length, 1, JSON.stringify(r.body.alerts));
+    assert.match(fe[0].title, /ENA \(short Bybit, long Hyperliquid\)/);
+    r = await t.call('POST', '/api/tick');
+    assert.equal(r.body.alerts.filter((a) => a.area === 'funding').length, 0, 'não repete dentro do intervalo');
+    const st = await t.call('GET', '/api/status');
+    assert.ok(st.body.state.alerts.some((a) => /ENA/.test(a.title)));
+    const log = await t.call('GET', '/api/log');
+    assert.ok(log.body.log.some((l) => l.kind === 'alerta'));
+    // desligar alertas
+    await t.call('PUT', '/api/config', { alerts: false });
+    r = await t.call('POST', '/api/tick');
+    assert.deepEqual(r.body.alerts, []);
+  } finally { t.server.close(); }
+});
+
+test('integração: proxy da WhatToMine só nas rotas permitidas', async () => {
+  const t = await setup();
+  try {
+    const bad = await worker.fetch(new Request('https://api.example/wtm/coins/1.json'), t.env, {});
+    assert.equal(bad.status, 404);
   } finally { t.server.close(); }
 });

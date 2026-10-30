@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: ['worker/**', '.github/workflows/worker.yml']
+    paths: ['worker/**', 'core.js', 'radar.js', 'copilot.js', '.github/workflows/worker.yml']
 permissions:
   contents: read
 jobs:

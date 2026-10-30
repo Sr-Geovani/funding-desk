@@ -17,7 +17,10 @@ export const DEFAULT_CONFIG = {
   dailyBudgetUsd: 500,      // gasto máximo por dia (UTC); ao atingir, reduz para a potência de pausa
   autoCreate: false,        // criar ordem quando o sinal ficar verde e não houver ordem gerenciada
   orderAmountBtc: 0.002,
-  managed: []               // ids das ordens que o robô pode alterar ou cancelar
+  managed: [],              // ids das ordens que o robô pode alterar ou cancelar
+  alerts: true,             // alertas de entrada/saída/risco (funding e mineração) a cada ciclo, com Telegram
+  alertCapital: 1000,       // capital usado para calcular os alertas de funding
+  alertHold: 3              // ciclo (dias) usado nos alertas de funding
 };
 
 export const DOWN_STEP_MS = 10 * 60 * 1000; // NiceHash: uma redução de preço (priceDownStep) a cada ~10 min
@@ -54,6 +57,8 @@ export function sanitizeConfig(input = {}, prev = DEFAULT_CONFIG, limits = limit
   num('sessionBudgetUsd', 0, limits.maxDailyUsd); num('dailyBudgetUsd', 0, limits.maxDailyUsd);
   num('orderAmountBtc', 0, limits.maxOrderBtc);
   if (input.autoCreate !== undefined) c.autoCreate = !!input.autoCreate;
+  if (input.alerts !== undefined) c.alerts = !!input.alerts;
+  num('alertCapital', 10, 1e7); num('alertHold', 1, 30);
   if (input.managed !== undefined) {
     if (Array.isArray(input.managed)) c.managed = input.managed.map(String).slice(0, 50); else errors.push('managed deve ser lista');
   }

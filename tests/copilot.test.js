@@ -107,3 +107,11 @@ test('formatação pt-BR', () => {
   assert.equal(C.hoursTxt(30), '30,0 h');
   assert.equal(C.hoursTxt(24 * 3000), '8 anos');
 });
+
+test('mineração com livro raso não vira "compensa"', () => {
+  const v = C.miningVerdict({ coin: 'BCH', revenue: 40, rent: 35, minEdgePct: 3, thin: 2 });
+  assert.equal(v.level, 'maybe');
+  assert.match(v.note, /Livro da NiceHash raso agora \(2 ordens/);
+  const r = C.coinCompare([{ coin: 'BSV', D: 27.06e9, rewardCoin: 3.125, coinUsd: 17.27 }], { rent: 30, poolFeePct: 2, minEdgePct: 3, thin: 2 });
+  assert.equal(r[0].level, 'maybe');
+});

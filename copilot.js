@@ -99,6 +99,7 @@ function miningVerdict(x) {
   }
   var m = (x.minEdgePct || 0) / 100, ratio = x.revenue / x.rent;
   var level = x.rent <= x.revenue * (1 - m) ? 'go' : (x.rent <= x.revenue ? 'maybe' : 'no');
+  if (x.thin && level === 'go') level = 'maybe'; // livro raso: preço típico não vale para volume
   var title = { go: 'Compensa alugar hash para ' + x.coin + ' agora', maybe: x.coin + ' está no empate', no: 'Não compensa alugar para ' + x.coin + ' agora' }[level];
   var why = 'Alugar 1 PH/s por um dia custa ' + money(x.rent) + ' (preço típico do mercado, com taxas). Esse hash rende em média ' + money(x.revenue) +
     ' em ' + x.coin + ' (já sem a taxa do pool). ' + (ratio >= 1 ? 'Para cada US$1 pago, espera-se receber US$' + nf(ratio, 2) + '.' : 'Você pagaria US$' + nf(1 / ratio, 2) + ' para cada US$1 esperado.');
@@ -117,6 +118,7 @@ function miningVerdict(x) {
     maybe: 'Só vale comprando no teto. Deixe o robô em Observar com teto: ele só compra quando o preço ficar abaixo do empate.',
     no: 'Não abra ordem agora. Se quiser, deixe o robô em Observar: ele registra quando o preço cair abaixo do teto.'
   }[level];
+  if (x.thin) note = 'Livro da NiceHash raso agora (' + x.thin + ' ordens recebendo hash): para comprar volume de verdade o preço tende a subir. ' + note;
   return { level: level, title: title, why: why, note: note, when: when, action: action, edgePct: (ratio - 1) * 100, ratio: ratio };
 }
 
@@ -132,6 +134,7 @@ function coinCompare(list, ctx) {
     var variance = hoursPerBlock > 24 * 365 ? { key: 'loteria', label: 'loteria' } : hoursPerBlock > 24 * 7 ? { key: 'alta', label: 'alta' } :
       hoursPerBlock > 12 ? { key: 'media', label: 'média' } : { key: 'baixa', label: 'baixa' };
     var level = ctx.rent > 0 ? (ctx.rent <= revenue * (1 - m) ? 'go' : (ctx.rent <= revenue ? 'maybe' : 'no')) : 'none';
+    if (ctx.thin && level === 'go') level = 'maybe';
     return {
       coin: c.coin, name: c.name, revenue: revenue, edgePct: ctx.rent > 0 ? (revenue / ctx.rent - 1) * 100 : null,
       phDaysPerBlock: phDays, blockUsd: blockUsd, costPerBlock: ctx.rent > 0 ? phDays * ctx.rent : null,
@@ -182,14 +185,19 @@ var MOMENTS = {
     'Entre antes do próximo pagamento da perna short: cada pagamento perdido é renda perdida.',
     'Evite listings recentes e spreads marcados como "extremo": as regras e o preço mudam rápido.',
     'Saia quando o spread cair abaixo do break-even ou inverter, mesmo antes do fim do ciclo.',
-    'Ciclos mais longos diluem as taxas: em 1 dia quase nada compensa; em 3 a 5 dias, sim.'
+    'Ciclos mais longos diluem as taxas: em 1 dia quase nada compensa; em 3 a 5 dias, sim.',
+    'Cada perna tem a sua própria margem e pode ser liquidada sozinha: deixe folga nas duas exchanges (o risco mais citado em fóruns, junto com a inversão do funding).',
+    'Exchanges pagam em horários diferentes: confira os dois próximos pagamentos antes de entrar e de sair.',
+    'Transferir entre exchanges leva tempo: tenha saldo nas duas antes de abrir, para não ficar com uma perna só.'
   ],
   mining: [
     'Quando o aluguel fica abaixo do preço de empate. O gráfico de margem do robô mostra os horários em que isso acontece.',
     'Logo depois de uma alta forte da moeda: a dificuldade leva horas para acompanhar e o hash rende mais nesse intervalo.',
     'Quando a dificuldade está abaixo da média recente.',
     'Não são momentos (não mudam a chance por hash): rede "rápida", esforço ou luck alto, best share "quase", potência de quem achou o último bloco.',
-    'Parar no bloco e stop-loss controlam o risco e o caixa; o retorno médio por dólar continua dependendo só do preço pago.'
+    'Parar no bloco e stop-loss controlam o risco e o caixa; o retorno médio por dólar continua dependendo só do preço pago.',
+    'Na NiceHash, um lance maior de outro comprador toma o hash da sua ordem: o preço de mercado muda ao longo do dia.',
+    'Redes pequenas parecem render muito por hash, mas o hash alugado derruba a dificuldade e não há onde vender a moeda.'
   ]
 };
 
@@ -209,7 +217,11 @@ var GLOSSARY = [
   ['Lance', 'Preço que o robô oferece: um pouco acima do menor preço que está recebendo hash na NiceHash.'],
   ['Blocos esperados (λ)', 'Quantos blocos sairiam em média com aquela potência e duração. 0,5 = cerca de 39% de chance de ao menos um.'],
   ['Mineração solo', 'Você só recebe se a sua potência achar o bloco inteiro. Paga tudo ou nada: grande variação.'],
-  ['Stop-loss', 'Gasto máximo por sessão sem achar bloco. Ao atingir, a ordem é encerrada.']
+  ['Stop-loss', 'Gasto máximo por sessão sem achar bloco. Ao atingir, a ordem é encerrada.'],
+  ['Merged mining', 'Minerar duas moedas com o mesmo hash ao mesmo tempo. No Scrypt, Litecoin e Dogecoin pagam juntos.'],
+  ['Algoritmo', 'Tipo de cálculo de cada moeda (SHA-256, Scrypt...). Hash alugado de um algoritmo só serve para moedas dele.'],
+  ['Sentimento (funding médio)', 'Média do funding de BTC, ETH e SOL. Muito alto: excesso de comprados alavancados; negativo: excesso de vendidos.'],
+  ['Alerta de entrada', 'Uma oportunidade compensa e se mantém por duas leituras seguidas ou está estável no histórico de pagamentos.']
 ];
 
 var FDC = {

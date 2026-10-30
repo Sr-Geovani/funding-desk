@@ -1,24 +1,32 @@
-// Foto do livro de ordens SHA-256 da NiceHash, publicada junto com o site (o navegador não consegue ler a API direto: CORS).
-// Uso: node scripts/snapshot-nicehash.js <arquivo-de-saida>
+// Fotos de mercado publicadas junto com o site (o navegador não lê NiceHash nem WhatToMine direto: CORS).
+// Uso: node scripts/snapshot-nicehash.js <pasta-de-saida>   → nicehash.json (SHA-256) e market.json (todos os algoritmos)
 const fs = require('node:fs');
 const path = require('node:path');
 const FDM = require('../mining.js');
+const FDR = require('../radar.js');
 
-const out = process.argv[2] || '_site/data/nicehash.json';
-const url = 'https://api2.nicehash.com/main/api/v2/hashpower/orderBook?algorithm=SHA256';
+const outDir = process.argv[2] || '_site/data';
+const NH = 'https://api2.nicehash.com/main/api/v2/hashpower/orderBook?algorithm=';
+const get = async (u) => { const r = await fetch(u, { headers: { accept: 'application/json', 'user-agent': 'funding-desk/1.0' } }); if (!r.ok) throw new Error('HTTP ' + r.status + ' ' + u); return r.json(); };
+// Mantém só o necessário do livro (preço, velocidade aceita, ativa) para o arquivo ficar pequeno.
+const slim = (d) => { for (const m of Object.values(d.stats || {})) m.orders = (m.orders || []).map((o) => ({ price: o.price, acceptedSpeed: o.acceptedSpeed, alive: o.alive, type: o.type, rigsCount: o.rigsCount })); return d; };
 
 (async () => {
-  let body;
-  try {
-    const r = await fetch(url, { headers: { accept: 'application/json' } });
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    const markets = FDM.parseNiceHashBook(await r.json());
-    body = { at: new Date().toISOString(), source: 'github-actions', url, markets };
-  } catch (e) {
-    // Sem dado novo não quebra o deploy: o painel mostra o erro e pede preço manual.
-    body = { at: new Date().toISOString(), source: 'github-actions', url, markets: [], error: String(e.message || e) };
+  fs.mkdirSync(outDir, { recursive: true });
+  const at = new Date().toISOString(), errors = [];
+  const books = {};
+  for (const a of FDR.ALGOS) {
+    try { books[a.nh] = slim(await get(NH + a.nh)); } catch (e) { errors.push(a.nh + ': ' + e.message); }
   }
-  fs.mkdirSync(path.dirname(out), { recursive: true });
-  fs.writeFileSync(out, JSON.stringify(body));
-  console.log(out, body.markets.length ? 'ok' : 'sem dados: ' + body.error);
+  let wtm = null;
+  try {
+    const w = await get('https://whattomine.com/asic.json');
+    const keep = ['tag', 'name', 'algorithm', 'block_time', 'block_reward', 'nethash', 'exchange_rate', 'exchange_rate_vol', 'lagging'];
+    wtm = { coins: {} };
+    for (const [k, c] of Object.entries(w.coins || {})) wtm.coins[k] = Object.fromEntries(keep.map((f) => [f, c[f]]).concat([['name', k]]));
+  } catch (e) { errors.push('whattomine: ' + e.message); }
+  const sha = books.SHA256 ? FDM.parseNiceHashBook(books.SHA256) : [];
+  fs.writeFileSync(path.join(outDir, 'nicehash.json'), JSON.stringify({ at, source: 'github-actions', markets: sha, error: sha.length ? undefined : errors.join('; ') }));
+  fs.writeFileSync(path.join(outDir, 'market.json'), JSON.stringify({ at, source: 'github-actions', books, wtm, errors }));
+  console.log(outDir, 'livros:', Object.keys(books).length, 'whattomine:', wtm ? Object.keys(wtm.coins).length : 0, errors.length ? 'erros: ' + errors.join('; ') : '');
 })();

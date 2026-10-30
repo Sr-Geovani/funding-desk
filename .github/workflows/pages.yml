@@ -34,12 +34,12 @@ jobs:
       - name: Montar site (só arquivos públicos do app)
         run: |
           mkdir _site
-          cp -r index.html diagnostico.html core.js mining.js copilot.js app.js sw.js manifest.json icons _site/
+          cp -r index.html diagnostico.html core.js mining.js copilot.js radar.js app.js sw.js manifest.json icons _site/
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Foto do livro de ordens NiceHash
-        run: node scripts/snapshot-nicehash.js _site/data/nicehash.json
+      - name: Fotos de mercado (livros NiceHash por algoritmo e WhatToMine)
+        run: node scripts/snapshot-nicehash.js _site/data
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
       - id: deployment

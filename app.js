@@ -62,7 +62,7 @@ function tick(){
 setInterval(tick,1000);
 
 /* ---------- rede ---------- */
-var PROXY_KEY={'fapi.binance.com':'binance','api.bybit.com':'bybit','api2.nicehash.com':'nicehash'};
+var PROXY_KEY={'fapi.binance.com':'binance','api.bybit.com':'bybit','api2.nicehash.com':'nicehash','whattomine.com':'wtm'};
 var usedProxy={};
 function fetchJSON(u,opt){
   var ctl=typeof AbortController!=='undefined'?new AbortController():null,o=Object.assign({},opt||{});
@@ -120,12 +120,15 @@ function loadBybit(){
 function hl(body){return fetchJSON('https://api.hyperliquid.xyz/info',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})}
 function loadHL(){return hl({type:'metaAndAssetCtxs'}).then(function(d){return FD.parseHL(d,Date.now())})}
 function loadPredicted(){return hl({type:'predictedFundings'}).then(FD.parsePredicted)}
+function loadOKX(){return Promise.all([fetchJSON('https://www.okx.com/api/v5/public/funding-rate?instId=ANY'),fetchJSON('https://www.okx.com/api/v5/market/tickers?instType=SWAP')]).then(function(a){return FD.parseOKX(a[0],a[1])})}
+function loadBitget(){return Promise.all([fetchJSON('https://api.bitget.com/api/v2/mix/market/current-fund-rate?productType=USDT-FUTURES'),fetchJSON('https://api.bitget.com/api/v2/mix/market/tickers?productType=USDT-FUTURES')]).then(function(a){return FD.parseBitget(a[0],a[1])})}
+function loadGate(){return Promise.all([fetchJSON('https://api.gateio.ws/api/v4/futures/usdt/contracts'),fetchJSON('https://api.gateio.ws/api/v4/futures/usdt/tickers')]).then(function(a){return FD.parseGate(a[0],a[1])})}
 
 var loading=false;
 function load(){
   if(loading)return;loading=true;usedProxy={};
   $('status').textContent='lendo…';$('status').className='chip demo';
-  Promise.all([loadBinance(),loadBybit(),loadHL(),loadPredicted()].map(settle)).then(function(res){
+  Promise.all([loadBinance(),loadBybit(),loadHL(),loadPredicted(),loadOKX(),loadBitget(),loadGate()].map(settle)).then(function(res){
     loading=false;
     var rows={},src={},err={},notes=[];
     function add(v,map,how){src[v]=how;Object.keys(map).forEach(function(c){(rows[c]=rows[c]||{})[v]=map[c]})}
@@ -139,13 +142,15 @@ function load(){
       }
     });
     if(res[2].ok)add('Hyperliquid',res[2].v,'api');else{err.Hyperliquid=errMsg(res[2].e);notes.push('Hyperliquid: sem resposta ('+err.Hyperliquid+').')}
+    ['OKX','Bitget','Gate'].forEach(function(v,i){var r=res[4+i];if(r.ok)add(v,r.v,'api');else{err[v]=errMsg(r.e);notes.push(v+': sem resposta ('+err[v]+').')}});
     var n=Object.keys(src).length;
     state.updated=new Date();state.srcErr=err;
     if(n){
       state.rows=rows;state.live=true;state.src=src;
       var direct=Object.keys(src).filter(function(v){return src[v]!=='via HL'}).length;
-      $('status').textContent=direct===3?'ao vivo':'parcial';
-      $('status').className='chip '+(direct===3?'live':'demo');
+      var all=direct===VENUES.length;
+      $('status').textContent=all?'ao vivo':'parcial';
+      $('status').className='chip '+(all?'live':'demo');
       if(n<2&&state.mode==='pp')notes.push('Só uma exchange respondeu: Perp × Perp precisa de duas.');
     }else{
       state.rows=FD.demoData(Date.now());state.live=false;state.src={};
@@ -154,7 +159,7 @@ function load(){
     }
     $('banner').hidden=!notes.length;$('banner').innerHTML=notes.join('<br>');
     $('stamp').textContent='Funding atualizado às '+state.updated.toLocaleTimeString('pt-BR')+' (taxa prevista do próximo pagamento; pode inverter).';
-    renderScan();renderPositions();renderHome();renderConn();
+    renderScan();renderPositions();renderHome();renderConn();updateRadar();
   });
 }
 
@@ -191,6 +196,7 @@ function loadMining(){
     fillPlanLive(false);
     renderMine();renderHome();renderConn();renderSessions();
     if(mineAgain)loadMining();
+    loadMarketMap();
   });
 }
 // Valores ao vivo consolidados (com fallback entre fontes).
@@ -216,6 +222,9 @@ function loadHist(venue,sym,fallbackH){
   var start=Date.now()-HIST_DAYS*864e5,p;
   if(venue==='Binance')p=jget('https://fapi.binance.com/fapi/v1/fundingRate?symbol='+encodeURIComponent(sym)+'&startTime='+start+'&limit=1000').then(FD.parseBinanceHist);
   else if(venue==='Bybit')p=jget('https://api.bybit.com/v5/market/funding/history?category=linear&symbol='+encodeURIComponent(sym)+'&startTime='+start+'&endTime='+Date.now()+'&limit=200').then(FD.parseBybitHist);
+  else if(venue==='OKX')p=fetchJSON('https://www.okx.com/api/v5/public/funding-rate-history?instId='+encodeURIComponent(sym)+'&limit=100').then(FD.parseOKXHist);
+  else if(venue==='Bitget')p=fetchJSON('https://api.bitget.com/api/v2/mix/market/history-fund-rate?symbol='+encodeURIComponent(sym)+'&productType=USDT-FUTURES&pageSize=100').then(FD.parseBitgetHist);
+  else if(venue==='Gate')p=fetchJSON('https://api.gateio.ws/api/v4/futures/usdt/funding_rate?contract='+encodeURIComponent(sym)+'&limit=100').then(FD.parseGateHist);
   else p=hl({type:'fundingHistory',coin:sym,startTime:start}).then(FD.parseHLHist);
   return p.then(function(pts){var s=FD.historySeries(pts,fallbackH);histCache[key]={at:Date.now(),s:s};return s});
 }
@@ -418,8 +427,9 @@ function mineVerdict(L){
   var price=refPrice(L),rent=price&&L.btcUsd?FDM.rentalUsdPerPhDay(price,L.btcUsd,3):null;
   var rev=L.D&&L.bchUsd?FDM.hashpriceUsd(L.D,L.rewardCoin,L.bchUsd)*(1-poolFee()/100):null;
   var be=rev&&L.btcUsd?rev/1.03/L.btcUsd*1000:null;
-  var v=FDC.miningVerdict({coin:'BCH',revenue:rev,rent:rent,rentPriceEH:price,breakEvenEH:be,coinUsd:L.bchUsd,networkPH:L.networkPH,avgBlockMin:L.st?L.st.avgAll:null,minEdgePct:minEdge()});
-  return {v:v,rent:rent,rev:rev,price:price};
+  var thin=L.book&&L.book.activeOrders<5?L.book.activeOrders:0;
+  var v=FDC.miningVerdict({coin:'BCH',revenue:rev,rent:rent,rentPriceEH:price,breakEvenEH:be,coinUsd:L.bchUsd,networkPH:L.networkPH,avgBlockMin:L.st?L.st.avgAll:null,minEdgePct:minEdge(),thin:thin});
+  return {v:v,rent:rent,rev:rev,price:price,thin:thin};
 }
 var COIN_NOTES={
   BTC:'O bloco vale muito, mas precisa de muito hash: com potência alugada pequena é bilhete de loteria.',
@@ -431,7 +441,7 @@ function coinRows(L,V){
     {coin:'BTC',name:'Bitcoin',D:L.btcD,rewardCoin:3.125,coinUsd:L.btcUsd,notes:COIN_NOTES.BTC},
     {coin:'BCH',name:'Bitcoin Cash',D:L.D,rewardCoin:L.rewardCoin,coinUsd:L.bchUsd,notes:COIN_NOTES.BCH},
     {coin:'BSV',name:'Bitcoin SV',D:L.bsvD,rewardCoin:3.125,coinUsd:L.bsvUsd,notes:COIN_NOTES.BSV}
-  ],{rent:V.rent,poolFeePct:poolFee(),minEdgePct:minEdge(),refPh:10});
+  ],{rent:V.rent,poolFeePct:poolFee(),minEdgePct:minEdge(),refPh:10,thin:V.thin});
 }
 function renderCoins(L,V){
   var rows=coinRows(L,V);
@@ -738,7 +748,7 @@ function opCard(eyebrow,level,title,text,btns,extra){
     '<div class="row">'+btns.map(function(b){return '<button class="sm'+(b[2]?' pri':'')+'" data-go="'+b[0]+'"'+(b[3]?' data-setmode="'+b[3]+'"':'')+'>'+b[1]+'</button>'}).join('')+'</div></div>';
 }
 function renderHome(){
-  var rows=['Binance','Bybit','Hyperliquid'].map(function(v){
+  var rows=VENUES.map(function(v){
     var s=state.src[v];
     if(s)return srcRow(v,s==='via HL'?'parcial':'ok',SRC_NAME[s]+(state.updated?' · '+hhmm(state.updated):''),s==='via HL'?'warn':'good');
     return srcRow(v,state.updated?'falhou':'…',state.srcErr[v]||'',state.updated?'bad':'mute');
@@ -774,7 +784,8 @@ function renderHome(){
   $('h_alerts').innerHTML='<div class="eyebrow">Suas operações</div><div class="lead">'+(al.length?plural(al.length,'posição pede atenção','posições pedem atenção'):'Nada pede atenção agora')+'</div>'+
     (lines.length?'<ul class="rules">'+lines.join('')+'</ul>':'')+
     '<p class="note">'+plural(openN,'posição de funding aberta','posições de funding abertas')+' · '+plural(ms.n,'sessão de mineração registrada','sessões de mineração registradas')+(ms.n?' (líquido '+usd(ms.net)+')':'')+(bs2?' · robô '+MODE_TXT[bs2.config.mode].toLowerCase():'')+'.</p>'+
-    '<div class="row"><button class="sm" data-go="diary">Abrir diário</button>'+(settings.apiUrl?'<button class="sm" data-go="mine:ops">Operar</button>':'')+'</div>';
+    (alerts.length?'<p class="note" style="margin:0 0 8px">Radar: '+plural(unseen(),'alerta novo','alertas novos')+'. Último: '+esc(alerts[alerts.length-1].title)+'.</p>':'')+
+    '<div class="row"><button class="sm" data-go="radar">Abrir radar</button><button class="sm" data-go="diary">Abrir diário</button>'+(settings.apiUrl?'<button class="sm" data-go="mine:ops">Operar</button>':'')+'</div>';
   renderJourneys(V);
 }
 function stepsHTML(steps){
@@ -847,13 +858,131 @@ function renderLiq(){
    '<div><span class="mute">Alavancagem 3x ou mais</span><span class="mono bad">evite</span></div>';
 }
 
+/* ---------- radar: mapas, padrões e alertas ---------- */
+var market={raw:null,map:null,at:null,src:null,err:null},marketLoading=false;
+function loadMarketMap(){
+  if(marketLoading||(market.map&&Date.now()-market.at<5*60e3))return;
+  marketLoading=true;
+  var wtmU=proxied('https://whattomine.com/asic.json');
+  var live$=wtmU?Promise.all([fetchJSON(wtmU)].concat(FDR.ALGOS.map(function(a){return settle(fetchJSON(proxied('https://api2.nicehash.com/main/api/v2/hashpower/orderBook?algorithm='+a.nh)))}))).then(function(r){
+      var books={};FDR.ALGOS.forEach(function(a,i){if(r[i+1].ok)books[a.nh]=r[i+1].v});return {wtm:r[0],books:books,at:Date.now(),src:'tempo real'}})
+    :Promise.reject(new Error('sem backend'));
+  live$.catch(function(){return fetchJSON('data/market.json?'+Math.floor(Date.now()/60000)).then(function(d){return {wtm:d.wtm,books:d.books||{},at:Date.parse(d.at),src:'foto GitHub'}})})
+    .then(function(d){marketLoading=false;market.raw=d;market.at=Date.now();market.src=d.src;market.dataAt=d.at;market.err=null;computeMarketMap();renderRadar();updateRadar()},
+      function(e){marketLoading=false;market.err=errMsg(e);renderRadar()});
+}
+function computeMarketMap(){
+  if(!market.raw||!market.raw.wtm)return;
+  var L=live(),extra=[];
+  if(L.bsvD&&L.bsvUsd&&L.btcUsd)extra.push({tag:'BSV',name:'Bitcoin SV',algorithm:'SHA-256',block_time:600,block_reward:3.125,nethash:L.bsvD*4294967296/600,exchange_rate:L.bsvUsd/L.btcUsd,exchange_rate_vol:null});
+  market.map=FDR.miningMap(market.raw.wtm,market.raw.books||{},{btcUsd:L.btcUsd||undefined,poolFeePct:poolFee(),rentFeePct:3,minEdgePct:minEdge(),extra:extra});
+}
+var hist=ls('fd_hist')||[],amem=ls('fd_amem')||{},alerts=ls('fd_alerts')||[];
+function radarSnapshot(){
+  var L=live(),V=mineVerdict(L),edges={},prices={};
+  coinRows(L,V).forEach(function(c){if(c.edgePct!==null)edges[c.coin]=+c.edgePct.toFixed(2)});
+  (market.map||[]).forEach(function(m){if(m.edgePct!==null&&m.algo!=='SHA256')edges[m.label]=+m.edgePct.toFixed(2)});
+  if(L.bchUsd)prices.BCH=L.bchUsd;if(L.btcUsd)prices.BTC=L.btcUsd;if(L.bsvUsd)prices.BSV=L.bsvUsd;
+  if(market.raw&&market.raw.wtm&&L.btcUsd)FDR.wtmCoins(market.raw.wtm).forEach(function(c){if(['LTC','DOGE','KAS'].indexOf(c.tag)>=0&&c.exchange_rate>0)prices[c.tag]=c.exchange_rate*L.btcUsd});
+  var best=[];
+  if(state.live){var p=scanParams(),c=verdictCtx(p);(state.ops||[]).slice(0,10).forEach(function(o){
+    var st=stabOf(o),v=FDC.fundingVerdict(o,Object.assign({stab:st},c));
+    if(v.level==='go')best.push({key:oppKey(o),coin:o.coin,title:(o.l==='Spot'?'spot + short na '+o.s:'short '+o.s+', long '+o.l),level:'go',stab:st?st.key:null,netTxt:'~'+usd(o.m.netUsd)+' em '+p.hold+' dias'})})}
+  return {t:Date.now(),sent:state.live?FDR.sentiment(state.rows,VENUES):null,edges:edges,prices:prices,best:best.slice(0,5)};
+}
+function updateRadar(){
+  var snap=radarSnapshot(),prev=null;
+  for(var i=hist.length-1;i>=0;i--)if(snap.t-hist[i].t>=5*60e3){prev=hist[i];break}
+  var positions=posAlerts().map(function(x){return {id:x.p.id,coin:x.p.coin,s:x.p.s,l:x.p.l,level:x.al.level,text:x.al.text}});
+  var r=FDR.evaluateAlerts({snap:snap,prev:prev||{},hist:hist,positions:positions,mem:amem,now:snap.t,minEdgePct:minEdge()});
+  amem=r.mem;ls('fd_amem',amem);
+  hist=FDR.pushHistory(hist,snap);ls('fd_hist',hist);
+  if(r.alerts.length){alerts=alerts.concat(r.alerts).slice(-60);ls('fd_alerts',alerts);notifyLocal(r.alerts)}
+  renderRadar();renderBadge();
+}
+function notifyLocal(list){
+  try{
+    if(!('Notification' in window)||Notification.permission!=='granted')return;
+    navigator.serviceWorker&&navigator.serviceWorker.getRegistration?navigator.serviceWorker.getRegistration().then(function(reg){
+      list.slice(0,3).forEach(function(a){if(reg)reg.showNotification(a.title,{body:a.text,icon:'icons/icon-192.png'});else new Notification(a.title,{body:a.text})})}):
+      list.slice(0,3).forEach(function(a){new Notification(a.title,{body:a.text})});
+  }catch(e){}
+}
+function unseen(){var seen=+(ls('fd_aseen')||0);return alerts.filter(function(a){return a.t>seen}).length}
+function renderBadge(){var n=unseen(),b=$('r_badge');b.hidden=!n;b.textContent=n>9?'9+':n}
+var KIND={entrada:['Entrada','ok','✓'],saida:['Saída','bad','✕'],risco:['Risco','warn','!'],oportunidade:['Oportunidade','ok','↗']};
+var VABBR={Binance:'BIN',Bybit:'BYB',Hyperliquid:'HL',OKX:'OKX',Bitget:'BGT',Gate:'GATE'};
+function heatBg(apr){
+  if(!isFinite(apr))return 'transparent';
+  if(Math.abs(apr)<3)return 'rgba(128,128,128,.16)';
+  var a=Math.min(.62,.12+Math.abs(apr)/120);
+  return apr>0?'rgba(227,73,72,'+a.toFixed(2)+')':'rgba(57,135,229,'+a.toFixed(2)+')';
+}
+function fmtApr(a){return Math.abs(a)<10?nf(a,1):nf(a,0)}
+var radarSel=null,plCat='funding';
+function alertHTML(a){var k=KIND[a.kind]||['Info','',''];
+  return '<div class="alert '+a.kind+'"><div class="row between"><span class="chip '+k[1]+'">'+k[2]+' '+k[0]+'</span><span class="note mono">'+new Date(a.t).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})+'</span></div>'+
+    '<b>'+esc(a.title)+'</b><span class="note">'+esc(a.text)+'</span>'+(a.go?'<div><button class="sm" data-go="'+(a.go==='radar'?'radar':a.go)+'">Abrir</button></div>':'')+'</div>'}
+function renderRadar(){
+  if(!$('r_alerts'))return;
+  var list=alerts.slice().reverse().slice(0,12),srv=ops.status&&ops.status.state&&ops.status.state.alerts||[];
+  var canNotify='Notification' in window&&Notification.permission==='default';
+  $('r_alerts').innerHTML='<div class="row between"><div class="eyebrow">Alertas</div>'+(canNotify?'<button class="sm" id="r_notify">Avisar neste aparelho</button>':'')+'</div>'+
+    '<div class="lead">'+(list.length?plural(list.length,'alerta recente','alertas recentes'):'Nenhum alerta ainda')+'</div>'+
+    (list.length?'<div class="stack" style="gap:8px">'+list.map(alertHTML).join('')+'</div>':
+      '<p class="note" style="margin:0">O radar compara cada leitura com as anteriores. Entradas aparecem quando uma oportunidade compensa e se mantém (ou está estável no histórico); saídas, quando uma posição sua ou a mineração deixa de compensar.</p>')+
+    (srv.length?'<details style="margin-top:8px"><summary>Do servidor (Telegram): '+srv.length+'</summary><div class="stack" style="gap:8px">'+srv.slice(0,8).map(alertHTML).join('')+'</div></details>':
+      '<p class="note" style="margin:8px 0 0">'+(settings.apiUrl?'Servidor sem alertas recentes.':'Sem backend, os alertas só são calculados com o painel aberto. Com o backend ligado e o Telegram configurado, chegam 24 h por dia.')+'</p>');
+  var sent=state.live?FDR.sentiment(state.rows,VENUES):null;
+  $('r_sent').innerHTML=sent?'<span class="chip '+sent.cls+'">'+sent.label+'</span>':'';
+  $('r_senttxt').textContent=sent?'Funding médio de BTC, ETH e SOL: '+pct(sent.avg,1)+' ao ano (o normal é ~11%). '+sent.text:(state.live?'':'Sem dados ao vivo de funding agora.');
+  var mx=state.live?FDR.fundingMatrix(state.rows,VENUES,{extra:8,minVol:num('minvol')*1e6}):[];
+  $('r_fmap').innerHTML=mx.length?'<colgroup><col style="width:58px">'+VENUES.map(function(){return '<col>'}).join('')+'</colgroup><tr><th></th>'+VENUES.map(function(v){return '<th>'+VABBR[v]+'</th>'}).join('')+'</tr>'+
+    mx.map(function(r){return '<tr data-coin="'+esc(r.coin)+'"'+(radarSel===r.coin?' class="sel"':'')+'><td>'+esc(r.coin)+(r.major?'':' <span class="note">↕</span>')+'</td>'+r.cells.map(function(c){
+      return c?'<td style="background:'+heatBg(c.apr)+'" title="'+esc(c.venue)+': '+pct(c.apr,1)+' a.a., paga a cada '+c.hours+' h">'+fmtApr(c.apr)+'</td>':'<td class="note">—</td>'}).join('')+'</tr>'}).join('')
+    :'<tr><td class="note">Carregando funding das exchanges…</td></tr>';
+  var sel=mx.filter(function(r){return r.coin===radarSel})[0];
+  $('r_fsel').innerHTML=sel&&sel.hi&&sel.lo&&sel.hi!==sel.lo?'<b>'+esc(sel.coin)+'</b>: maior em '+sel.hi.venue+' ('+pct(sel.hi.apr,1)+' a.a.), menor em '+sel.lo.venue+' ('+pct(sel.lo.apr,1)+'). Diferença de '+nf(sel.spread,1)+' pontos ao ano: short na '+sel.hi.venue+', long na '+sel.lo.venue+'. <button class="sm" data-go="fund">Ver a conta no Funding</button>'
+    :'Toque numa moeda para ver o melhor par. Linhas com ↕ são as de maior diferença entre exchanges agora (fora os majors).';
+  var mm=market.map;
+  $('r_mmap').innerHTML=mm&&mm.length?mm.map(function(m){
+    return '<div class="coinrow"><div class="row between"><b>'+esc(m.label)+'</b>'+chip(m.level)+'</div>'+
+      '<div>Melhor opção: <b>'+esc(m.coins.join(' + '))+'</b>'+(m.merged?' (mineradas juntas)':'')+'</div>'+
+      (m.edgePct!==null?'<div>Rende <b>'+usd(m.revUsdPerUnit)+'</b> por '+m.unit+'/s ao dia · aluguel '+usd(m.rentUsdPerUnit)+' → <b class="'+(m.edgePct>=0?'good':'bad')+'">'+pct(m.edgePct,1)+'</b></div>':'<div class="note">Sem preço de aluguel desse algoritmo agora.</div>')+
+      (m.thin?'<div class="note warn">Livro raso: só '+m.paying+' ordens recebendo hash; o preço para comprar volume real tende a ser maior.</div>':'')+
+      '<div class="note">'+esc(m.where)+(m.small.length?' · redes pequenas que rendem mais por hash, mas com pouca liquidez (o hash alugado derruba a dificuldade): '+esc(m.small.join(', ')):'')+'</div></div>'}).join('')+
+    '<p class="note" style="margin:8px 0 0">Fonte: WhatToMine e NiceHash ('+esc(market.src||'')+(market.dataAt?', '+ago(market.dataAt)+' atrás':'')+'). Solo: a variação depende de quanto da rede você aluga.</p>'
+    :'<p class="note">'+(market.err?'Mapa indisponível ('+esc(market.err)+'). Com o backend ligado, ele é lido em tempo real.':'Carregando mapa de mineração…')+'</p>';
+  // padrões por hora: histórico local + histórico do servidor
+  var h=hist.slice(),eh=ops.status&&ops.status.state&&ops.status.state.edgeHist||[];
+  eh.forEach(function(x){h.push({t:x[0],edges:{BCH:x[1]}})});
+  var prof=FDR.hourProfile(h,'BCH',-new Date().getTimezoneOffset()),filled=prof.filter(function(x){return x.avg!==null});
+  $('r_hours').innerHTML='<div class="hours">'+prof.map(function(x){
+    var c=x.avg===null?'var(--panel2)':(x.avg>=0?'rgba(79,210,138,'+Math.min(.85,.25+x.avg/10).toFixed(2)+')':'rgba(242,103,90,'+Math.min(.85,.2+Math.abs(x.avg)/15).toFixed(2)+')');
+    return '<div style="background:'+c+'" title="'+x.h+'h: '+(x.avg===null?'sem dado':pct(x.avg,1)+' ('+x.n+' leituras)')+'"></div>'}).join('')+'</div>'+
+    '<div class="hours-l"><span>0h</span><span>3h</span><span>6h</span><span>9h</span><span>12h</span><span>15h</span><span>18h</span><span>21h</span></div>';
+  if(filled.length>=6){var b=filled.slice().sort(function(a,c){return c.avg-a.avg});
+    $('r_hnote').textContent='Margem média por hora (seu fuso), com '+h.filter(function(x){return x.edges&&isFinite(x.edges.BCH)}).length+' leituras. Melhor: '+b[0].h+'h ('+pct(b[0].avg,1)+'); pior: '+b[b.length-1].h+'h ('+pct(b[b.length-1].avg,1)+'). Verde = o aluguel ficou abaixo da receita.'}
+  else $('r_hnote').textContent='Juntando dados: o padrão aparece depois de algumas horas com o painel aberto ou com o backend ligado (ele registra a cada 15 min).';
+  $('plSeg').innerHTML=Object.keys(FDR.PLAYER_CATS).map(function(k){return '<button class="sm" data-pl="'+k+'" aria-pressed="'+(k===plCat)+'">'+({funding:'Funding',hash:'Comprar hash',pool:'Pools solo',dados:'Dados'})[k]+'</button>'}).join('');
+  $('r_players').innerHTML='<div class="note" style="margin-bottom:4px">'+esc(FDR.PLAYER_CATS[plCat])+'</div>'+FDR.PLAYERS.filter(function(p){return p.cat===plCat}).map(function(p){
+    return '<div class="player"><div class="row between"><a href="'+esc(p.url)+'" target="_blank" rel="noopener"><b>'+esc(p.name)+'</b></a>'+(p.panel?'<span class="chip ok">no painel</span>':'<span class="chip">API: '+esc(p.api)+'</span>')+'</div>'+
+      '<span class="note">'+esc(p.what)+(p.note?' ('+esc(p.note)+')':'')+'</span></div>'}).join('');
+}
+document.addEventListener('click',function(e){
+  var tr=e.target.closest('#r_fmap tr[data-coin]');if(tr){radarSel=tr.dataset.coin;renderRadar();return}
+  var pl=e.target.closest('[data-pl]');if(pl){plCat=pl.dataset.pl;renderRadar();return}
+  if(e.target.id==='r_notify'){try{Notification.requestPermission().then(function(){renderRadar()})}catch(err){}}
+});
+
 /* ---------- navegação ---------- */
-var TABS=['home','fund','mine','diary','set'];
+var TABS=['home','radar','fund','mine','diary','set'];
 function tab(t,sub){
   TABS.forEach(function(x){$('tab-'+x).hidden=x!==t});
   document.querySelectorAll('nav button').forEach(function(b){b.setAttribute('aria-current',b.dataset.tab===t?'true':'false')});
   if(sub)subTab(t,sub);
   settings.tab=t;ls('fd_set',settings);
+  if(t==='radar'){ls('fd_aseen',Date.now());renderBadge();loadMarketMap();renderRadar()}
   if((t==='mine'||t==='home')&&(!mine.at||Date.now()-mine.at>300000))loadMining();
   window.scrollTo(0,0);
 }

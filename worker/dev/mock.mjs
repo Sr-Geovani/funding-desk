@@ -42,6 +42,11 @@ export function createMock() {
     if (p === '/_set') { Object.assign(s, JSON.parse(body || '{}')); return send(200, { ok: true }); }
     // ---- cotações e BCH ----
     if (p.startsWith('/cg/')) return send(200, { bitcoin: { usd: s.btcUsd }, 'bitcoin-cash': { usd: s.bchUsd } });
+    // previsto de funding da Hyperliquid: ENA com 0,1%/8 h na Bybit e 0,00125%/h na HL (≈ 98% a.a. de diferença)
+    if (p === '/hl/info') return send(200, s.predicted || [
+      ['ENA', [['BybitPerp', { fundingRate: '0.001', nextFundingTime: Date.now() + 3600e3, fundingIntervalHours: 8 }], ['HlPerp', { fundingRate: '0.0000125', nextFundingTime: Date.now() + 600e3, fundingIntervalHours: 1 }]]],
+      ['BTC', [['BinPerp', { fundingRate: '0.0001', nextFundingTime: Date.now() + 3600e3, fundingIntervalHours: 8 }], ['HlPerp', { fundingRate: '0.0000125', nextFundingTime: Date.now() + 600e3, fundingIntervalHours: 1 }]]]
+    ]);
     if (p === '/bch/blockchain/getBlockchainInfo') return send(200, { blocks: s.height, difficulty: s.difficulty });
     let m = /^\/bch\/block\/detailsByHeight\/(\d+)$/.exec(p);
     if (m) return send(200, { height: +m[1], time: Math.floor(Date.now() / 1000), difficulty: s.difficulty, tx: ['cb' + m[1]] });

@@ -211,3 +211,36 @@ test('mergePositions: por id, sem duplicar', () => {
   assert.equal(r.updated, 1);
   assert.equal(r.list.find((p) => p.coin === 'B').fee, 5);
 });
+
+test('OKX, Bitget e Gate com respostas reais', () => {
+  const okx = FD.parseOKX(fx('okx-funding.real.json'), fx('okx-tickers.real.json'));
+  assert.ok(okx.BTC && okx.ETH);
+  assert.equal(okx.BTC.sym, 'BTC-USDT-SWAP');
+  assert.equal(okx.BTC.hours, 8);
+  close(okx.BTC.apr, FD.aprFrom(okx.BTC.rate / 100, 8));
+  assert.ok(okx.BTC.vol > 1e8 && okx.BTC.next > 0);
+  assert.ok(!Object.values(okx).some((r) => /-USD-SWAP$/.test(r.sym)), 'contratos inversos (USD) ficam fora');
+  const bg = FD.parseBitget(fx('bitget-fundrate.real.json'), fx('bitget-tickers.real.json'));
+  assert.ok(bg.BTC && bg.BTC.vol > 1e8);
+  assert.ok(Object.values(bg).some((r) => r.hours !== 8), 'intervalo diferente de 8h vem da API');
+  const gt = FD.parseGate(fx('gate-contracts.real.json'), fx('gate-tickers.real.json'));
+  assert.ok(gt.BTC && gt.BTC.vol > 1e8);
+  assert.equal(gt.BTC.hours, 8);
+  assert.ok(gt.BTC.listed > 0 && gt.BTC.next > Date.UTC(2026, 0, 1));
+  assert.ok(!fx('gate-contracts.real.json').some((c) => c.in_delisting && gt[c.name.slice(0, -5)] && gt[c.name.slice(0, -5)].sym === c.name), 'contrato em delisting fica fora');
+});
+
+test('históricos de OKX, Bitget e Gate', () => {
+  assert.deepEqual(FD.parseOKXHist({ data: [{ fundingTime: '1793376000000', fundingRate: '0.0002', realizedRate: '0.0001' }] }), [{ t: 1793376000000, rate: 0.0001 }]);
+  assert.deepEqual(FD.parseBitgetHist({ data: [{ fundingTime: '1793376000000', fundingRate: '-0.00001' }] }), [{ t: 1793376000000, rate: -0.00001 }]);
+  assert.deepEqual(FD.parseGateHist([{ r: '0.0001', t: 1793376000 }]), [{ t: 1793376000000, rate: 0.0001 }]);
+});
+
+test('seis exchanges: taxas padrão e oportunidades entre qualquer par', () => {
+  assert.deepEqual(FD.VENUES, ['Binance', 'Bybit', 'Hyperliquid', 'OKX', 'Bitget', 'Gate']);
+  FD.VENUES.forEach((v) => assert.ok(FD.DEFAULT_FEES[v].taker > 0));
+  const rows = { ETH: { OKX: { apr: 40, vol: 1e9, oi: null }, Gate: { apr: 2, vol: 1e9, oi: null }, Binance: { apr: 10, vol: 1e9, oi: null } } };
+  const o = FD.opportunities(rows, { capital: 1000, lev: 2, hold: 3, minVol: 0, aprCap: 150, mode: 'pp', fees: FD.DEFAULT_FEES, execShort: 'taker', execLong: 'taker', slipPct: 0.03, rebalUsd: 1, sort: 'net', now: NOW });
+  assert.deepEqual([o[0].s, o[0].l], ['OKX', 'Gate']);
+  assert.ok(Object.keys(FD.demoData(NOW).BTC).length === 3, 'dados de exemplo continuam com 3 exchanges');
+});

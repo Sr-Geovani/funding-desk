@@ -3,7 +3,7 @@
 (function (root) {
 'use strict';
 
-var VENUES = ['Binance', 'Bybit', 'Hyperliquid'];
+var VENUES = ['Binance', 'Bybit', 'Hyperliquid', 'OKX', 'Bitget', 'Gate'];
 var HOURS_YEAR = 8760;
 var DAY = 864e5, HOUR = 36e5;
 
@@ -11,7 +11,10 @@ var DAY = 864e5, HOUR = 36e5;
 var DEFAULT_FEES = {
   Binance:     { maker: 0.02,  taker: 0.05,  spotMaker: 0.1,  spotTaker: 0.1 },
   Bybit:       { maker: 0.02,  taker: 0.055, spotMaker: 0.1,  spotTaker: 0.1 },
-  Hyperliquid: { maker: 0.015, taker: 0.045, spotMaker: 0.04, spotTaker: 0.07 }
+  Hyperliquid: { maker: 0.015, taker: 0.045, spotMaker: 0.04, spotTaker: 0.07 },
+  OKX:         { maker: 0.02,  taker: 0.05,  spotMaker: 0.08, spotTaker: 0.1 },
+  Bitget:      { maker: 0.02,  taker: 0.06,  spotMaker: 0.1,  spotTaker: 0.1 },
+  Gate:        { maker: 0.02,  taker: 0.05,  spotMaker: 0.1,  spotTaker: 0.1 }
 };
 
 /* ---------- normalização ---------- */
@@ -134,10 +137,73 @@ function parsePredicted(d) {
   return out;
 }
 
+// OKX (v5): funding-rate?instId=ANY traz todos os perpétuos; tickers?instType=SWAP traz preço e volume (volCcy24h em moeda).
+// fundingRate é o do período corrente, liquidado em fundingTime; o intervalo é fundingTime − prevFundingTime.
+function parseOKX(funding, tickers) {
+  var px = {}, vol = {}, out = {};
+  ((tickers && tickers.data) || []).forEach(function (t) {
+    var last = parseFloat(t.last);
+    px[t.instId] = last; vol[t.instId] = (parseFloat(t.volCcy24h) || 0) * (last || 0);
+  });
+  ((funding && funding.data) || []).forEach(function (f) {
+    var id = f.instId;
+    if (!/-USDT-SWAP$/.test(id)) return;
+    var r = parseFloat(f.fundingRate);
+    if (!isFinite(r) || f.fundingRate === '') return;
+    var h = Math.round((+f.fundingTime - +f.prevFundingTime) / HOUR);
+    if (!(h >= 1 && h <= 8)) h = 8;
+    put(out, id.split('-')[0], {
+      sym: id, rate: r * 100, apr: aprFrom(r, h), hours: h, vol: vol[id] || 0, oi: null, mark: px[id] || null,
+      next: +f.fundingTime || null, listed: null, capPct: parseFloat(f.maxFundingRate) * 100 || null, src: 'api'
+    });
+  });
+  return out;
+}
+
+// Bitget (v2, USDT-FUTURES): current-fund-rate traz taxa, intervalo (h) e próximo pagamento; tickers traz volume em USDT.
+function parseBitget(fundRates, tickers) {
+  var t = {}, out = {};
+  ((tickers && tickers.data) || []).forEach(function (x) { t[x.symbol] = x; });
+  ((fundRates && fundRates.data) || []).forEach(function (f) {
+    var s = f.symbol;
+    if (!/USDT$/.test(s)) return;
+    var r = parseFloat(f.fundingRate);
+    if (!isFinite(r)) return;
+    var h = +f.fundingRateInterval || 8, tk = t[s] || {};
+    put(out, s.slice(0, -4), {
+      sym: s, rate: r * 100, apr: aprFrom(r, h), hours: h, vol: parseFloat(tk.usdtVolume) || 0, oi: null,
+      mark: parseFloat(tk.markPrice) || null, next: +f.nextUpdate || null, listed: null,
+      capPct: parseFloat(f.maxFundingRate) * 100 || null, src: 'api'
+    });
+  });
+  return out;
+}
+
+// Gate (v4, futures USDT): contracts traz taxa, intervalo (s), próximo pagamento (s) e data de criação; tickers traz volume.
+function parseGate(contracts, tickers) {
+  var vol = {}, out = {};
+  (tickers || []).forEach(function (x) { vol[x.contract] = parseFloat(x.volume_24h_quote) || 0; });
+  (contracts || []).forEach(function (c) {
+    if (c.in_delisting || !/_USDT$/.test(c.name)) return;
+    var r = parseFloat(c.funding_rate);
+    if (!isFinite(r)) return;
+    var h = (+c.funding_interval || 28800) / 3600;
+    put(out, c.name.slice(0, -5), {
+      sym: c.name, rate: r * 100, apr: aprFrom(r, h), hours: h, vol: vol[c.name] || 0, oi: null,
+      mark: parseFloat(c.mark_price) || null, next: c.funding_next_apply ? c.funding_next_apply * 1000 : null,
+      listed: c.create_time ? c.create_time * 1000 : null, capPct: null, src: 'api'
+    });
+  });
+  return out;
+}
+
 /* ---------- histórico (pagamentos liquidados) ---------- */
 function parseBinanceHist(a) { return (a || []).map(function (x) { return { t: +x.fundingTime, rate: parseFloat(x.fundingRate) }; }); }
 function parseBybitHist(d) { return ((d && d.result && d.result.list) || []).map(function (x) { return { t: +x.fundingRateTimestamp, rate: parseFloat(x.fundingRate) }; }); }
 function parseHLHist(a) { return (a || []).map(function (x) { return { t: +x.time, rate: parseFloat(x.fundingRate) }; }); }
+function parseOKXHist(d) { return ((d && d.data) || []).map(function (x) { return { t: +x.fundingTime, rate: parseFloat(x.realizedRate || x.fundingRate) }; }); }
+function parseBitgetHist(d) { return ((d && d.data) || []).map(function (x) { return { t: +x.fundingTime, rate: parseFloat(x.fundingRate) }; }); }
+function parseGateHist(a) { return (a || []).map(function (x) { return { t: x.t * 1000, rate: parseFloat(x.r) }; }); }
 
 // Converte pontos {t, rate} em {t, apr, hours}; o intervalo de cada ponto sai da distância até o anterior
 // (o intervalo pode ter mudado no período). Se não der para inferir, usa fallbackHours.
@@ -370,7 +436,7 @@ function demoData(now) {
   var rows = {};
   Object.keys(DEMO).forEach(function (c) {
     rows[c] = {};
-    VENUES.forEach(function (v) {
+    Object.keys(DEMO[c]).forEach(function (v) {
       var d = DEMO[c][v], h = d[1];
       rows[c][v] = { sym: c, apr: d[0], rate: rateFromApr(d[0], h) * 100, hours: h, vol: d[2], oi: null, mark: 0,
         next: Math.floor(now / (h * HOUR)) * h * HOUR + h * HOUR, listed: null, capPct: null, src: 'exemplo' };
@@ -383,7 +449,9 @@ var FD = {
   VENUES: VENUES, DEFAULT_FEES: DEFAULT_FEES, HOUR: HOUR, DAY: DAY,
   aprFrom: aprFrom, rateFromApr: rateFromApr, normBase: normBase, nextHour: nextHour,
   parseBinance: parseBinance, parseBybit: parseBybit, parseHL: parseHL, parsePredicted: parsePredicted,
+  parseOKX: parseOKX, parseBitget: parseBitget, parseGate: parseGate,
   parseBinanceHist: parseBinanceHist, parseBybitHist: parseBybitHist, parseHLHist: parseHLHist,
+  parseOKXHist: parseOKXHist, parseBitgetHist: parseBitgetHist, parseGateHist: parseGateHist,
   historySeries: historySeries, spreadSeries: spreadSeries, seriesStats: seriesStats,
   cycle: cycle, legFee: legFee, opportunities: opportunities,
   currentSpread: currentSpread, positionAlert: positionAlert,

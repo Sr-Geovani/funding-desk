@@ -5,13 +5,15 @@
 import { createClient, NH_HOSTS } from './nicehash.js';
 import { createChain, paidTo, DEFAULT_BCH_REST, DEFAULT_PRICE_URL } from './chain.js';
 import { DEFAULT_CONFIG, sanitizeConfig, parseBook, computeMarket, decide, limitsFromEnv } from './bot.js';
+import { fundingSnapshot, runAlerts } from './alerts.js';
 
 export const VERSION = '1.0.0';
-const UPSTREAM = { binance: 'https://fapi.binance.com', bybit: 'https://api.bybit.com', nicehash: 'https://api2.nicehash.com' };
+const UPSTREAM = { binance: 'https://fapi.binance.com', bybit: 'https://api.bybit.com', nicehash: 'https://api2.nicehash.com', wtm: 'https://whattomine.com' };
 const ALLOW = {
   binance: /^\/fapi\/v1\/(premiumIndex|ticker\/24hr|fundingInfo|fundingRate|exchangeInfo)$/,
   bybit: /^\/v5\/market\/(tickers|instruments-info|funding\/history)$/,
-  nicehash: /^\/main\/api\/v2\/(hashpower\/orderBook|public\/stats\/global\/current|mining\/algorithms)$/
+  nicehash: /^\/main\/api\/v2\/(hashpower\/orderBook|public\/stats\/global\/current|mining\/algorithms)$/,
+  wtm: /^\/(asic|coins)\.json$/
 };
 const LOG_MAX = 300;
 
@@ -88,7 +90,10 @@ export async function tick(env, opts = {}) {
   const nh = nhClient(env, fetchFn), chain = chainClient(env, fetchFn);
   const log = [], errors = [];
 
-  const [info, prices, bookR, unitsR] = await Promise.all([chain.info(), chain.prices(), nh.orderBook(), nh.units()].map(settle));
+  const hlUrl = env.HL_URL || 'https://api.hyperliquid.xyz/info';
+  const predicted = fetchFn(hlUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ type: 'predictedFundings' }) })
+    .then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
+  const [info, prices, bookR, unitsR, predR] = await Promise.all([chain.info(), chain.prices(), nh.orderBook(), nh.units(), predicted].map(settle));
   if (!info.ok) errors.push('rede BCH: ' + info.e);
   if (!prices.ok) errors.push('cotações: ' + prices.e);
   if (!bookR.ok) errors.push('livro NiceHash: ' + bookR.e);
@@ -161,7 +166,18 @@ export async function tick(env, opts = {}) {
     await notify(env, 'erro: ' + errors[0], fetchFn);
   }
 
-  const next = Object.assign({}, dec.state, {
+  // Alertas (entrada/saída/risco) com aviso no Telegram; não dependem do modo do robô.
+  let newAlerts = [], alertState = { alertPrev: state.alertPrev, alertMem: state.alertMem, alerts: state.alerts };
+  if (cfg.alerts !== false) {
+    const funding = predR.ok ? fundingSnapshot(predR.v, cfg, now) : null;
+    if (!predR.ok) errors.push('funding (Hyperliquid): ' + predR.e);
+    const ra = runAlerts({ state, funding, edges: mkt.ok ? { BCH: mkt.edgeAtBidPct } : {}, now, minEdgePct: cfg.minEdgePct });
+    newAlerts = ra.alerts; alertState = ra.state;
+    for (const a of newAlerts) log.push({ t: now, kind: 'alerta', text: a.title + ': ' + a.text });
+    for (const a of newAlerts.slice(0, 3)) await notify(env, a.title + '. ' + a.text, fetchFn);
+  }
+
+  const next = Object.assign({}, dec.state, alertState, {
     lastTick: now, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig,
     market: mkt.ok ? { breakEvenEH: mkt.breakEvenEH, capEH: mkt.capEH, fillEH: mkt.fillEH, medianEH: mkt.medianEH, bidEH: mkt.bidEH,
       edgeAtBidPct: mkt.edgeAtBidPct, green: mkt.green, D: mkt.D, bchUsd: mkt.bchUsd, btcUsd: mkt.btcUsd, costPerBlockUsd: mkt.costPerBlockUsd,
@@ -174,13 +190,14 @@ export async function tick(env, opts = {}) {
   next.edgeHist = hist.slice(-672); // 7 dias
   await kvPut(env, 'state', next);
   await appendLog(env, log);
-  return { market: next.market, actions: results, notes: dec.notes, errors, blockEvent, mode: cfg.mode };
+  return { market: next.market, actions: results, notes: dec.notes, errors, blockEvent, mode: cfg.mode, alerts: newAlerts };
 }
 
 /* ---------- rotas ---------- */
 async function proxy(kind, path, search) {
   if (!ALLOW[kind].test(path)) return json({ error: 'rota não permitida' }, 404);
-  const up = await fetch(UPSTREAM[kind] + path + search, { headers: { accept: 'application/json' }, cf: { cacheTtl: 15, cacheEverything: true } });
+  const ttl = kind === 'wtm' ? 300 : 15; // WhatToMine atualiza devagar: 5 min de cache
+  const up = await fetch(UPSTREAM[kind] + path + search, { headers: { accept: 'application/json', 'user-agent': 'funding-desk/1.0' }, cf: { cacheTtl: ttl, cacheEverything: true } });
   return new Response(up.body, { status: up.status, headers: { 'content-type': up.headers.get('content-type') || 'application/json', 'cache-control': 'public, max-age=15' } });
 }
 
@@ -195,7 +212,7 @@ async function api(req, env, url, fetchFn) {
     return json({ version: VERSION, nhEnv: env.NH_BASE ? 'personalizado' : (env.NH_ENV === 'prod' ? 'produção' : 'teste'), keys: hasKeys(env),
       telegram: !!(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID), limits, config: cfg,
       state: { lastTick: state.lastTick, lastHeight: state.lastHeight, market: state.market, myBlocks: state.myBlocks || [], dailyUsd: state.dailyUsd || 0,
-        errors: state.errors || [], edgeHist: state.edgeHist || [] } });
+        errors: state.errors || [], edgeHist: state.edgeHist || [], alerts: (state.alerts || []).slice(-20).reverse() } });
   }
   if (p === '/config' && m === 'PUT') {
     const { config, errors } = sanitizeConfig(body, await getConfig(env), limits);
@@ -289,7 +306,7 @@ export default {
     if (req.method === 'OPTIONS') return new Response(null, { headers: h });
     try {
       if (url.pathname === '/' || url.pathname === '/health') return json({ ok: true, service: 'funding-desk-api', version: VERSION }, 200, h);
-      const pm = /^\/(binance|bybit|nicehash)(\/.*)$/.exec(url.pathname);
+      const pm = /^\/(binance|bybit|nicehash|wtm)(\/.*)$/.exec(url.pathname);
       if (pm) {
         if (req.method !== 'GET') return json({ error: 'só GET' }, 405, h);
         const r = await proxy(pm[1], pm[2], url.search);

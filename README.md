@@ -5,7 +5,17 @@ Painel web (PWA simples) para acompanhar e operar **manualmente**:
 - **Funding:** arbitragem de funding em perpétuos, Perp × Perp (short onde o funding é mais alto, long onde é mais baixo) e Spot + Perp.
 - **Mineração:** mineração solo de Bitcoin Cash com hashrate alugado (NiceHash, MRR), com sinal de valor esperado, planejador de sessão e diário que testa hipóteses.
 
-Abas: Início (copiloto) · Funding (oportunidades, jornada, calculadora) · Mineração (agora, jornada, planejar, operar, rede) · Diário · Ajustes.
+Abas: Início (copiloto) · **Radar** (alertas, mapas, padrões, players) · Funding (oportunidades, jornada, calculadora) ·
+Mineração (agora, jornada, planejar, operar, rede) · Diário · Ajustes.
+
+**Radar** (`radar.js`, testado):
+- **Mapa de funding:** moedas × 6 exchanges (Binance, Bybit, Hyperliquid, OKX, Bitget, Gate), com cor por sinal e intensidade e o número sempre visível; mostra o melhor par por moeda e o sentimento dos majors (funding médio de BTC, ETH e SOL).
+- **Mapa de mineração:** 9 algoritmos da NiceHash contra a receita da melhor moeda líquida de cada um (WhatToMine). O Scrypt soma LTC + DOGE (merged). Redes com menos de 10 BTC/dia de volume ficam fora; livro com menos de 5 ordens pagando é marcado como raso.
+- **Padrões:** margem média do aluguel por hora do dia (histórico do aparelho + servidor).
+- **Alertas:** entrada (oportunidade que se mantém ou é estável no histórico), saída (posição abaixo do break-even, mineração que deixa de compensar), risco (sentimento extremo) e oportunidade (alta forte de preço). No aparelho com o painel aberto; no backend a cada 3 min, com Telegram.
+- **Players:** onde operar funding, comprar hash, entregar (pools solo) e dados de referência, com links conferidos.
+
+Pesquisa global (6 idiomas), lacunas e roteiro até a execução automática: [`docs/pesquisa-global.md`](docs/pesquisa-global.md).
 
 **Copiloto** (`copilot.js`, testado): cada operação mostra o veredito (Compensa / No limite / Não compensa agora), o porquê
 em uma frase, quando passa a compensar e o que fazer. Os números técnicos ficam em "Números" / "Entender os números",
@@ -33,6 +43,9 @@ Mineração compara BTC, BCH e BSV (mesmo hash SHA-256): receita por PH·dia, ma
 | Binance USDⓈ-M | `premiumIndex`, `ticker/24hr`, `fundingInfo`, `exchangeInfo`, `fundingRate` (histórico) | Intervalo padrão 8h; `fundingInfo` lista só símbolos com intervalo/teto ajustado. **Bloqueia IPs dos EUA (HTTP 451).** Do Brasil, direto do navegador: ok (testado em 30/10/2026). |
 | Bybit v5 linear | `tickers`, `instruments-info` (paginado, `fundingInterval` em minutos), `funding/history` | **Bloqueia IPs dos EUA (HTTP 403, CloudFront).** Do Brasil, direto do navegador: ok (testado em 30/10/2026). |
 | Hyperliquid | `metaAndAssetCtxs`, `predictedFundings`, `fundingHistory` (POST `/info`) | Funding horário. CORS liberado (`*`). |
+| OKX | `public/funding-rate?instId=ANY`, `market/tickers?instType=SWAP`, `funding-rate-history` | Intervalo = fundingTime − prevFundingTime. CORS liberado. |
+| Bitget | `mix/market/current-fund-rate`, `mix/market/tickers`, `history-fund-rate` (USDT-FUTURES) | Intervalo informado por moeda. CORS liberado. |
+| Gate | `futures/usdt/contracts`, `futures/usdt/tickers`, `futures/usdt/funding_rate` | Intervalo em segundos; contratos em delisting ficam fora. CORS liberado. |
 
 Tickers com multiplicador são unificados: `1000PEPE`, `kPEPE`, `SHIB1000`, `1MBABYDOGE` → `PEPE`, `SHIB`, `BABYDOGE`.
 Anualização: `% a.a. = taxa por intervalo × 8760 / horas do intervalo × 100` (APR simples, sem juros compostos).
@@ -157,6 +170,7 @@ index.html        marcação e estilos
 app.js            interface (abas, renderização, coleta de dados)
 core.js           lógica pura de funding (normalização, parsers, cycle(), scanner, histórico, CSV/JSON)
 copilot.js        vereditos, jornadas, momentos e glossário em linguagem simples
+radar.js          mapas de funding e mineração, sentimento, padrões, alertas e players
 mining.js         lógica pura de mineração (Poisson, hashprice, aluguel, livro NiceHash, blocos BCH, diário)
 scripts/          foto do livro da NiceHash (rodada pelo workflow)
 diagnostico.html  teste dos endpoints a partir do navegador
