@@ -50,9 +50,9 @@ node --test tests/*.test.js
    ```bash
    gh repo create funding-desk --public --source . --push
    ```
-2. O workflow `.github/workflows/pages.yml` roda os testes e publica a cada push em `main`. Se o Pages não ativar sozinho:
-   Settings → Pages → Source: **GitHub Actions**.
-3. Endereço: `https://<seu-usuario>.github.io/funding-desk/`.
+2. Uma vez só: Settings → Pages → Build and deployment → Source: **GitHub Actions**.
+3. O workflow `.github/workflows/pages.yml` roda os testes e publica a cada push em `main`.
+4. Endereço: `https://sr-geovani.github.io/funding-desk/`.
 
 No iPhone: abra no Safari → Compartilhar → **Adicionar à Tela de Início**. Abre em tela cheia, com ícone próprio.
 
