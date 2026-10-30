@@ -21,7 +21,9 @@ MAX_ORDER_BTC = "0.01"
 MAX_LIMIT_PH = "100"
 MAX_DAILY_USD = "1000"
 
-# Segredos (NUNCA aqui): configure no painel do Cloudflare → Worker → Settings → Variables and Secrets
-#   PANEL_TOKEN         token do painel (mínimo 24 caracteres)
-#   NH_API_KEY, NH_API_SECRET, NH_ORG_ID   chave da NiceHash (sem permissão de saque)
-#   TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID   avisos (opcional)
+# Segredos (NUNCA aqui). A instalação (scripts/deploy-backend.sh ou o workflow) cria:
+#   PANEL_TOKEN   token do painel (mínimo 24 caracteres)
+#   ENC_KEY       cifra as contas cadastradas pelo painel (nunca troque: as contas salvas ficariam ilegíveis)
+# NiceHash e Telegram: cadastre no painel (Ajustes → Conectar contas). Ficam cifrados no KV e vencem
+# estes segredos opcionais, se existirem: NH_API_KEY, NH_API_SECRET, NH_ORG_ID, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID.
+# O ambiente da NiceHash (teste/produção) também é escolhido no painel; NH_ENV abaixo é só o padrão.

@@ -55,11 +55,11 @@ Estado do projeto e pendências (para continuar em outra conversa): [`docs/estad
 
 ## Para colocar em produção
 
-1. Publicar o backend no Cloudflare (seção "Backend") e conectar em Ajustes.
-2. Chaves da NiceHash, **sem saque**: primeiro de test.nicehash.com e depois da conta real.
-3. Telegram, para alertas 24 h.
+1. Publicar o backend no Cloudflare (um token; seção "Backend") e abrir o link de conexão no celular.
+2. Ajustes → Conectar contas: NiceHash **sem saque** (primeiro test.nicehash.com, depois a conta real).
+3. Ajustes → Conectar contas: Telegram, para alertas 24 h.
 4. Endereço BCH e pool cadastrados (Operar); robô em **Observar** por alguns dias, lendo o log.
-5. `NH_ENV = "prod"`, tetos (`MAX_ORDER_BTC`, `MAX_DAILY_USD`) do tamanho do seu risco, e robô em **Ativo**.
+5. Ambiente Produção (Conectar contas), tetos (`MAX_ORDER_BTC`, `MAX_DAILY_USD`) do tamanho do seu risco, e robô em **Ativo**.
 6. Funding automático (abrir e fechar as duas pernas): ainda a construir. Precisa de servidor no Brasil
    (Binance e Bybit bloqueiam os EUA), chaves de trade sem saque e regras de execução simultânea.
 
@@ -70,7 +70,7 @@ em uma frase, quando passa a compensar e o que fazer. Os números técnicos fica
 com glossário no Início. Funding ganha o selo de estabilidade (estável, oscila, pico) pelo histórico pago de 72 h.
 Mineração compara BTC, BCH e BSV (mesmo hash SHA-256): receita por PH·dia, margem contra o aluguel e variação.
 
-- **Só lê dados públicos.** Não executa ordens e não guarda chaves de API. Não coloque segredos neste repositório.
+- **O painel não guarda chaves de API.** Ordens só passam pelo seu backend, que guarda as chaves cifradas. Não coloque segredos neste repositório.
 - HTML/CSS/JS sem build. Lógica pura em `core.js` (testada); interface em `index.html`.
 - Diário de posições no `localStorage` do navegador, com exportar/importar CSV e JSON.
 
@@ -152,8 +152,8 @@ se o app aberto no celular parecer antigo, feche e abra de novo. Ao mudar a list
 
 ## Backend: operação na NiceHash e robô de mineração
 
-O painel continua sem chaves. As chaves da NiceHash ficam **só** no servidor (segredos do Cloudflare Worker).
-O painel fala com o backend usando um token seu, guardado apenas no aparelho.
+O painel continua sem chaves. As chaves da NiceHash e do Telegram ficam **só** no servidor, cifradas (cadastradas pelo
+painel em Conectar contas) ou como segredos do Worker. O painel fala com o backend usando um token seu, guardado apenas no aparelho.
 
 O que o backend faz (`worker/`):
 - **Proxy público** de dados de mercado (Binance, Bybit, NiceHash), só leitura, rotas fixas.
@@ -166,29 +166,23 @@ O que o backend faz (`worker/`):
   - stop-loss por sessão, limite diário e botão de emergência; avisos no Telegram (opcional).
 - Modos: **desligado**, **observar** (calcula e registra, não executa; padrão) e **ativo**.
 - Tetos que o servidor impõe a qualquer pedido: `MAX_ORDER_BTC`, `MAX_LIMIT_PH`, `MAX_DAILY_USD` (`worker/wrangler.toml`).
-- Começa no **ambiente de teste da NiceHash** (`NH_ENV = "test"`, api-test.nicehash.com). Produção só trocando para `"prod"`.
+- Começa no **ambiente de teste da NiceHash** (api-test.nicehash.com). Produção: escolha em Ajustes → Conectar contas.
 
-### Instalar (dá para fazer tudo pelo celular)
+### Instalar (você só cria um token)
 
-Guia detalhado, com problemas comuns: [`docs/configurar-backend.md`](docs/configurar-backend.md). O mesmo passo a passo está no painel, em Ajustes → Configurar o backend (com gerador do token do painel).
+Guia completo, com o jeito manual e problemas comuns: [`docs/configurar-backend.md`](docs/configurar-backend.md).
+O mesmo resumo está no painel, em Ajustes → Conectar o backend.
 
-1. **Cloudflare** (grátis): crie a conta em dash.cloudflare.com e abra *Workers & Pages* uma vez para escolher o subdomínio `*.workers.dev`.
-2. **Token do Cloudflare**: *My Profile → API Tokens → Create Token → modelo "Edit Cloudflare Workers"*. Copie o token
-   e o *Account ID* (aparece na página inicial da conta).
-3. **GitHub**: no repositório, *Settings → Secrets and variables → Actions → New repository secret*:
-   `CLOUDFLARE_API_TOKEN` e `CLOUDFLARE_ACCOUNT_ID`.
-4. **Deploy**: *Actions → "Deploy do backend (Cloudflare Worker)" → Run workflow*. O workflow roda os testes, cria o KV
-   `funding-desk-kv` e publica `funding-desk-api`. O endereço fica `https://funding-desk-api.<seu-subdominio>.workers.dev`.
-5. **Segredos do Worker**: no Cloudflare, *Workers → funding-desk-api → Settings → Variables and Secrets → Add (tipo Secret)*:
-   - `PANEL_TOKEN`: uma senha longa e aleatória (mínimo 24 caracteres), que você vai digitar no painel;
-   - `NH_API_KEY`, `NH_API_SECRET`, `NH_ORG_ID`: chave da NiceHash. Crie primeiro em **test.nicehash.com** (conta separada).
-     Permissões: ver saldo e gerenciar ordens de hashpower. **Nunca** marque saque/retirada;
-   - opcional: `TELEGRAM_BOT_TOKEN` e `TELEGRAM_CHAT_ID` para avisos.
-   (Alternativa: cadastrar esses mesmos nomes como segredos no GitHub; o workflow copia para o Worker.)
-6. **Painel**: *Ajustes → Backend*: cole o endereço e o `PANEL_TOKEN` → *Salvar e testar*.
-7. **Mineração → Operar**: cadastre o pool (ex.: `solo.blocksniper.ai:3333`, usuário = seu endereço BCH), informe o
+1. **Cloudflare** (grátis): crie a conta e gere um token em *API Tokens → Create Token → "Edit Cloudflare Workers"*.
+2. **Instalar**: `CLOUDFLARE_API_TOKEN=... bash scripts/deploy-backend.sh` (ou mande o token para o Claude rodar).
+   O script acha a conta, cria o subdomínio `workers.dev` e o KV se faltarem, publica o Worker, cria `PANEL_TOKEN` e
+   `ENC_KEY` e imprime um **link** que abre o painel já conectado.
+3. **Ajustes → Conectar contas**: NiceHash (comece por test.nicehash.com; chave **sem saque**) e Telegram (token do
+   @BotFather; o backend acha o seu chat sozinho). As chaves vão direto para o backend e ficam **cifradas** (AES-GCM com
+   `ENC_KEY`) no KV; nenhuma rota as devolve.
+4. **Mineração → Operar**: cadastre o pool (ex.: `solo.blocksniper.ai:3333`, usuário = seu endereço BCH), informe o
    endereço da recompensa, deixe o robô em **Observar** por alguns dias e leia o log. Só depois mude para **Ativo**.
-8. Para produção: troque `NH_ENV = "prod"` em `worker/wrangler.toml` (o push publica sozinho) e cadastre as chaves da conta real.
+5. **Produção**: em Conectar contas, ambiente **Produção** e a chave da conta real. Trocar de ambiente volta o robô para Observar.
 
 ### Testar localmente (sem dinheiro e sem chaves)
 

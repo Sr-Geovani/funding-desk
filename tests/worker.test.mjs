@@ -9,6 +9,7 @@ import { DEFAULT_CONFIG, sanitizeConfig, parseBook, computeMarket, decide, DOWN_
 import worker, { tick } from '../worker/src/index.js';
 import { createMock, MOCK_KEYS } from '../worker/dev/mock.mjs';
 import { memoryKV } from '../worker/dev/server.mjs';
+import { seal, unseal, chatFromUpdates, parseNiceHash } from '../worker/src/creds.js';
 const FDM = createRequire(import.meta.url)('../mining.js');
 
 const close = (a, b, eps = 1e-9, msg = '') => assert.ok(Math.abs(a - b) <= eps, `${msg} esperado ${b}, veio ${a}`);
@@ -256,5 +257,123 @@ test('Telegram: saída e risco na hora; entradas em resumo de 30 min', async () 
     await t.call('PUT', '/api/config', { alertHold: 4 });  // muda a chave do alerta? não: mesma chave, intervalo de 6 h segura
     await tick(env, { fetchFn, now: T0 + 10 * 60e3 });
     assert.equal(sent.length, n, 'nada novo dentro do intervalo');
+  } finally { t.server.close(); }
+});
+
+/* ---------- contas conectadas pelo painel (credenciais cifradas no KV) ---------- */
+const ENC = 'chave-de-cifra-de-teste-com-32-chars!';
+
+test('credenciais: cifra AES-GCM, chave errada não abre, texto não aparece', async () => {
+  const box = await seal(ENC, { NH_API_SECRET: 'segredo-super-secreto' });
+  assert.ok(!JSON.stringify(box).includes('segredo'));
+  assert.deepEqual(await unseal(ENC, box), { NH_API_SECRET: 'segredo-super-secreto' });
+  await assert.rejects(unseal(ENC + 'x', box));
+  await assert.rejects(seal('curta', {}), /ENC_KEY/);
+  assert.equal(parseNiceHash({ key: 'abc', secret: 'x', org: '' }).errors.length, 3);
+  assert.equal(parseNiceHash({ key: 'mesma-coisa-1', secret: 'mesma-coisa-1', org: 'org-12345' }).errors.length, 1);
+  assert.equal(parseNiceHash({ key: 'k-12345678', secret: 's-12345678', org: 'o-12345678', env: 'mainnet' }).errors.length, 1);
+});
+
+test('credenciais: NiceHash pelo painel (confere, cifra, usa no robô, remove)', async () => {
+  const t = await setup();
+  try {
+    const env = Object.assign({}, t.env, { NH_API_KEY: '', NH_API_SECRET: '', NH_ORG_ID: '', ENC_KEY: ENC });
+    const call = async (method, path, body) => {
+      const r = await worker.fetch(new Request('https://api.example' + path, { method, headers: { Authorization: 'Bearer ' + env.PANEL_TOKEN, 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined }), env, {});
+      return { status: r.status, body: await r.json() };
+    };
+    let r = await call('GET', '/api/credentials');
+    assert.equal(r.body.nicehash.set, false); assert.equal(r.body.encryption, true);
+    assert.equal((await call('GET', '/api/balance')).status, 412);
+    // chave errada: a NiceHash (falsa) recusa a assinatura e nada é salvo
+    r = await call('PUT', '/api/credentials', { nicehash: { key: MOCK_KEYS.key, secret: 'segredo-errado-123', org: MOCK_KEYS.org, env: 'test' } });
+    assert.equal(r.status, 400); assert.match(r.body.error, /não aceitou/);
+    assert.equal(await env.FD_KV.get('creds'), null);
+    // chave certa
+    r = await call('PUT', '/api/credentials', { nicehash: { key: MOCK_KEYS.key, secret: MOCK_KEYS.secret, org: MOCK_KEYS.org, env: 'test' } });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.nicehash.set, true); assert.equal(r.body.nicehash.source, 'painel'); assert.equal(r.body.nicehash.key, '…-key');
+    assert.equal(r.body.balanceBtc, '0.05');
+    assert.ok(!JSON.stringify(r.body).includes(MOCK_KEYS.secret), 'segredo nunca volta');
+    const raw = await env.FD_KV.get('creds');
+    assert.ok(raw && !raw.includes(MOCK_KEYS.secret) && !raw.includes(MOCK_KEYS.key), 'KV guarda só texto cifrado');
+    // backend passa a usar a chave salva
+    assert.equal((await call('GET', '/api/balance')).body.available, '0.05');
+    assert.equal((await call('PUT', '/api/config', { mode: 'active', payoutAddress: ADDR })).status, 200);
+    const st = await call('GET', '/api/status');
+    assert.equal(st.body.keys, true); assert.equal(st.body.creds.nicehash.source, 'painel');
+    const tk = await tick(env);
+    assert.deepEqual(tk.errors.filter((e) => /ordens/.test(e)), [], 'robô lê as ordens com a chave do painel');
+    assert.equal(t.state.authFails, 1, 'só a tentativa com chave errada falhou');
+    // remover
+    r = await call('PUT', '/api/credentials', { remove: 'nicehash' });
+    assert.equal(r.body.nicehash.set, false);
+    assert.equal((await call('GET', '/api/status')).body.config.mode, 'observe', 'sem chave, sai do modo ativo');
+    assert.equal((await call('GET', '/api/balance')).status, 412);
+    // sem ENC_KEY não salva
+    const env2 = Object.assign({}, env, { ENC_KEY: '' });
+    const r2 = await worker.fetch(new Request('https://api.example/api/credentials', { method: 'PUT', headers: { Authorization: 'Bearer ' + env.PANEL_TOKEN }, body: JSON.stringify({ nicehash: { key: MOCK_KEYS.key, secret: MOCK_KEYS.secret, org: MOCK_KEYS.org } }) }), env2, {});
+    assert.equal(r2.status, 412);
+  } finally { t.server.close(); }
+});
+
+test('credenciais: troca de ambiente põe o robô em Observar', async () => {
+  const t = await setup();
+  try {
+    const env = Object.assign({}, t.env, { NH_API_KEY: '', NH_API_SECRET: '', NH_ORG_ID: '', ENC_KEY: ENC });
+    const call = async (method, path, body) => {
+      const r = await worker.fetch(new Request('https://api.example' + path, { method, headers: { Authorization: 'Bearer ' + env.PANEL_TOKEN }, body: body ? JSON.stringify(body) : undefined }), env, {});
+      return { status: r.status, body: await r.json() };
+    };
+    const nh = { key: MOCK_KEYS.key, secret: MOCK_KEYS.secret, org: MOCK_KEYS.org };
+    await call('PUT', '/api/credentials', { nicehash: Object.assign({ env: 'test' }, nh) });
+    await call('PUT', '/api/config', { mode: 'active', payoutAddress: ADDR, managed: ['ord-1'], poolId: 'pool-1' });
+    const r = await call('PUT', '/api/credentials', { nicehash: Object.assign({ env: 'prod' }, nh) }); // NH_BASE fixo: o mock responde
+    assert.equal(r.body.nicehash.env, 'personalizado');
+    const cfg = (await call('GET', '/api/status')).body.config;
+    assert.deepEqual([cfg.mode, cfg.managed, cfg.poolId], ['observe', [], '']);
+  } finally { t.server.close(); }
+});
+
+test('credenciais: Telegram acha o chat pela mensagem e manda teste', async () => {
+  assert.deepEqual(chatFromUpdates([{ message: { chat: { id: -100, type: 'group', title: 'G' } } }, { message: { chat: { id: 42, type: 'private', first_name: 'Geo' } } }, { my_chat_member: { chat: { id: -7, type: 'channel', title: 'C' } } }]), { id: '42', type: 'private', name: 'Geo' });
+  assert.equal(chatFromUpdates([]), null);
+  const t = await setup();
+  try {
+    const env = Object.assign({}, t.env, { ENC_KEY: ENC });
+    const TOKEN = '123456789:AAHfakeTokenFakeTokenFakeToken12345';
+    let updates = [];
+    const sent = [];
+    const fetchFn = async (u, o) => {
+      const m = /api\.telegram\.org\/bot([^/]+)\/(\w+)$/.exec(String(u));
+      if (!m) return fetch(u, o);
+      if (m[1] !== TOKEN) return new Response(JSON.stringify({ ok: false, description: 'Unauthorized' }), { status: 401 });
+      if (m[2] === 'getMe') return Response.json({ ok: true, result: { username: 'meu_fd_bot' } });
+      if (m[2] === 'getUpdates') return Response.json({ ok: true, result: updates });
+      if (m[2] === 'sendMessage') { sent.push(JSON.parse(o.body)); return Response.json({ ok: true, result: {} }); }
+      return Response.json({ ok: false });
+    };
+    const call = async (body) => {
+      const r = await worker.fetch(new Request('https://api.example/api/telegram', { method: 'POST', headers: { Authorization: 'Bearer ' + env.PANEL_TOKEN }, body: JSON.stringify(body) }), env, {}, fetchFn);
+      return { status: r.status, body: await r.json() };
+    };
+    assert.equal((await call({ token: 'abc' })).status, 400);
+    assert.equal((await call({ token: '123456789:AAHoutroTokenOutroTokenOutroToken999' })).status, 400, 'Telegram recusa');
+    let r = await call({ token: TOKEN });
+    assert.deepEqual([r.status, r.body.needMessage, r.body.link], [200, true, 'https://t.me/meu_fd_bot']);
+    updates = [{ update_id: 1, message: { chat: { id: 4242, type: 'private', first_name: 'Geo' }, text: 'oi' } }];
+    r = await call({}); // segunda vez: usa o token já salvo
+    assert.equal(r.body.connected, true, JSON.stringify(r.body));
+    assert.equal(sent[0].chat_id, '4242'); assert.match(sent[0].text, /conectado/);
+    const st = await worker.fetch(new Request('https://api.example/api/credentials', { headers: { Authorization: 'Bearer ' + env.PANEL_TOKEN } }), env, {});
+    const sb = await st.json();
+    assert.deepEqual([sb.telegram.set, sb.telegram.bot, sb.telegram.source], [true, 'meu_fd_bot', 'painel']);
+    assert.ok(!JSON.stringify(sb).includes('AAHfake'), 'token nunca volta');
+    // o robô avisa pelo Telegram salvo no painel
+    await t.call('PUT', '/api/config', { payoutAddress: ADDR });
+    await tick(env, { fetchFn }); // primeira leitura só marca a altura
+    await fetch(t.base + '/_mine', { method: 'POST', body: JSON.stringify({ address: ADDR }) });
+    await tick(env, { fetchFn });
+    assert.ok(sent.some((x) => /bloco .* encontrado/.test(x.text) && x.chat_id === '4242'), JSON.stringify(sent.map((x) => x.text)));
   } finally { t.server.close(); }
 });

@@ -1,11 +1,13 @@
 // Funding Desk — backend (Cloudflare Worker).
 // - Rotas públicas /binance, /bybit, /nicehash: proxy só de leitura de dados de mercado.
-// - Rotas /api/*: exigem o token do painel. Guardam as chaves da NiceHash como segredos do Worker.
+// - Rotas /api/*: exigem o token do painel. As chaves da NiceHash e do Telegram são cadastradas pelo painel
+//   e guardadas cifradas no KV (ENC_KEY), ou como segredos do Worker. Nunca voltam para o painel.
 // - Agendamento (cron): robô de mineração. Começa em modo "observe" (só registra o que faria).
 import { createClient, NH_HOSTS } from './nicehash.js';
 import { createChain, paidTo, DEFAULT_BCH_REST, DEFAULT_PRICE_URL } from './chain.js';
 import { DEFAULT_CONFIG, sanitizeConfig, parseBook, computeMarket, decide, limitsFromEnv } from './bot.js';
 import { fundingSnapshot, runAlerts } from './alerts.js';
+import { withCreds, reloadCreds, saveCreds, credStatus, parseNiceHash, TG_TOKEN_RE, chatFromUpdates } from './creds.js';
 
 export const VERSION = '1.0.0';
 const UPSTREAM = { binance: 'https://fapi.binance.com', bybit: 'https://api.bybit.com', nicehash: 'https://api2.nicehash.com', wtm: 'https://whattomine.com' };
@@ -73,7 +75,7 @@ function hasKeys(env) { return !!(env.NH_API_KEY && env.NH_API_SECRET && env.NH_
 async function notify(env, text, fetchFn) {
   if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID) return;
   try {
-    await (fetchFn || fetch)('https://api.telegram.org/bot' + env.TELEGRAM_BOT_TOKEN + '/sendMessage', {
+    await (fetchFn || fetch)((env.TG_BASE || 'https://api.telegram.org') + '/bot' + env.TELEGRAM_BOT_TOKEN + '/sendMessage', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ chat_id: env.TELEGRAM_CHAT_ID, text: 'Funding Desk: ' + text })
     });
@@ -84,6 +86,7 @@ const settle = (p) => p.then((v) => ({ ok: true, v }), (e) => ({ ok: false, e: S
 
 /* ---------- ciclo do robô ---------- */
 export async function tick(env, opts = {}) {
+  env = await withCreds(env);
   const fetchFn = opts.fetchFn || fetch, now = opts.now || Date.now();
   const cfg = await getConfig(env), limits = limitsFromEnv(env);
   const state = await kvGet(env, 'state', {});
@@ -202,6 +205,72 @@ export async function tick(env, opts = {}) {
   return { market: next.market, actions: results, notes: dec.notes, errors, blockEvent, mode: cfg.mode, alerts: newAlerts };
 }
 
+/* ---------- contas conectadas pelo painel ---------- */
+// NiceHash: confere a chave lendo o saldo antes de salvar. Trocar de ambiente volta o robô para Observar.
+async function putCredentials(env, body, fetchFn) {
+  if (body.remove === 'nicehash' || body.remove === 'telegram') {
+    const tg = body.remove === 'telegram';
+    await saveCreds(env, tg ? { TELEGRAM_BOT_TOKEN: null, TELEGRAM_CHAT_ID: null, botName: null } : { NH_API_KEY: null, NH_API_SECRET: null, NH_ORG_ID: null, NH_ENV: null });
+    const msgs = [tg ? 'Telegram desconectado' : 'NiceHash desconectada'];
+    if (!tg) {
+      const cfg = await getConfig(env);
+      if (cfg.mode === 'active') { cfg.mode = 'observe'; await kvPut(env, 'config', cfg); msgs.push('robô voltou para Observar'); }
+    }
+    await appendLog(env, [{ t: Date.now(), kind: 'config', text: msgs.join('; ') }]);
+    return json(credStatus(await reloadCreds(env)));
+  }
+  const { patch, errors } = parseNiceHash(body.nicehash || {});
+  if (errors.length) return json({ error: errors.join('; ') }, 400);
+  const base = env.NH_BASE || NH_HOSTS[patch.NH_ENV];
+  const probe = createClient({ base, key: patch.NH_API_KEY, secret: patch.NH_API_SECRET, org: patch.NH_ORG_ID, fetchFn: fetchFn || fetch });
+  let bal;
+  try { bal = await probe.balance(); } catch (e) {
+    const where = patch.NH_ENV === 'prod' ? 'nicehash.com (produção)' : 'test.nicehash.com (teste)';
+    const auth = /\b(401|403)\b/.test(String(e.message));
+    return json({ error: auth
+      ? `A NiceHash não aceitou as chaves. Confira: criadas em ${where}; API Key, API Secret e Organization ID cada um no seu campo; permissão para ver saldo.`
+      : `Não consegui falar com a NiceHash agora (${String(e.message).slice(0, 120)}). Tente de novo em instantes.` }, 400);
+  }
+  const prevEnv = env.NH_ENV === 'prod' ? 'prod' : 'test';
+  await saveCreds(env, patch);
+  const log = [{ t: Date.now(), kind: 'config', text: `NiceHash conectada pelo painel (ambiente ${patch.NH_ENV === 'prod' ? 'produção' : 'teste'}, chave …${patch.NH_API_KEY.slice(-4)})` }];
+  if (prevEnv !== patch.NH_ENV) {
+    const cfg = await getConfig(env);
+    if (cfg.mode === 'active') cfg.mode = 'observe';
+    cfg.managed = []; cfg.autoCreate = false; cfg.poolId = '';
+    await kvPut(env, 'config', cfg);
+    log.push({ t: Date.now(), kind: 'config', text: 'ambiente trocado: robô em Observar, ordens e pool do ambiente anterior esquecidos' });
+  }
+  await appendLog(env, log);
+  const st = credStatus(await reloadCreds(env));
+  return json(Object.assign(st, { balanceBtc: bal && (bal.available ?? bal.totalBalance) }));
+}
+
+// Telegram: valida o token do bot, acha o seu chat pela última mensagem enviada ao bot e manda um teste.
+async function connectTelegram(env, body, fetchFn) {
+  const f = fetchFn || fetch, tgBase = env.TG_BASE || 'https://api.telegram.org';
+  const token = String(body.token || '').trim() || env.TELEGRAM_BOT_TOKEN || '';
+  if (!TG_TOKEN_RE.test(token)) return json({ error: 'token do bot inválido: ele vem do @BotFather e parece com 123456789:AAH...' }, 400);
+  const tg = async (method, payload) => {
+    const r = await f(tgBase + '/bot' + token + '/' + method, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload || {}) });
+    const j = await r.json().catch(() => ({}));
+    if (!j.ok) throw new Error(j.description || 'HTTP ' + r.status);
+    return j.result;
+  };
+  let me;
+  try { me = await tg('getMe'); } catch (e) { return json({ error: 'O Telegram recusou o token (' + e.message + '). Copie de novo no @BotFather.' }, 400); }
+  const bot = me.username || '';
+  await saveCreds(env, { TELEGRAM_BOT_TOKEN: token, botName: bot });
+  let chat = null;
+  try { chat = chatFromUpdates(await tg('getUpdates', { limit: 50, timeout: 0 })); } catch (e) { /* sem mensagens ainda */ }
+  if (!chat) return json({ connected: false, bot, needMessage: true, link: bot ? 'https://t.me/' + bot : null });
+  try { await tg('sendMessage', { chat_id: chat.id, text: 'Funding Desk conectado ✅ Aqui chegam saídas, riscos e blocos na hora; entradas e oportunidades num resumo a cada 30 min.' }); }
+  catch (e) { return json({ error: 'Achei o chat, mas não consegui enviar a mensagem de teste (' + e.message + ').' }, 400); }
+  await saveCreds(env, { TELEGRAM_CHAT_ID: chat.id });
+  await appendLog(env, [{ t: Date.now(), kind: 'config', text: `Telegram conectado (@${bot}, conversa com ${chat.name || chat.type})` }]);
+  return json({ connected: true, bot, chatName: chat.name });
+}
+
 /* ---------- rotas ---------- */
 async function proxy(kind, path, search) {
   if (!ALLOW[kind].test(path)) return json({ error: 'rota não permitida' }, 404);
@@ -214,24 +283,27 @@ async function api(req, env, url, fetchFn) {
   const p = url.pathname.replace(/^\/api/, ''), m = req.method;
   const body = m === 'GET' || m === 'DELETE' ? {} : await req.json().catch(() => ({}));
   const nh = nhClient(env, fetchFn), limits = limitsFromEnv(env);
-  const need = () => { if (!hasKeys(env)) throw Object.assign(new Error('Chaves da NiceHash não configuradas no servidor (NH_API_KEY, NH_API_SECRET, NH_ORG_ID)'), { status: 412 }); };
+  const need = () => { if (!hasKeys(env)) throw Object.assign(new Error('NiceHash não conectada: cadastre as chaves em Ajustes → Conectar contas'), { status: 412 }); };
 
   if (p === '/status' && m === 'GET') {
     const [cfg, state] = await Promise.all([getConfig(env), kvGet(env, 'state', {})]);
     return json({ version: VERSION, nhEnv: env.NH_BASE ? 'personalizado' : (env.NH_ENV === 'prod' ? 'produção' : 'teste'), keys: hasKeys(env),
-      telegram: !!(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID), limits, config: cfg,
+      telegram: !!(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID), creds: credStatus(env), limits, config: cfg,
       state: { lastTick: state.lastTick, lastHeight: state.lastHeight, market: state.market, myBlocks: state.myBlocks || [], dailyUsd: state.dailyUsd || 0,
         errors: state.errors || [], edgeHist: state.edgeHist || [], alerts: (state.alerts || []).slice(-20).reverse() } });
   }
   if (p === '/config' && m === 'PUT') {
     const { config, errors } = sanitizeConfig(body, await getConfig(env), limits);
     if (errors.length) return json({ error: errors.join('; ') }, 400);
-    if (config.mode === 'active' && !hasKeys(env)) return json({ error: 'modo ativo exige as chaves da NiceHash no servidor' }, 400);
+    if (config.mode === 'active' && !hasKeys(env)) return json({ error: 'modo ativo exige a NiceHash conectada (Ajustes → Conectar contas)' }, 400);
     await kvPut(env, 'config', config);
     await appendLog(env, [{ t: Date.now(), kind: 'config', text: `configuração salva (modo ${config.mode})` }]);
     return json({ config });
   }
   if (p === '/tick' && m === 'POST') return json(await tick(env, { fetchFn }));
+  if (p === '/credentials' && m === 'GET') return json(credStatus(env));
+  if (p === '/credentials' && m === 'PUT') return putCredentials(env, body, fetchFn);
+  if (p === '/telegram' && m === 'POST') return connectTelegram(env, body, fetchFn);
   if (p === '/log' && m === 'GET') return json({ log: (await kvGet(env, 'log', [])).slice().reverse() });
   if (p === '/kill' && m === 'POST') {
     const cfg = await getConfig(env), done = [], fail = [];
@@ -326,7 +398,7 @@ export default {
       if (url.pathname.startsWith('/api/')) {
         if (!allowedOrigin(env, req.headers.get('Origin')) && req.headers.get('Origin')) return json({ error: 'origem não permitida' }, 403, h);
         if (!authOk(req, env)) return json({ error: 'token inválido ou PANEL_TOKEN não configurado (mínimo 24 caracteres)' }, 401, h);
-        const r = await api(req, env, url, fetchFn);
+        const r = await api(req, await withCreds(env), url, fetchFn);
         for (const [k, v] of Object.entries(h)) r.headers.set(k, v);
         return r;
       }

@@ -1,4 +1,4 @@
-// NiceHash + REST BCH + cotações FALSOS, para testar o backend inteiro sem dinheiro e sem chaves reais.
+// NiceHash + REST BCH + cotações + Telegram FALSOS, para testar o backend inteiro sem dinheiro e sem chaves reais.
 // A assinatura de cada pedido privado é conferida com o algoritmo do cliente oficial (node:crypto, independente do Worker).
 import http from 'node:http';
 import crypto from 'node:crypto';
@@ -10,7 +10,7 @@ export function createMock() {
     height: 900000, difficulty: 530e9, bchUsd: 285, btcUsd: 77000,
     book: [{ price: 0.40, speed: 0.0006 }, { price: 0.42, speed: 0.0004 }, { price: 0.50, speed: 0.0002 }],
     blocks: {}, orders: {}, pools: [{ id: 'pool-1', name: 'BlockSniper solo', stratumHostname: 'solo.blocksniper.ai', stratumPort: 3333, username: 'bitcoincash:qtest', password: 'x' }],
-    calls: [], authFails: 0, balance: 0.05, nextId: 1
+    calls: [], authFails: 0, balance: 0.05, nextId: 1, tgUpdates: [], tgSent: []
   };
   const addCoinbase = (h, addr, value) => { s.blocks[h] = { addr, value }; };
   for (let h = s.height - 60; h <= s.height; h++) addCoinbase(h, 'qpoolxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx', 3.126);
@@ -36,10 +36,18 @@ export function createMock() {
     const p = u.pathname, q = u.search.slice(1);
     s.calls.push(req.method + ' ' + p);
     // ---- controle do teste ----
-    if (p === '/_state') return send(200, { orders: s.orders, height: s.height, authFails: s.authFails, calls: s.calls.length });
+    if (p === '/_state') return send(200, { orders: s.orders, height: s.height, authFails: s.authFails, calls: s.calls.length, tgSent: s.tgSent });
     if (p === '/_mine') { const b = JSON.parse(body || '{}'); s.height++; addCoinbase(s.height, String(b.address || '').replace(/^bitcoincash:/, ''), b.value || 3.126); return send(200, { height: s.height }); }
     if (p === '/_spend') { const b = JSON.parse(body || '{}'); s.orders[b.id].paid += b.btc; return send(200, s.orders[b.id]); }
     if (p === '/_set') { Object.assign(s, JSON.parse(body || '{}')); return send(200, { ok: true }); }
+    // ---- Telegram (TG_BASE=<mock>/tg) ----
+    let tg = /^\/tg\/bot(\d+:[\w-]+)\/(\w+)$/.exec(p);
+    if (tg) {
+      if (tg[2] === 'getMe') return send(200, { ok: true, result: { id: 1, is_bot: true, username: 'fd_teste_bot' } });
+      if (tg[2] === 'getUpdates') return send(200, { ok: true, result: s.tgUpdates });
+      if (tg[2] === 'sendMessage') { s.tgSent.push(JSON.parse(body || '{}')); return send(200, { ok: true, result: {} }); }
+      return send(404, { ok: false, description: 'Not Found' });
+    }
     // ---- cotações e BCH ----
     if (p.startsWith('/cg/')) return send(200, { bitcoin: { usd: s.btcUsd }, 'bitcoin-cash': { usd: s.bchUsd } });
     // previsto de funding da Hyperliquid: ENA com 0,1%/8 h na Bybit e 0,00125%/h na HL (≈ 98% a.a. de diferença)

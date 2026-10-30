@@ -512,33 +512,60 @@ details.card>summary{color:var(--fg);font-size:15px}
   <!-- AJUSTES -->
   <section id="tab-set" class="stack" hidden>
     <div class="card" id="prod"></div>
-    <details class="card" id="setup"><summary>Configurar o backend: passo a passo (dá para fazer pelo celular)</summary>
-      <p class="note" style="margin:8px 0">O backend guarda as chaves da NiceHash (nunca no painel), roda o robô e manda alertas no Telegram 24 h. Leva uns 15 minutos. Guia completo: <a href="https://github.com/Sr-Geovani/funding-desk/blob/main/docs/configurar-backend.md" target="_blank" rel="noopener">docs/configurar-backend.md</a>.</p>
+    <details class="card" id="setup"><summary>Conectar o backend (sem parte técnica)</summary>
+      <p class="note" style="margin:8px 0">O backend é um pequeno servidor grátis na <b>sua</b> conta do Cloudflare. Ele roda o robô, guarda as chaves da NiceHash cifradas e manda alertas no Telegram 24 h.</p>
       <ol class="steps">
-        <li class="info"><span class="n">1</span><div><b>Conta no Cloudflare (grátis)</b><p class="note">Crie em <a href="https://dash.cloudflare.com/sign-up" target="_blank" rel="noopener">dash.cloudflare.com/sign-up</a> e abra <a href="https://dash.cloudflare.com/?to=/:account/workers-and-pages" target="_blank" rel="noopener">Workers &amp; Pages</a> uma vez para escolher o seu subdomínio <code>*.workers.dev</code>.</p></div></li>
-        <li class="info"><span class="n">2</span><div><b>Token do Cloudflare</b><p class="note">Em <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noopener">API Tokens</a>: Create Token → modelo "Edit Cloudflare Workers" → Use template → Continue → Create Token. Copie o token. Copie também o <b>Account ID</b> (aparece na lateral de Workers &amp; Pages).</p></div></li>
-        <li class="info"><span class="n">3</span><div><b>Token do painel</b><p class="note">Senha que só o seu painel conhece. Fica salva neste aparelho.</p><div class="row"><button class="sm" id="su_gen">Gerar token do painel</button><button class="sm" id="su_copy" hidden>Copiar</button></div><code id="su_tok" style="word-break:break-all;font-size:12px"></code></div></li>
-        <li class="info"><span class="n">4</span><div><b>Segredos no GitHub</b><p class="note">Em <a href="https://github.com/Sr-Geovani/funding-desk/settings/secrets/actions/new" target="_blank" rel="noopener">New repository secret</a>, crie um de cada vez: <code>CLOUDFLARE_API_TOKEN</code>, <code>CLOUDFLARE_ACCOUNT_ID</code> e <code>PANEL_TOKEN</code> (o do passo 3). Segredos do GitHub ficam cifrados e não aparecem no código.</p></div></li>
-        <li class="info"><span class="n">5</span><div><b>Publicar</b><p class="note">Abra <a href="https://github.com/Sr-Geovani/funding-desk/actions/workflows/worker.yml" target="_blank" rel="noopener">Deploy do backend</a> → Run workflow → Run. Quando terminar (~2 min), abra a execução: o resumo mostra o <b>endereço do backend</b> e se ele respondeu.</p></div></li>
-        <li class="info"><span class="n">6</span><div><b>Conectar</b><p class="note">Cole o endereço em "Backend (operação)", logo acima, e toque em Salvar e testar. O token do passo 3 já está salvo.</p></div></li>
-        <li class="info"><span class="n">7</span><div><b>NiceHash de teste</b><p class="note">Crie conta em <a href="https://test.nicehash.com" target="_blank" rel="noopener">test.nicehash.com</a> (dinheiro de teste). Em Configurações → Chaves de API, crie uma chave com permissão de <b>ver saldos e gerenciar ordens de hashpower</b>, <b>sem saque</b>. Crie no GitHub os segredos <code>NH_API_KEY</code>, <code>NH_API_SECRET</code> e <code>NH_ORG_ID</code> (Organization ID, na mesma página) e rode o passo 5 de novo.</p></div></li>
-        <li class="info"><span class="n">8</span><div><b>Telegram (alertas 24 h)</b><p class="note">No Telegram, fale com <b>@BotFather</b> → /newbot → copie o token. Mande "oi" para o seu bot e abra <code>https://api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</code>: o número em <code>"chat":{"id":...}</code> é o chat. Segredos <code>TELEGRAM_BOT_TOKEN</code> e <code>TELEGRAM_CHAT_ID</code> → rode o passo 5.</p></div></li>
-        <li class="info"><span class="n">9</span><div><b>Validar e ir para produção</b><p class="note">Em Mineração → Operar: endereço BCH, pool e robô em <b>Observar</b> por alguns dias, lendo o log. Depois troque <code>NH_ENV</code> para <code>"prod"</code> em <code>worker/wrangler.toml</code>, substitua os segredos NH_* pelos da conta real e rode o passo 5.</p></div></li>
+        <li class="info"><span class="n">1</span><div><b>Crie a conta no Cloudflare (grátis)</b><p class="note"><a href="https://dash.cloudflare.com/sign-up" target="_blank" rel="noopener">dash.cloudflare.com/sign-up</a> e confirme o e-mail.</p></div></li>
+        <li class="info"><span class="n">2</span><div><b>Gere um token e mande para o Claude</b><p class="note"><a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noopener">API Tokens</a> → Create Token → <b>Edit Cloudflare Workers</b> → Use template → em Account Resources escolha a sua conta e em Zone Resources "All zones" → Continue to summary → Create Token. Copie o token e mande no chat. O resto ele instala.</p></div></li>
+        <li class="info"><span class="n">3</span><div><b>Toque no link que voltar</b><p class="note">O link abre este painel já conectado ao backend, neste aparelho.</p></div></li>
+        <li class="info"><span class="n">4</span><div><b>Conecte NiceHash e Telegram aqui embaixo</b><p class="note">Em "Conectar contas". Essas chaves vão direto para o seu backend, cifradas. Não mande essas chaves no chat.</p></div></li>
       </ol>
+      <p class="note" style="margin:8px 0 0">Prefere fazer sozinho? <a href="https://github.com/Sr-Geovani/funding-desk/blob/main/docs/configurar-backend.md" target="_blank" rel="noopener">Guia técnico</a>.</p>
     </details>
-    <div class="card">
-      <h2>Conexões</h2>
-      <div class="scroll"><table id="conn"></table></div>
-      <p class="note" style="margin:8px 0 0">Conectar conta (saldo, posições, ordens) exige chave de API. Chave nunca fica no navegador nem no repositório: isso só será feito com um backend próprio que guarde as chaves cifradas, só leitura, sem saque. Até lá, registre manualmente no Diário.</p>
-    </div>
     <div class="card">
       <h2>Backend (operação)</h2>
       <div class="grid2">
         <label style="grid-column:1/-1">Endereço do backend<input id="api_url" type="url" inputmode="url" placeholder="https://funding-desk-api.seu-nome.workers.dev" autocomplete="off"></label>
-        <label style="grid-column:1/-1">Token do painel<input id="api_token" type="password" autocomplete="off" placeholder="o PANEL_TOKEN que você definiu no Cloudflare"></label>
+        <label style="grid-column:1/-1">Token do painel<input id="api_token" type="password" autocomplete="off" placeholder="vem no link de conexão"></label>
       </div>
       <div class="row" style="margin-top:10px"><button class="pri" id="api_save">Salvar e testar</button><button id="api_clear">Esquecer token</button></div>
-      <p class="note" id="api_msg" style="margin:8px 0 0">O token fica só neste aparelho. As chaves da NiceHash ficam só no servidor (segredos do Cloudflare) e nunca passam pelo painel. Com o backend configurado, ele também serve de proxy em tempo real.</p>
+      <p class="note" id="api_msg" style="margin:8px 0 0">Normalmente o link de conexão preenche isto sozinho. O token fica só neste aparelho; as chaves da NiceHash e do Telegram ficam cifradas no backend. Com o backend conectado, ele também serve de proxy em tempo real.</p>
+    </div>
+    <div class="card" id="acct">
+      <h2>Conectar contas</h2>
+      <p class="note" id="ac_state" style="margin:4px 0 8px">Conecte o backend primeiro.</p>
+      <details id="ac_nh"><summary>NiceHash <span id="ac_nh_st" class="chip"></span></summary>
+        <ol class="note" style="margin:8px 0;padding-left:18px">
+          <li>Entre em <a href="https://test.nicehash.com" target="_blank" rel="noopener">test.nicehash.com</a> (teste, dinheiro de mentira; comece por aqui) ou em nicehash.com (dinheiro real).</li>
+          <li>Configurações → Chaves de API → criar chave.</li>
+          <li>Marque só: <b>ver saldos</b> e, no marketplace de hashpower, <b>ver e gerenciar pedidos</b> e <b>pools</b>. <b class="bad">Nunca marque saque (withdraw) nem endereços de saque.</b></li>
+          <li>Copie API Key, API Secret e Organization ID (aparece na mesma página) e cole aqui.</li>
+        </ol>
+        <div class="grid2">
+          <label style="grid-column:1/-1">Ambiente<select id="ac_env"><option value="test">Teste (test.nicehash.com)</option><option value="prod">Produção (dinheiro real)</option></select></label>
+          <label style="grid-column:1/-1">API Key<input id="ac_key" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"></label>
+          <label style="grid-column:1/-1">API Secret<input id="ac_secret" type="password" autocomplete="new-password"></label>
+          <label style="grid-column:1/-1">Organization ID<input id="ac_org" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"></label>
+        </div>
+        <div class="row" style="margin-top:10px"><button class="pri" id="ac_nh_save">Salvar e conferir</button><button id="ac_nh_del">Desconectar</button></div>
+        <p class="note" id="ac_nh_msg" style="margin:8px 0 0"></p>
+      </details>
+      <details id="ac_tg" style="margin-top:8px"><summary>Telegram (alertas 24 h) <span id="ac_tg_st" class="chip"></span></summary>
+        <ol class="note" style="margin:8px 0;padding-left:18px">
+          <li>No Telegram, abra <a href="https://t.me/BotFather" target="_blank" rel="noopener">@BotFather</a> → /newbot → escolha um nome → copie o token.</li>
+          <li>Cole aqui e toque em Conectar.</li>
+          <li>Ele pede para você mandar "oi" para o seu bot. Mande e toque em Conectar de novo.</li>
+        </ol>
+        <label>Token do bot<input id="ac_tgtok" type="password" autocomplete="new-password" placeholder="123456789:AAH..."></label>
+        <div class="row" style="margin-top:10px"><button class="pri" id="ac_tg_go">Conectar</button><button id="ac_tg_del">Desconectar</button></div>
+        <p class="note" id="ac_tg_msg" style="margin:8px 0 0"></p>
+      </details>
+      <p class="note" style="margin:10px 0 0">As chaves saem deste formulário direto para o seu backend (HTTPS) e ficam cifradas lá. O painel não guarda chaves e o backend nunca as devolve.</p>
+    </div>
+    <div class="card">
+      <h2>Conexões</h2>
+      <div class="scroll"><table id="conn"></table></div>
+      <p class="note" style="margin:8px 0 0">NiceHash e Telegram se conectam em "Conectar contas", com as chaves cifradas no seu backend. Contas das exchanges de funding ainda não se conectam: registre as operações no Diário.</p>
     </div>
     <div class="card">
       <h2>Fonte de dados</h2>

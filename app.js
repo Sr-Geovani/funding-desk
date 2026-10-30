@@ -656,7 +656,7 @@ function loadOps(){
     if(r[2].ok)ops.bal=r[2].v;else ops.err.bal=r[2].e.message;
     if(r[3].ok)ops.pools=r[3].v.list||[];else ops.err.pools=r[3].e.message;
     if(r[4].ok)ops.log=r[4].v.log||[];
-    renderOps();renderHome();renderMine();
+    renderOps();renderHome();renderMine();renderAcct();
   });
 }
 setInterval(function(){if(document.visibilityState==='visible'&&!$('mine-ops').hidden&&!$('tab-mine').hidden)loadOps()},30000);
@@ -665,11 +665,11 @@ var BOT_FIELDS=['mode','onBlock','payoutAddress','minEdgePct','bidPremiumPct','t
 function renderOps(){
   var c=apiCfg(),st=ops.status;
   if(!c.url){
-    $('o_conn').innerHTML='<h2>Backend não configurado</h2><p class="note">Para operar (ordens, robô, parada no bloco) é preciso publicar o backend no Cloudflare e informar o endereço e o token. O passo a passo está no README do repositório.</p><div class="row"><button class="sm" data-go="set">Abrir Ajustes</button></div>';
+    $('o_conn').innerHTML='<h2>Backend não configurado</h2><p class="note">Para operar (ordens, robô, parada no bloco) é preciso o backend. É só mandar um token do Cloudflare no chat: o passo a passo de 4 itens está em Ajustes.</p><div class="row"><button class="sm" data-go="set" data-focus="#setup">Abrir Ajustes</button></div>';
     ['o_status','o_orders','o_log'].forEach(function(id){$(id).innerHTML=''});$('o_bal').textContent='';return;
   }
   $('o_conn').innerHTML=st?'<div class="row" style="justify-content:space-between"><h2 style="margin:0">Backend</h2><span class="chip ok">conectado</span></div>'+
-    '<div class="kv" style="margin-top:10px"><div><small>NiceHash</small><span class="'+(st.nhEnv==='produção'?'warn':'')+'">'+esc(st.nhEnv)+'</span></div><div><small>Chaves</small><span class="'+(st.keys?'good':'bad')+'">'+(st.keys?'ok':'faltando')+'</span></div><div><small>Telegram</small><span>'+(st.telegram?'ok':'—')+'</span></div>'+
+    '<div class="kv" style="margin-top:10px"><div><small>NiceHash</small><span class="'+(st.nhEnv==='produção'?'warn':'')+'">'+esc(st.nhEnv)+'</span></div><div><small>Chaves</small><span class="'+(st.keys?'good':'bad')+'">'+(st.keys?'ok':'faltando <button class="sm" data-go="set" data-focus="#acct">Conectar</button>')+'</span></div><div><small>Telegram</small><span>'+(st.telegram?'ok':'—')+'</span></div>'+
     '<div><small>Teto por ordem</small><span>'+st.limits.maxOrderBtc+' BTC</span></div><div><small>Teto de potência</small><span>'+st.limits.maxLimitPh+' PH/s</span></div><div><small>Versão</small><span>'+esc(st.version)+'</span></div></div>'
     :'<div class="row" style="justify-content:space-between"><h2 style="margin:0">Backend</h2><span class="chip bad">sem conexão</span></div><p class="note">'+esc(ops.err.status||'carregando…')+'</p>';
   if(!st){$('o_status').innerHTML='';return}
@@ -901,17 +901,32 @@ function renderReal(){
     '<div class="box"><b>Funding</b>Dados e recomendações: <b>reais, ao vivo</b>. Ordens: <b>você abre e fecha na exchange</b>; o painel ainda não executa funding. Diário: registro manual (o extrato da exchange é o oficial).</div>'+
     '<div class="box"><b>Mineração</b>'+mine+'</div>';
 }
+function renderAcct(){
+  var st=ops.status,c=st&&st.creds,host='';
+  try{host=new URL(apiCfg().url).host}catch(e){}
+  var on=!!st;['ac_nh_save','ac_nh_del','ac_tg_go','ac_tg_del'].forEach(function(id){$(id).disabled=!on});
+  if(!apiCfg().url){$('ac_state').textContent='Conecte o backend primeiro (passos acima).';$('ac_nh_st').textContent='';$('ac_tg_st').textContent='';return}
+  if(!st){$('ac_state').textContent='Backend sem resposta: '+(ops.err.status||'carregando…');return}
+  if(!c){$('ac_state').textContent='O backend está numa versão antiga: publique de novo para cadastrar contas por aqui.';return}
+  $('ac_state').innerHTML='As chaves vão para <b>'+esc(host)+'</b>'+(c.encryption?' e ficam cifradas lá.':'. <span class="bad">Falta a chave de cifra (ENC_KEY) no backend: rode a instalação de novo antes de cadastrar.</span>')+(c.error?' <span class="bad">'+esc(c.error)+'</span>':'');
+  var nh=c.nicehash,tg=c.telegram;
+  $('ac_nh_st').className='chip '+(nh.set?(nh.env==='prod'?'warn':'ok'):'');
+  $('ac_nh_st').textContent=nh.set?('conectada · '+(nh.env==='prod'?'produção':nh.env==='test'?'teste':nh.env)+(nh.source==='cloudflare'?' (Cloudflare)':'')):'não conectada';
+  $('ac_tg_st').className='chip '+(tg.set?'ok':'');
+  $('ac_tg_st').textContent=tg.set?('conectado'+(tg.bot?' · @'+tg.bot:'')):(tg.token?'falta mandar "oi"':'não conectado');
+  if(nh.set&&!$('ac_env').dataset.touched)$('ac_env').value=nh.env==='prod'?'prod':'test';
+}
 function renderProd(){
   var st=ops.status,cfg=st&&st.config,n=Object.keys(state.src).filter(function(v){return state.src[v]==='api'||state.src[v]==='proxy'}).length;
   var items=[
     ['Painel publicado (GitHub Pages)',true,''],
     ['Dados ao vivo das exchanges',n===VENUES.length,n+' de '+VENUES.length+' diretas'],
-    ['Backend publicado e conectado',!!st,settings.apiUrl?(st?'ok':'sem resposta'):'publicar pelo README (Cloudflare)'],
-    ['Chaves da NiceHash no backend (sem saque)',!!(st&&st.keys),''],
-    ['Telegram para alertas 24 h',!!(st&&st.telegram),''],
+    ['Backend publicado e conectado',!!st,settings.apiUrl?(st?'ok':'sem resposta'):'Ajustes → Conectar o backend: mande o token do Cloudflare'],
+    ['NiceHash conectada (chave sem saque)',!!(st&&st.keys),st&&st.keys?'':'Ajustes → Conectar contas'],
+    ['Telegram para alertas 24 h',!!(st&&st.telegram),st&&st.telegram?'':'Ajustes → Conectar contas'],
     ['Endereço BCH e pool cadastrados',!!(cfg&&cfg.payoutAddress&&ops.pools.length),''],
     ['Robô validado em Observar por alguns dias',null,'confira o log em Operar'],
-    ['NiceHash em produção (NH_ENV = "prod")',!!(st&&st.nhEnv==='produção'),st?st.nhEnv:''],
+    ['NiceHash em produção',!!(st&&st.nhEnv==='produção'),st?(st.nhEnv==='produção'?'':'hoje: '+st.nhEnv+'. Em Conectar contas, escolha Produção e cole a chave da conta real'):''],
     ['Execução automática de funding',false,'a construir: precisa de servidor no Brasil']
   ];
   var done=items.filter(function(i){return i[1]===true}).length;
@@ -1191,7 +1206,9 @@ Object.keys(SUBS).forEach(function(t){document.querySelectorAll('#'+SUBS[t][0]+'
 document.querySelectorAll('nav button').forEach(function(b){b.addEventListener('click',function(){tab(b.dataset.tab)})});
 document.addEventListener('click',function(e){var b=e.target.closest('[data-go]');if(!b)return;var g=b.dataset.go.split(':');
   if(b.dataset.setmode){setMode(b.dataset.setmode);renderScan()}
-  if(b.dataset.focus){focusAlgo=b.dataset.focus;setTimeout(function(){var el=document.getElementById('algo-'+focusAlgo);if(el){el.scrollIntoView({block:'start'})}},60)}
+  var fo=b.dataset.focus;
+  if(fo&&fo[0]==='#')setTimeout(function(){var el=document.getElementById(fo.slice(1));if(el){if(el.tagName==='DETAILS')el.open=true;el.scrollIntoView({block:'start'})}},60);
+  else if(fo){focusAlgo=fo;setTimeout(function(){var el=document.getElementById('algo-'+focusAlgo);if(el){el.scrollIntoView({block:'start'})}},60)}
   tab(g[0],g[1]||(g[0]==='fund'?'scan':g[0]==='mine'?'now':undefined))});
 function setMode(m){
   state.mode=m;settings.mode=m;ls('fd_set',settings);
@@ -1290,6 +1307,16 @@ setInterval(function(){if(document.visibilityState==='visible'&&state.live)load(
 ['iv_total','iv_sess','iv_edge','iv_stop'].forEach(function(id){$(id).addEventListener('input',function(){saveSettings();renderInvest()})});
 document.querySelectorAll('#invSeg button').forEach(function(b){b.addEventListener('click',function(){
   invScenario=b.dataset.sc;document.querySelectorAll('#invSeg button').forEach(function(x){x.setAttribute('aria-pressed',x===b?'true':'false')});renderInvest()})});
+// Link de conexão gerado pela instalação: #api=<endereço>&tok=<token>. Pede confirmação e some da barra de endereço.
+var linkConnect=(function(){
+  var h=location.hash.slice(1);if(!/(^|&)tok=/.test(h))return null;
+  var q=new URLSearchParams(h),u=(q.get('api')||'').trim().replace(/\/+$/,''),t=(q.get('tok')||'').trim();
+  try{history.replaceState(null,'',location.pathname+location.search)}catch(e){}
+  if(!/^(https:\/\/[a-z0-9.-]+|http:\/\/(localhost|127\.0\.0\.1))(:\d+)?$/i.test(u)||t.length<24)return {error:'Link de conexão inválido.'};
+  if(!confirm('Conectar este painel ao backend '+u.replace(/^https?:\/\//,'')+'? Só aceite se foi você quem pediu este link.'))return {error:'Conexão cancelada.'};
+  settings.apiUrl=u;ls('fd_set',settings);ls('fd_tok',t);return {ok:true};
+})();
+$('setup').open=!settings.apiUrl;
 $('api_url').value=settings.apiUrl||'';
 if(ls('fd_tok'))$('api_token').placeholder='token salvo neste aparelho';
 $('api_save').addEventListener('click',function(){
@@ -1300,12 +1327,38 @@ $('api_save').addEventListener('click',function(){
   opsMsg('api_msg','Testando…');
   apiCall('GET','/status').then(function(st){opsMsg('api_msg','Conectado. NiceHash: '+st.nhEnv+' · chaves '+(st.keys?'ok':'faltando')+' · robô '+MODE_TXT[st.config.mode]+'.');cache={};loadOps();loadMining()},function(e){opsMsg('api_msg','Falhou: '+e.message,true)});
 });
-$('su_gen').addEventListener('click',function(){
-  var b=new Uint8Array(24);crypto.getRandomValues(b);
-  var t=btoa(String.fromCharCode.apply(null,b)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
-  ls('fd_tok',t);$('su_tok').textContent=t;$('su_copy').hidden=false;$('api_token').placeholder='token salvo neste aparelho';
+/* ---------- conectar contas (chaves vão direto para o backend, cifradas lá; nada fica no painel) ---------- */
+function acctBusy(id,on){$(id).disabled=on}
+$('ac_env').addEventListener('change',function(){$('ac_env').dataset.touched='1'});
+$('ac_nh_save').addEventListener('click',function(){
+  var env=$('ac_env').value,body={nicehash:{env:env,key:$('ac_key').value.trim(),secret:$('ac_secret').value.trim(),org:$('ac_org').value.trim()}};
+  if(!body.nicehash.key||!body.nicehash.secret||!body.nicehash.org){opsMsg('ac_nh_msg','Preencha API Key, API Secret e Organization ID.',true);return}
+  if(env==='prod'&&!confirm('Produção usa dinheiro real. O robô volta para Observar e você ativa depois de conferir. Continuar?'))return;
+  acctBusy('ac_nh_save',true);opsMsg('ac_nh_msg','Conferindo com a NiceHash…');
+  apiCall('PUT','/credentials',body).then(function(r){
+    $('ac_key').value='';$('ac_secret').value='';$('ac_org').value='';
+    opsMsg('ac_nh_msg','Conectada ('+(r.nicehash.env==='prod'?'produção':'teste')+', chave '+r.nicehash.key+'). Saldo: '+(r.balanceBtc!=null?r.balanceBtc+' BTC':'—')+'. Próximo passo: Mineração → Operar, com o robô em Observar.');
+    loadOps();
+  },function(e){opsMsg('ac_nh_msg',e.message,true)}).then(function(){acctBusy('ac_nh_save',false)});
 });
-$('su_copy').addEventListener('click',function(){var b=$('su_copy');try{navigator.clipboard.writeText($('su_tok').textContent).then(function(){b.textContent='Copiado'},function(){b.textContent='Selecione e copie'})}catch(e){b.textContent='Selecione e copie'}});
+$('ac_nh_del').addEventListener('click',function(){
+  if(!confirm('Desconectar a NiceHash? As chaves salvas pelo painel são apagadas do backend e o robô volta para Observar.'))return;
+  apiCall('PUT','/credentials',{remove:'nicehash'}).then(function(r){opsMsg('ac_nh_msg',r.nicehash.set?'Chaves do painel apagadas; o backend ainda tem chaves cadastradas direto no Cloudflare.':'NiceHash desconectada.');loadOps()},function(e){opsMsg('ac_nh_msg',e.message,true)});
+});
+$('ac_tg_go').addEventListener('click',function(){
+  var tok=$('ac_tgtok').value.trim();
+  acctBusy('ac_tg_go',true);opsMsg('ac_tg_msg','Conectando…');
+  apiCall('POST','/telegram',tok?{token:tok}:{}).then(function(r){
+    $('ac_tgtok').value='';
+    if(r.connected){opsMsg('ac_tg_msg','Pronto: mandei uma mensagem de teste para '+(r.chatName||'você')+' pelo @'+r.bot+'.');loadOps();return}
+    $('ac_tg_msg').className='note';
+    $('ac_tg_msg').innerHTML='Token ok. Agora abra '+(r.link?'<a href="'+esc(r.link)+'" target="_blank" rel="noopener">@'+esc(r.bot)+'</a>':'o seu bot')+', toque em <b>Iniciar</b> (ou mande "oi") e volte aqui para tocar em <b>Conectar</b> de novo.';
+  },function(e){opsMsg('ac_tg_msg',e.message,true)}).then(function(){acctBusy('ac_tg_go',false)});
+});
+$('ac_tg_del').addEventListener('click',function(){
+  if(!confirm('Desconectar o Telegram? Os alertas param de chegar no celular.'))return;
+  apiCall('PUT','/credentials',{remove:'telegram'}).then(function(){opsMsg('ac_tg_msg','Telegram desconectado.');loadOps()},function(e){opsMsg('ac_tg_msg',e.message,true)});
+});
 $('api_clear').addEventListener('click',function(){try{localStorage.removeItem('fd_tok')}catch(e){}$('api_token').placeholder='';opsMsg('api_msg','Token apagado deste aparelho.')});
 $('o_refresh').addEventListener('click',loadOps);
 BOT_FIELDS.forEach(function(k){$('b_'+k).addEventListener('input',function(){ops.dirty=true})});
@@ -1355,5 +1408,8 @@ renderCalc();renderLiq();renderFees();renderPositions();renderSessions();renderP
 state.rows=FD.demoData(Date.now());renderScan();renderHome();
 tab(TABS.indexOf(settings.tab)>=0?settings.tab:'home');
 load();loadMining();if(settings.apiUrl)loadOps();
+renderAcct();
+if(linkConnect){tab('set');opsMsg('api_msg',linkConnect.ok?'Backend conectado pelo link. Agora conecte NiceHash e Telegram logo abaixo.':linkConnect.error,!linkConnect.ok);
+  if(linkConnect.ok)setTimeout(function(){$('ac_nh').open=true;$('acct').scrollIntoView({block:'start'})},80)}
 if('serviceWorker' in navigator&&/^https?:/.test(location.protocol))navigator.serviceWorker.register('sw.js').catch(function(){});
 })();

@@ -17,8 +17,9 @@ sempre identificado; nada de prometer previsão de sorte (Poisson é sem memóri
 | `radar.js` | mapas de funding e mineração (9 algoritmos, WhatToMine), sentimento, alertas (agora/histórico), pools e players |
 | `insights.js` | plano do ciclo, curto prazo, ficar/sair/trocar, backtest, meta, previsão de mineração, plano combinado |
 | `app.js` / `index.html` | interface: Início, Radar, Funding, Mineração (Agora, Jornada, Planejar, Algoritmos, Operar, Rede), Diário, Ajustes |
-| `worker/` | backend Cloudflare: API com token, chaves NiceHash como segredo, robô (cron 3 min), alertas + Telegram, proxy |
-| `tests/` | `node --test tests/*.test.js tests/*.test.mjs` (91 testes; NiceHash falsa em `worker/dev/mock.mjs`) |
+| `worker/` | backend Cloudflare: API com token, contas (NiceHash/Telegram) cifradas no KV via painel (`creds.js`), robô (cron 3 min), alertas + Telegram, proxy |
+| `scripts/deploy-backend.sh` | instala/atualiza o backend só com um token do Cloudflare e imprime o link de conexão do painel |
+| `tests/` | `node --test tests/*.test.js tests/*.test.mjs` (NiceHash e Telegram falsos em `worker/dev/mock.mjs`) |
 | `.github/workflows/` | `pages.yml` (testes + Pages + fotos de mercado), `worker.yml` (testes + deploy do backend + resumo) |
 
 ## Decisões importantes
@@ -33,9 +34,9 @@ sempre identificado; nada de prometer previsão de sorte (Poisson é sem memóri
 
 ## Estado e pendências
 - [x] Painel publicado; dados ao vivo validados do Brasil (Binance/Bybit diretos no iPhone).
-- [ ] **Backend no Cloudflare**: depende do dono (passos em Ajustes → Configurar o backend e `docs/configurar-backend.md`).
-      Esta sessão não tem acesso ao Cloudflare nem permissão para criar segredos no GitHub.
-- [ ] Validar robô em Observar (NiceHash de teste), depois `NH_ENV = "prod"`.
+- [ ] **Backend no Cloudflare**: o dono cria um token "Edit Cloudflare Workers" e o Claude roda `scripts/deploy-backend.sh`;
+      o dono abre o link de conexão e cadastra NiceHash e Telegram em Ajustes → Conectar contas (nunca no chat).
+- [ ] Validar robô em Observar (NiceHash de teste), depois ambiente Produção em Conectar contas.
 - [ ] Funding automático: exige servidor no Brasil (Binance/Bybit bloqueiam EUA), chaves de trade sem saque.
 - [ ] Robô multi-algoritmo (pool PPS) para Scrypt/RandomX/Equihash etc.
 - [ ] Mais exchanges: dYdX (CORS ok), MEXC e KuCoin (via backend).
