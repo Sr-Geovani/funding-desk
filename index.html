@@ -314,6 +314,7 @@ details.card>summary{color:var(--fg);font-size:15px}
       <button data-sub="now" aria-pressed="true">Agora</button>
       <button data-sub="journey" aria-pressed="false">Jornada</button>
       <button data-sub="plan" aria-pressed="false">Planejar</button>
+      <button data-sub="algos" aria-pressed="false">Algoritmos</button>
       <button data-sub="ops" aria-pressed="false">Operar</button>
       <button data-sub="net" aria-pressed="false">Rede</button>
     </div>
@@ -382,6 +383,11 @@ details.card>summary{color:var(--fg);font-size:15px}
         <p class="note" style="margin:8px 0 0">Blocos seguem Poisson: com retorno por dólar abaixo de 1, investir mais torna o prejuízo mais provável; acima de 1, torna o lucro mais provável. "Só com margem mínima" supõe que você só compra quando o mercado está no teto ou abaixo (o robô faz isso); nesses períodos o hash pode simplesmente não estar disponível. Sessões: simulação de 5.000 cenários.</p>
       </div>
       <p class="note">Taxas NiceHash: 3% sobre o gasto e 0,00001 BTC por ordem (tabela pública). Pacotes EasyMining têm preço fechado: use taxa do aluguel 0% e o preço equivalente do pacote.</p>
+    </div>
+    <div id="mine-algos" class="stack" hidden>
+      <div class="card"><div class="eyebrow">Algoritmos</div><div class="lead">Outras moedas: o que compensa e como minerar</div>
+        <p class="note" style="margin:0">A aba "Agora" e o robô automático cuidam do SHA-256 (BCH) em modo solo. Os outros algoritmos se mineram com <b>ordem manual na NiceHash</b> apontada para um <b>pool da moeda</b>: o pool paga proporcional ao hash entregue (pouca variação), então o resultado esperado é a margem abaixo. Os alertas desta aba avisam quando cada um começa e para de compensar.</p></div>
+      <div id="m_algos" class="stack"></div>
     </div>
     <div id="mine-ops" class="stack" hidden>
       <div class="card" id="o_conn"></div>

@@ -116,6 +116,7 @@ function miningMap(wtm, books, opts) {
       algo: a.nh, label: a.label, where: a.where, coins: option.coins, merged: option.coins.length > 1, all: list.slice(0, 4).map(function (c) { return c.coin; }),
       small: all.filter(function (c) { return !c.liquid && c.rev > option.rev; }).slice(0, 3).map(function (c) { return c.coin; }),
       revBtcPerH: rev, rentBtcPerH: rent, edgePct: rent ? (rev / rent - 1) * 100 : null, level: level,
+      unitFactor: unitF, capBtcPerUnit: unitF ? rev * unitF / (1 + fee) * (1 - m) : null, fillBtcPerUnit: b && b.fill ? b.fill * unitF : null,
       unit: b ? b.unit : '', revUsdPerUnit: unitF && btcUsd ? rev * unitF * btcUsd : null, rentUsdPerUnit: unitF && rent && btcUsd ? rent * unitF * btcUsd : null,
       paying: b ? b.paying : 0, thin: thin
     };
@@ -155,6 +156,7 @@ function priceMove(hist, coin, now, mins) {
 }
 
 /* ---------- alertas ---------- */
+var SHA_COINS = { BCH: 1, BSV: 1, BTC: 1 }; // moedas da aba "Agora" (SHA-256); o resto abre em "Algoritmos"
 var COOLDOWN = { fe: 6 * HOUR, fs: 2 * HOUR, sent: 12 * HOUR, me: 3 * HOUR, ms: 3 * HOUR, pm: 6 * HOUR };
 // c: { snap, prev, hist, positions: [{ id, coin, s, l, level, text }], mem: { key: tAlerted }, now, minEdgePct }
 function evaluateAlerts(c) {
@@ -184,10 +186,11 @@ function evaluateAlerts(c) {
   Object.keys(s.edges || {}).forEach(function (f) {
     var v = s.edges[f], pv = p.edges ? p.edges[f] : undefined;
     if (!isFinite(v)) return;
-    if (v >= m && isFinite(pv) && pv < m) fire('me', f, { kind: 'entrada', area: 'mineracao', go: 'mine',
+    var dest = SHA_COINS[f] ? 'mine' : 'mine:algos';
+    if (v >= m && isFinite(pv) && pv < m) fire('me', f, { kind: 'entrada', area: 'mineracao', go: dest, focus: f,
       title: 'Mineração: ' + f + ' passou a compensar (' + (v >= 0 ? '+' : '') + v.toFixed(1).replace('.', ',') + '%)',
       text: 'O aluguel ficou abaixo do que o hash rende, com a sua margem. Confira no Planejar antes de abrir ordem.' });
-    if (v < 0 && isFinite(pv) && pv >= 0) fire('ms', f, { kind: 'saida', area: 'mineracao', go: 'mine',
+    if (v < 0 && isFinite(pv) && pv >= 0) fire('ms', f, { kind: 'saida', area: 'mineracao', go: dest, focus: f,
       title: 'Mineração: ' + f + ' deixou de compensar (' + v.toFixed(1).replace('.', ',') + '%)',
       text: 'O aluguel passou a custar mais do que o hash rende. Pause ou reduza ordens dessa moeda.' });
   });
@@ -218,7 +221,7 @@ function activeConditions(c) {
   });
   Object.keys(s.edges || {}).forEach(function (f) {
     var v = s.edges[f];
-    if (isFinite(v) && v >= m && !(s.thin && s.thin[f])) out.push({ key: 'me:' + f, kind: 'entrada', area: 'mineracao', go: 'mine', coin: f,
+    if (isFinite(v) && v >= m && !(s.thin && s.thin[f])) out.push({ key: 'me:' + f, kind: 'entrada', area: 'mineracao', go: SHA_COINS[f] ? 'mine' : 'mine:algos', focus: f, coin: f,
       title: 'Mineração: ' + f + ' compensa (' + (v >= 0 ? '+' : '') + v.toFixed(1).replace('.', ',') + '%)', text: 'O aluguel está abaixo do que o hash rende, com a sua margem.' });
   });
   return out.sort(function (a, b) { return PRIO[a.kind] - PRIO[b.kind] || (a.title < b.title ? -1 : 1); });
@@ -238,6 +241,20 @@ function groupConditions(list) {
     var names = a.items.map(function (x) { return x.coin; });
     return Object.assign(a, { title: a.items.length + ' entradas de ' + (a.area === 'funding' ? 'funding' : 'mineração') + ': ' + names.slice(0, 4).join(', ') + (names.length > 4 ? '…' : ''),
       text: 'Toque para ver cada uma.' });
+  });
+}
+// Desde quando cada condição está ativa: entra quando aparece, sai quando deixa de valer.
+function trackSince(since, activeKeys, now) {
+  var out = {};
+  activeKeys.forEach(function (k) { out[k] = (since && since[k]) || now; });
+  return out;
+}
+// Marca nos eventos do histórico quando a condição acabou (o evento de entrada deixa de valer).
+function markEnded(events, activeKeys, now) {
+  return (events || []).map(function (a) {
+    var k = a.key ? a.key.replace(/^(fe|me|fs|sent):/, '$1:') : null;
+    if (!a.endedAt && /^(fe|me|fs|sent):/.test(k || '') && activeKeys.indexOf(k) < 0) return Object.assign({}, a, { endedAt: now });
+    return a;
   });
 }
 // Mantém o histórico de eventos em até `days` dias e `max` itens.
@@ -287,6 +304,18 @@ var PLAYERS = [
   { cat: 'dados', name: 'MiningPoolStats', url: 'https://miningpoolstats.stream', what: 'Pools e potência por moeda.', api: 'leitura', panel: false },
   { cat: 'dados', name: 'MiningBoard', url: 'https://miningboard.com', what: 'Compara pools solo com o custo de alugar na NiceHash.', api: 'leitura', panel: false, note: 'não respondeu do servidor de teste; citado por várias fontes' }
 ];
+// Pools por algoritmo para minerar com hash alugado (em pool, o pagamento é proporcional: pouca variação).
+var POOLS = {
+  SHA256: [['BlockSniper (BCH solo)', 'https://blocksniper.ai'], ['2Miners Solo BCH', 'https://solo-bch.2miners.com'], ['CKPool Solo (BTC)', 'https://solo.ckpool.org']],
+  SCRYPT: [['LiteSolo (LTC + DOGE solo)', 'https://litesolo.org'], ['litecoinpool.org (LTC + DOGE)', 'https://www.litecoinpool.org'], ['ViaBTC', 'https://www.viabtc.com']],
+  RANDOMXMONERO: [['P2Pool (sem taxa, descentralizado)', 'https://p2pool.io'], ['SupportXMR', 'https://supportxmr.com'], ['MoneroOcean', 'https://moneroocean.stream']],
+  EQUIHASH: [['2Miners ZEC', 'https://zec.2miners.com'], ['F2Pool', 'https://www.f2pool.com']],
+  ETCHASH: [['2Miners ETC', 'https://etc.2miners.com'], ['F2Pool', 'https://www.f2pool.com']],
+  KHEAVYHASH: [['2Miners KAS', 'https://kas.2miners.com'], ['F2Pool', 'https://www.f2pool.com']],
+  X11: [['F2Pool', 'https://www.f2pool.com'], ['ViaBTC', 'https://www.viabtc.com']],
+  EAGLESONG: [['F2Pool', 'https://www.f2pool.com'], ['ViaBTC', 'https://www.viabtc.com']],
+  ALEPHIUM: [['F2Pool', 'https://www.f2pool.com']]
+};
 var PLAYER_CATS = { funding: 'Operar funding (perpétuos)', hash: 'Comprar potência (hash)', pool: 'Entregar a potência (pools solo)', dados: 'Dados e referências' };
 
 var FDR = {
@@ -294,6 +323,7 @@ var FDR = {
   coinRevenueBtc: coinRevenueBtc, wtmCoins: wtmCoins, btcUsdFrom: btcUsdFrom, bookPerHash: bookPerHash, miningMap: miningMap,
   pushHistory: pushHistory, hourProfile: hourProfile, priceMove: priceMove, evaluateAlerts: evaluateAlerts, COOLDOWN: COOLDOWN,
   PLAYERS: PLAYERS, PLAYER_CATS: PLAYER_CATS,
+  POOLS: POOLS, SHA_COINS: SHA_COINS, trackSince: trackSince, markEnded: markEnded,
   PRIO: PRIO, activeConditions: activeConditions, groupConditions: groupConditions, pruneHistory: pruneHistory, isMuted: isMuted, cleanDismissed: cleanDismissed
 };
 if (typeof module !== 'undefined' && module.exports) module.exports = FDR;

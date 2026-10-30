@@ -181,3 +181,26 @@ test('alertas "agora": condições ativas por prioridade, agrupadas, com silênc
   const hist = [{ t: NOW - 8 * 864e5 }, { t: NOW - 6 * 864e5 }, { t: NOW }];
   assert.equal(R.pruneHistory(hist, NOW).length, 2);
 });
+
+test('alertas de mineração abrem o algoritmo certo; vida útil das condições', () => {
+  let r = R.evaluateAlerts({ snap: { edges: { RandomX: 4 } }, prev: { edges: { RandomX: 1 } }, now: NOW, minEdgePct: 3 });
+  assert.deepEqual([r.alerts[0].go, r.alerts[0].focus], ['mine:algos', 'RandomX']);
+  r = R.evaluateAlerts({ snap: { edges: { BSV: 4 } }, prev: { edges: { BSV: 1 } }, now: NOW, minEdgePct: 3 });
+  assert.equal(r.alerts[0].go, 'mine');
+  assert.equal(R.activeConditions({ snap: { edges: { Scrypt: 9 } }, minEdgePct: 3 })[0].go, 'mine:algos');
+  // desde quando vale e quando acabou
+  let since = R.trackSince({}, ['me:RandomX'], NOW);
+  since = R.trackSince(since, ['me:RandomX', 'fe:X'], NOW + H);
+  assert.deepEqual(since, { 'me:RandomX': NOW, 'fe:X': NOW + H });
+  assert.deepEqual(R.trackSince(since, ['fe:X'], NOW + 2 * H), { 'fe:X': NOW + H });
+  const ev = R.markEnded([{ key: 'me:RandomX', t: NOW }, { key: 'pm:BCH', t: NOW }], [], NOW + H);
+  assert.equal(ev[0].endedAt, NOW + H); assert.equal(ev[1].endedAt, undefined);
+  assert.equal(R.markEnded(ev, [], NOW + 2 * H)[0].endedAt, NOW + H, 'não sobrescreve o fim');
+  // teto nas unidades da NiceHash
+  const w = { coins: { a: { tag: 'XMR', algorithm: 'RandomX', block_time: 120, block_reward: 0.6, nethash: 6.5e9, exchange_rate: 0.0077, exchange_rate_vol: 50 } } };
+  const book = { stats: { BTC: { priceFactor: '1e9', displayPriceFactor: 'GH', orders: Array.from({ length: 6 }, () => ({ price: '0.0001', acceptedSpeed: '0.01', alive: true })) } } };
+  const m = R.miningMap(w, { RANDOMXMONERO: book }, { btcUsd: 77000, minEdgePct: 3 }).find((x) => x.algo === 'RANDOMXMONERO');
+  close(m.capBtcPerUnit, m.revBtcPerH * 1e9 / 1.03 * 0.97, 1e-12);
+  close(m.fillBtcPerUnit, 0.0001, 1e-12);
+  assert.ok(R.POOLS.RANDOMXMONERO.length >= 2 && R.POOLS.SCRYPT[0][1].startsWith('https://'));
+});

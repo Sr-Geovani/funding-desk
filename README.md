@@ -16,6 +16,9 @@ Mineração (agora, jornada, planejar, operar, rede) · Diário · Ajustes.
 - **Players:** onde operar funding, comprar hash, entregar (pools solo) e dados de referência, com links conferidos.
 
 Pesquisa global (6 idiomas), lacunas e roteiro até a execução automática: [`docs/pesquisa-global.md`](docs/pesquisa-global.md).
+Estado do projeto e pendências (para continuar em outra conversa): [`docs/estado-do-projeto.md`](docs/estado-do-projeto.md).
+
+**Mineração → Algoritmos:** para cada algoritmo (Scrypt, RandomX, Equihash, Etchash, X11...), mostra se compensa, desde quando, o passo a passo manual (mercado NiceHash, pools conferidos, preço máximo nas unidades da NiceHash) e o resultado esperado em pool. Os alertas de mineração abrem direto no algoritmo.
 
 **Copiloto preditivo** (`insights.js`, testado):
 - **Funding, por oportunidade:**

@@ -500,7 +500,8 @@ function renderCoins(L,V){
       '<div>Rende <b>'+usd(c.revenue)+'</b> por PH/s ao dia'+(c.edgePct===null?'':' · aluguel '+usd(V.rent)+' → <b class="'+(c.edgePct>=0?'good':'bad')+'">'+pct(c.edgePct,1)+'</b>')+'</div>'+
       '<div class="note">Com '+c.refPh+' PH/s: 1 bloco a cada ~'+FDC.hoursTxt(c.hoursPerBlock)+' em média (variação '+c.variance.label+') · o bloco vale '+usd(c.blockUsd,0)+(c.costPerBlock?' · custa em média '+usd(c.costPerBlock,0)+' de aluguel':'')+'</div>'+
       '<div class="note">'+esc(c.notes)+'</div></div>';
-  }).join('')+'<p class="note" style="margin:8px 0 0">O robô e a aba Operar trabalham com BCH. Para outra moeda, a ordem aponta para um pool dela; a parada automática no bloco hoje só confere BCH.</p>'
+  }).join('')+'<p class="note" style="margin:8px 0 0">O robô e a aba Operar trabalham com BCH. Para outra moeda, a ordem aponta para um pool dela; a parada automática no bloco hoje só confere BCH.</p>'+
+    ((market.map||[]).filter(function(m){return m.algo!=='SHA256'&&m.level==='go'}).length?'<div class="box"><b>Outros algoritmos compensando agora</b>'+(market.map||[]).filter(function(m){return m.algo!=='SHA256'&&m.level==='go'}).map(function(m){return esc(m.label)+' ('+esc(m.coins.join('+'))+') '+pct(m.edgePct,1)}).join(' · ')+' <button class="sm" data-go="mine:algos">Ver como minerar</button></div>':'')
   :'<p class="note">Carregando dados das redes…</p>';
 }
 var SIG_TXT={favoravel:'Favorável',neutro:'Perto do empate',desfavoravel:'Desfavorável','sem-dado':'Sem dado'};
@@ -998,7 +999,7 @@ function loadMarketMap(){
       var books={};FDR.ALGOS.forEach(function(a,i){if(r[i+1].ok)books[a.nh]=r[i+1].v});return {wtm:r[0],books:books,at:Date.now(),src:'tempo real'}})
     :Promise.reject(new Error('sem backend'));
   live$.catch(function(){return fetchJSON('data/market.json?'+Math.floor(Date.now()/60000)).then(function(d){return {wtm:d.wtm,books:d.books||{},at:Date.parse(d.at),src:'foto GitHub'}})})
-    .then(function(d){marketLoading=false;market.raw=d;market.at=Date.now();market.src=d.src;market.dataAt=d.at;market.err=null;computeMarketMap();renderRadar();updateRadar()},
+    .then(function(d){marketLoading=false;market.raw=d;market.at=Date.now();market.src=d.src;market.dataAt=d.at;market.err=null;computeMarketMap();renderRadar();updateRadar();renderAlgos()},
       function(e){marketLoading=false;market.err=errMsg(e);renderRadar()});
 }
 function computeMarketMap(){
@@ -1028,12 +1029,13 @@ function updateRadar(){
   var r=FDR.evaluateAlerts({snap:snap,prev:prev||{},hist:hist,positions:positions,mem:amem,now:snap.t,minEdgePct:minEdge()});
   amem=r.mem;ls('fd_amem',amem);
   hist=FDR.pushHistory(hist,snap);ls('fd_hist',hist);
-  var active=FDR.activeConditions({snap:snap,positions:positions,minEdgePct:minEdge()});
-  state.active=active;aprefs=FDR.cleanDismissed(aprefs,active.map(function(a){return a.key}));ls('fd_aprefs',aprefs);
-  alerts=FDR.pruneHistory(alerts.concat(r.alerts),snap.t,7,200);ls('fd_alerts',alerts);
+  var active=FDR.activeConditions({snap:snap,positions:positions,minEdgePct:minEdge()}),akeys=active.map(function(a){return a.key});
+  state.active=active;since=FDR.trackSince(since,akeys,snap.t);ls('fd_since',since);aprefs=FDR.cleanDismissed(aprefs,active.map(function(a){return a.key}));ls('fd_aprefs',aprefs);
+  alerts=FDR.markEnded(FDR.pruneHistory(alerts.concat(r.alerts),snap.t,7,200),akeys,snap.t);ls('fd_alerts',alerts);
   if(r.alerts.length)notifyLocal(r.alerts.filter(function(a){return HIGH[a.kind]&&!FDR.isMuted(a.key,aprefs,Date.now())}));
   renderRadar();renderBadge();
 }
+var since=ls('fd_since')||{},focusAlgo=null;
 var aprefs=ls('fd_aprefs')||{snooze:{},dismissed:{}},HIGH={saida:1,risco:1,entrada:1},alertsOpen=false;
 function notifyLocal(list){
   try{
@@ -1060,9 +1062,15 @@ function alertHTML(a,opts){opts=opts||{};var k=KIND[a.kind]||['Info','',''];
   var resolved=opts.history&&state.active&&!state.active.some(function(x){return x.key===a.key})&&/^(fe|fs|me|sent):/.test(a.key||'');
   var body=a.items?'<details><summary>'+esc(a.title)+'</summary><div class="stack" style="gap:6px;margin-top:6px">'+a.items.map(function(x){return alertHTML(x,{nested:true})}).join('')+'</div></details>':
     '<b>'+esc(a.title)+'</b><span class="note">'+esc(a.text)+'</span>';
-  var acts=opts.nested||opts.history?(a.go&&!opts.history?'<div><button class="sm" data-go="'+a.go+'">Abrir</button></div>':''):
-    '<div class="row">'+(a.go?'<button class="sm" data-go="'+a.go+'">Abrir</button>':'')+(a.items?'':'<button class="sm" data-dismiss="'+esc(a.key)+'">Dispensar</button><button class="sm" data-snooze="'+esc(a.key)+'">Silenciar 24 h</button>')+'</div>';
-  return '<div class="alert '+a.kind+'"'+(resolved?' style="opacity:.6"':'')+'><div class="row between"><span class="chip '+k[1]+'">'+k[2]+' '+k[0]+'</span>'+(resolved?'<span class="note">resolvido</span>':when)+'</div>'+body+acts+'</div>'}
+  var open=a.go?'<button class="sm" data-go="'+a.go+'"'+(a.focus?' data-focus="'+esc(a.focus)+'"':'')+'>Abrir</button>':'';
+  var acts=opts.history?'<div class="row">'+(resolved?'':open)+'<button class="sm" data-rmalert="'+esc(a.id)+'">Remover</button></div>':
+    opts.nested?(open?'<div>'+open+'</div>':''):
+    '<div class="row">'+open+(a.items?'':'<button class="sm" data-dismiss="'+esc(a.key)+'">Dispensar</button><button class="sm" data-snooze="'+esc(a.key)+'">Silenciar 24 h</button>')+'</div>';
+  var life='';
+  if(!opts.history&&!a.items&&since[a.key])life='<span class="note">Vale há '+ago(since[a.key])+' (desde '+hhmm(since[a.key])+'). Ainda vale agora.</span>';
+  if(opts.history&&a.t){var end=a.endedAt||(resolved?Date.now():null);
+    life='<span class="note">Começou '+hhmm(a.t)+(end?' · acabou '+hhmm(end)+' (durou '+FDI.dur(end-a.t)+') · <b class="bad">não vale mais</b>':(/^(fe|me|fs|sent):/.test(a.key||'')?' · <b class="good">ainda vale</b>':''))+'.</span>'}
+  return '<div class="alert '+a.kind+'"'+(resolved?' style="opacity:.65"':'')+'><div class="row between"><span class="chip '+k[1]+'">'+k[2]+' '+k[0]+'</span>'+when+'</div>'+body+life+acts+'</div>'}
 function dayLabel(t){var d=new Date(t),n=new Date(),y=new Date(n.getTime()-864e5);
   return d.toDateString()===n.toDateString()?'Hoje':d.toDateString()===y.toDateString()?'Ontem':d.toLocaleDateString('pt-BR',{weekday:'long',day:'2-digit',month:'2-digit'})}
 function renderRadar(){
@@ -1079,7 +1087,7 @@ function renderRadar(){
       '<p class="note" style="margin:0">Aqui aparecem só condições que valem neste momento, por prioridade: saída, risco, atenção, entrada. Elas somem sozinhas quando deixam de valer.</p>')+
     (act.length>5?'<div style="margin-top:6px"><button class="sm" id="r_more">'+(alertsOpen?'Mostrar menos':'Ver todos ('+act.length+')')+'</button></div>':'')+
     (muted?'<p class="note" style="margin:6px 0 0">'+plural(muted,'item silenciado ou dispensado','itens silenciados ou dispensados')+'. <button class="sm" id="r_unmute">Mostrar de novo</button></p>':'')+
-    '<details style="margin-top:10px"><summary>Histórico (7 dias): '+histList.length+' eventos</summary>'+
+    '<details id="r_hist" style="margin-top:10px"><summary>Histórico (7 dias): '+histList.length+' eventos</summary>'+(histList.length?'<div style="margin:6px 0"><button class="sm" id="r_clear">Limpar histórico</button></div>':'')+
       (histList.length?Object.keys(byDay).map(function(d){return '<div class="eyebrow" style="margin:8px 0 4px">'+esc(d)+'</div><div class="stack" style="gap:6px">'+byDay[d].slice(0,20).map(function(a){return alertHTML(a,{history:true})}).join('')+'</div>'}).join(''):'<p class="note">Sem eventos.</p>')+'</details>'+
     (srv.length?'<details style="margin-top:8px"><summary>Do servidor (Telegram): '+srv.length+'</summary><div class="stack" style="gap:8px">'+srv.slice(0,8).map(alertHTML).join('')+'</div></details>':
       '<p class="note" style="margin:8px 0 0">'+(settings.apiUrl?'Servidor sem alertas recentes.':'Sem backend, os alertas só são calculados com o painel aberto. Com o backend ligado e o Telegram configurado, chegam 24 h por dia.')+'</p>');
@@ -1125,12 +1133,40 @@ document.addEventListener('click',function(e){
   var tr=e.target.closest('#r_fmap tr[data-coin]');if(tr){radarSel=tr.dataset.coin;renderRadar();return}
   var pl=e.target.closest('[data-pl]');if(pl){plCat=pl.dataset.pl;renderRadar();return}
   if(e.target.id==='r_notify'){try{Notification.requestPermission().then(function(){renderRadar()})}catch(err){}}
+  var rm=e.target.closest('[data-rmalert]');if(rm){alerts=alerts.filter(function(a){return a.id!==rm.dataset.rmalert});ls('fd_alerts',alerts);renderRadar();renderBadge();return}
+  if(e.target.id==='r_clear'&&confirm('Limpar o histórico de alertas deste aparelho?')){alerts=[];ls('fd_alerts',alerts);renderRadar();renderBadge();return}
   if(e.target.id==='r_read'){ls('fd_aseen',Date.now());renderBadge();renderRadar()}
   if(e.target.id==='r_more'){alertsOpen=!alertsOpen;renderRadar()}
   if(e.target.id==='r_unmute'){aprefs={snooze:{},dismissed:{}};ls('fd_aprefs',aprefs);renderRadar();renderBadge()}
   var dm=e.target.closest('[data-dismiss]');if(dm){aprefs.dismissed=aprefs.dismissed||{};aprefs.dismissed[dm.dataset.dismiss]=Date.now();ls('fd_aprefs',aprefs);renderRadar();renderBadge()}
   var sz=e.target.closest('[data-snooze]');if(sz){aprefs.snooze=aprefs.snooze||{};aprefs.snooze[sz.dataset.snooze]=Date.now()+864e5;ls('fd_aprefs',aprefs);renderRadar();renderBadge()}
 });
+
+/* ---------- mineração: outros algoritmos ---------- */
+function renderAlgos(){
+  if(!$('m_algos'))return;
+  var mm=market.map||[],L=live(),budget=num('iv_sess')||300,now=Date.now();
+  if(!mm.length){$('m_algos').innerHTML='<div class="card note">'+(market.err?'Mapa indisponível ('+esc(market.err)+').':'Carregando os algoritmos…')+'</div>';return}
+  $('m_algos').innerHTML=mm.map(function(m){
+    var foc=focusAlgo===m.label,key='me:'+m.label,act=since[key];
+    var pools=(FDR.POOLS[m.algo]||[]).map(function(p){return '<a href="'+esc(p[1])+'" target="_blank" rel="noopener">'+esc(p[0])+'</a>'}).join(' · ');
+    var exp=m.edgePct!==null?budget*m.edgePct/100:null;
+    return '<div class="card sig '+({go:'favoravel',maybe:'neutro',no:'desfavoravel'}[m.level]||'')+'" id="algo-'+esc(m.label)+'"'+(foc?' style="outline:2px solid var(--accent)"':'')+'>'+
+      '<div class="row between"><b>'+esc(m.label)+'</b>'+chip(m.level)+'</div>'+
+      '<div class="why">Melhor opção: <b>'+esc(m.coins.join(' + '))+'</b>'+(m.merged?' (mineradas juntas)':'')+'</div>'+
+      (m.edgePct!==null?'<div>Rende <b>'+usd(m.revUsdPerUnit)+'</b> por '+m.unit+'/s ao dia · aluguel '+usd(m.rentUsdPerUnit)+' → <b class="'+(m.edgePct>=0?'good':'bad')+'">'+pct(m.edgePct,1)+'</b></div>':'<div class="note">Sem preço de aluguel desse algoritmo agora.</div>')+
+      (act?'<p class="note good" style="margin:4px 0 0">Compensa há '+ago(act)+' (desde '+hhmm(act)+').</p>':'')+
+      (m.thin?'<p class="note warn" style="margin:4px 0 0">Livro raso: só '+m.paying+' ordens recebendo hash; comprar volume real tende a sair mais caro.</p>':'')+
+      '<details'+(foc||m.level==='go'?' open':'')+' style="margin-top:8px"><summary>Como minerar (manual)</summary><ol class="rules note" style="margin-top:6px">'+
+        '<li>Na NiceHash, <a href="https://www.nicehash.com/my/marketplace" target="_blank" rel="noopener">mercado de hashpower</a> → algoritmo <b>'+esc(m.algo)+'</b>.</li>'+
+        '<li>Cadastre o pool da moeda (aceite de NiceHash conferido no site do pool): '+(pools||'pool da moeda com porta para NiceHash')+'. Usuário = sua carteira '+esc(m.coins[0])+'.</li>'+
+        (m.capBtcPerUnit?'<li>Preço máximo (teto, com sua margem de '+nf(minEdge(),0)+'%): <b>'+m.capBtcPerUnit.toFixed(6)+' BTC por '+m.unit+'/s por dia</b>'+(m.fillBtcPerUnit?' (hoje o menor preço recebendo hash é '+m.fillBtcPerUnit.toFixed(6)+')':'')+'. Acima disso não compensa.</li>':'')+
+        (exp!==null?'<li>Com '+usd(budget,0)+' (orçamento por sessão do Planejar), o resultado esperado em pool é <b class="'+(exp>=0?'good':'bad')+'">'+usd(exp)+'</b> (projeção, com pouca variação). Em solo, seria tudo ou nada.</li>':'')+
+        '<li>Acompanhe pelo Radar: o alerta de saída avisa quando deixar de compensar. Cancele a ordem nessa hora.</li>'+
+      '</ol><p class="note" style="margin:6px 0 0">O robô automático ainda não opera este algoritmo: a ordem é sua, na NiceHash.</p></details>'+
+      (m.small&&m.small.length?'<p class="note" style="margin:6px 0 0">Redes pequenas com mais rendimento por hash, mas pouca liquidez: '+esc(m.small.join(', '))+'.</p>':'')+'</div>';
+  }).join('')+'<p class="note">Fonte: WhatToMine e NiceHash ('+esc(market.src||'')+(market.dataAt?', '+ago(market.dataAt)+' atrás':'')+').</p>';
+}
 
 /* ---------- navegação ---------- */
 var TABS=['home','radar','fund','mine','diary','set'];
@@ -1143,9 +1179,10 @@ function tab(t,sub){
   if((t==='mine'||t==='home')&&(!mine.at||Date.now()-mine.at>300000))loadMining();
   window.scrollTo(0,0);
 }
-var SUBS={fund:['fundSeg',['scan','journey','calc']],mine:['mineSeg',['now','journey','plan','ops','net']],diary:['diarySeg',['pos','mine']]};
+var SUBS={fund:['fundSeg',['scan','journey','calc']],mine:['mineSeg',['now','journey','plan','algos','ops','net']],diary:['diarySeg',['pos','mine']]};
 function subTab(t,sub){
   var cfg=SUBS[t];
+  if(t==='mine'&&sub==='algos'){loadMarketMap();renderAlgos()}
   if(t==='mine'&&sub==='ops')loadOps();
   cfg[1].forEach(function(x){$(t+'-'+x).hidden=x!==sub});
   document.querySelectorAll('#'+cfg[0]+' button').forEach(function(b){b.setAttribute('aria-pressed',b.dataset.sub===sub?'true':'false')});
@@ -1154,6 +1191,7 @@ Object.keys(SUBS).forEach(function(t){document.querySelectorAll('#'+SUBS[t][0]+'
 document.querySelectorAll('nav button').forEach(function(b){b.addEventListener('click',function(){tab(b.dataset.tab)})});
 document.addEventListener('click',function(e){var b=e.target.closest('[data-go]');if(!b)return;var g=b.dataset.go.split(':');
   if(b.dataset.setmode){setMode(b.dataset.setmode);renderScan()}
+  if(b.dataset.focus){focusAlgo=b.dataset.focus;setTimeout(function(){var el=document.getElementById('algo-'+focusAlgo);if(el){el.scrollIntoView({block:'start'})}},60)}
   tab(g[0],g[1]||(g[0]==='fund'?'scan':g[0]==='mine'?'now':undefined))});
 function setMode(m){
   state.mode=m;settings.mode=m;ls('fd_set',settings);
