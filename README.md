@@ -31,6 +31,15 @@ Pesquisa global (6 idiomas), lacunas e roteiro até a execução automática: [`
 
   Também mostra a % do tempo em que compensou, o melhor horário, a chance de bloco na sessão sugerida, a chance real do próximo bloco da rede (sem memória), a divisão da rede entre pools e o último bloco.
 - **Plano combinado:** quanto colocar em funding, em mineração e em caixa, com projeção de 30 dias ajustada pela taxa de acerto do histórico.
+- **Curto prazo:** em cada oportunidade, o spread mínimo para empatar em 1, 2 ou 3 pagamentos (taker e maker, sem transferência) e quantos pagamentos o spread atual exige. Avisa quando o spread de agora é pico.
+- **Ficar, sair ou trocar** (por posição aberta): a entrada já foi paga, então fique enquanto o funding for positivo e saia quando ficar negativo (conta há quantos pagamentos). Troque só quando outra oportunidade pagar mais do que o custo da troca.
+- **Funding pelo histórico público:** soma os pagamentos reais desde a entrada, com o tamanho registrado, e um botão para usar o valor no Diário.
+
+**Alertas** (padrão de ferramentas de monitoramento):
+- **Agora:** condições que valem neste momento, por prioridade (saída, risco, atenção, entrada), no máximo 5 e agrupadas; somem sozinhas quando deixam de valer.
+- **Histórico:** 7 dias, agrupado por dia, com "resolvido".
+- **Controles:** dispensar, silenciar por 24 h e marcar como lidos. O selo conta só saída, risco e entrada não vistos.
+- **Telegram:** saída e risco chegam na hora; entradas e oportunidades, num resumo a cada 30 min.
 
 ## O que é real e o que é registro
 
@@ -157,6 +166,8 @@ O que o backend faz (`worker/`):
 - Começa no **ambiente de teste da NiceHash** (`NH_ENV = "test"`, api-test.nicehash.com). Produção só trocando para `"prod"`.
 
 ### Instalar (dá para fazer tudo pelo celular)
+
+Guia detalhado, com problemas comuns: [`docs/configurar-backend.md`](docs/configurar-backend.md). O mesmo passo a passo está no painel, em Ajustes → Configurar o backend (com gerador do token do painel).
 
 1. **Cloudflare** (grátis): crie a conta em dash.cloudflare.com e abra *Workers & Pages* uma vez para escolher o subdomínio `*.workers.dev`.
 2. **Token do Cloudflare**: *My Profile → API Tokens → Create Token → modelo "Edit Cloudflare Workers"*. Copie o token

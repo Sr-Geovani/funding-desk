@@ -155,3 +155,29 @@ test('livro raso rebaixa "compensa" para "no limite"', () => {
   const thin = R.miningMap(w, { SHA256: book(2) }, { btcUsd: 77000 })[0];
   assert.equal(thin.level, 'maybe'); assert.equal(thin.thin, true);
 });
+
+test('alertas "agora": condições ativas por prioridade, agrupadas, com silêncio e dispensa', () => {
+  const snap = {
+    best: [{ key: 'ENA|A|B', coin: 'ENA', title: 'short A, long B', level: 'go', netTxt: 'US$9', stab: 'estavel' }, { key: 'WLD|A|B', coin: 'WLD', title: 'x', level: 'go', netTxt: 'US$5' }],
+    sent: { key: 'euforia', label: 'Comprado demais', text: 't' },
+    edges: { BSV: 12, BCH: -1, X11: 18 }, thin: { X11: true }
+  };
+  const positions = [{ id: 'p1', coin: 'ENA', s: 'A', l: 'B', level: 'bad', text: 'sair: funding negativo' }, { id: 'p2', coin: 'SOL', s: 'A', l: 'B', level: 'warn', text: 'abaixo' }];
+  const a = R.activeConditions({ snap, positions, minEdgePct: 3 });
+  assert.deepEqual(a.map((x) => x.kind), ['saida', 'risco', 'atencao', 'entrada', 'entrada', 'entrada']);
+  assert.ok(!a.some((x) => x.key === 'me:X11'), 'livro raso não vira entrada');
+  assert.ok(!a.some((x) => x.key === 'me:BCH'));
+  const g = R.groupConditions(a);
+  const gf = g.find((x) => x.key === 'grupo:funding');
+  assert.equal(gf.items.length, 2); assert.match(gf.title, /2 entradas de funding: ENA, WLD/);
+  assert.equal(g.find((x) => x.key === 'me:BSV').kind, 'entrada', 'grupo de um item vira o próprio item');
+  // silenciar e dispensar
+  const prefs = { snooze: { 'fe:ENA|A|B': NOW + H }, dismissed: { 'sent:euforia': NOW } };
+  assert.ok(R.isMuted('fe:ENA|A|B', prefs, NOW)); assert.ok(!R.isMuted('fe:ENA|A|B', prefs, NOW + 2 * H));
+  assert.ok(R.isMuted('sent:euforia', prefs, NOW));
+  const cleaned = R.cleanDismissed(prefs, ['fe:ENA|A|B']);
+  assert.deepEqual(cleaned.dismissed, {}, 'dispensa some quando a condição deixa de valer');
+  // histórico com retenção de 7 dias
+  const hist = [{ t: NOW - 8 * 864e5 }, { t: NOW - 6 * 864e5 }, { t: NOW }];
+  assert.equal(R.pruneHistory(hist, NOW).length, 2);
+});

@@ -42,7 +42,8 @@ jobs:
       - name: Deploy
         if: steps.creds.outputs.ok == '1'
         working-directory: worker
-        run: npx --yes wrangler@4.149.0 deploy
+        shell: bash
+        run: npx --yes wrangler@4.149.0 deploy 2>&1 | tee deploy.log
       # Opcional: se estes segredos existirem no GitHub, são copiados para o Worker.
       # Recomendado: cadastrar as chaves da NiceHash direto no painel do Cloudflare (ficam só lá).
       - name: Segredos do Worker (opcionais)
@@ -60,3 +61,30 @@ jobs:
             v="${!k}"
             if [ -n "$v" ]; then printf '%s' "$v" | npx --yes wrangler@4.149.0 secret put "$k" >/dev/null && echo "segredo $k atualizado"; fi
           done
+      # Resumo da execução: endereço do backend, saúde e o que falta (aparece na página da execução).
+      - name: Resumo
+        if: always()
+        working-directory: worker
+        env:
+          PANEL_TOKEN: ${{ secrets.PANEL_TOKEN }}
+          NH_API_KEY: ${{ secrets.NH_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: |
+          S="$GITHUB_STEP_SUMMARY"
+          if [ "${{ steps.creds.outputs.ok }}" != "1" ]; then
+            echo "### Backend não publicado" >> "$S"
+            echo "Faltam os segredos CLOUDFLARE_API_TOKEN e CLOUDFLARE_ACCOUNT_ID (Ajustes → Configurar o backend, passos 1 a 4)." >> "$S"
+            exit 0
+          fi
+          URL=$(grep -o 'https://[a-zA-Z0-9.-]*\.workers\.dev' deploy.log | head -1 || true)
+          echo "### Backend publicado" >> "$S"
+          if [ -n "$URL" ]; then
+            echo "Endereço para colar no painel (Ajustes → Backend): **$URL**" >> "$S"
+            H=$(curl -s -m 20 "$URL/health" || true); echo "" >> "$S"; echo "Saúde: \`$H\`" >> "$S"
+          else
+            echo "Não achei o endereço no log. Confira se a conta tem um subdomínio workers.dev (Workers & Pages)." >> "$S"
+          fi
+          echo "" >> "$S"
+          [ -n "$PANEL_TOKEN" ] && echo "- PANEL_TOKEN: ok" >> "$S" || echo "- PANEL_TOKEN: **faltando** (passo 3 e 4)" >> "$S"
+          [ -n "$NH_API_KEY" ] && echo "- Chaves NiceHash: ok" >> "$S" || echo "- Chaves NiceHash: faltando (passo 7, ou cadastre direto no Cloudflare)" >> "$S"
+          [ -n "$TELEGRAM_BOT_TOKEN" ] && echo "- Telegram: ok" >> "$S" || echo "- Telegram: faltando (passo 8)" >> "$S"

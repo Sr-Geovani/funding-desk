@@ -359,12 +359,15 @@ function currentSpread(rows, pos) {
   return r[pos.s].apr - r[pos.l].apr;
 }
 // level: 'bad' (sair), 'warn' (atenção), 'ok', 'none' (sem dado)
+// Regra de permanência: a entrada já foi paga, então ficar só depende de o funding continuar positivo.
+// Negativo = você está pagando para manter a posição: sair. Abaixo do break-even de entrada = continuar só se
+// não houver coisa melhor (o painel compara com a melhor oportunidade).
 function positionAlert(cur, pos) {
   if (cur === null || cur === undefined) return { level: 'none', text: 'sem dado ao vivo' };
-  if (cur <= 0) return { level: 'bad', text: 'sair: spread inverteu' };
-  if (isFinite(pos.beApr) && pos.beApr > 0 && cur < pos.beApr) return { level: 'bad', text: 'abaixo do break-even' };
+  if (cur <= 0) return { level: 'bad', text: 'sair: funding negativo, você está pagando' };
+  if (isFinite(pos.beApr) && pos.beApr > 0 && cur < pos.beApr) return { level: 'warn', text: 'abaixo do break-even de entrada' };
   if (pos.apr > 0 && cur < pos.apr * 0.4) return { level: 'warn', text: 'spread caiu >60%' };
-  return { level: 'ok', text: 'ok' };
+  return { level: 'ok', text: 'continue' };
 }
 
 /* ---------- diário: CSV / JSON ---------- */

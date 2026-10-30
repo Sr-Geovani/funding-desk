@@ -171,9 +171,10 @@ test('opportunities spot+perp: só funding positivo, taxa spot na perna long', (
   close(o[0].m.costPct, 0.05 * 2 + 0.1 * 2 + 0.05);
 });
 
-test('positionAlert: inverteu, abaixo do break-even, queda, ok', () => {
+test('positionAlert: negativo sai; abaixo do break-even de entrada só avisa (entrada já paga)', () => {
   assert.equal(FD.positionAlert(-1, { apr: 30, beApr: 20 }).level, 'bad');
-  assert.equal(FD.positionAlert(15, { apr: 30, beApr: 20 }).level, 'bad');
+  assert.equal(FD.positionAlert(0, { apr: 30, beApr: 20 }).level, 'bad');
+  assert.equal(FD.positionAlert(15, { apr: 30, beApr: 20 }).level, 'warn');
   assert.equal(FD.positionAlert(25, { apr: 80, beApr: 20 }).level, 'warn');
   assert.equal(FD.positionAlert(40, { apr: 50, beApr: 20 }).level, 'ok');
   assert.equal(FD.positionAlert(null, { apr: 50 }).level, 'none');

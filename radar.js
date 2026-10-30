@@ -200,6 +200,63 @@ function evaluateAlerts(c) {
   return { alerts: out, mem: mem };
 }
 
+/* ---------- alertas: "agora" e histórico ----------
+   Agora = condições verdadeiras neste momento (recalculadas a cada leitura; somem sozinhas quando deixam de valer).
+   Histórico = eventos disparados (entrou, saiu, mudou), guardados por 7 dias. */
+var PRIO = { saida: 0, risco: 1, atencao: 2, entrada: 3, oportunidade: 4 };
+function activeConditions(c) {
+  var out = [], s = c.snap || {}, m = c.minEdgePct || 0;
+  (c.positions || []).forEach(function (x) {
+    if (x.level === 'bad') out.push({ key: 'fs:' + x.id, kind: 'saida', area: 'funding', go: 'diary', title: 'Saída: ' + x.coin + ' (' + x.s + ' / ' + x.l + ')', text: x.text + '. Feche as duas pernas juntas.' });
+    else if (x.level === 'warn') out.push({ key: 'fw:' + x.id, kind: 'atencao', area: 'funding', go: 'diary', title: 'Atenção: ' + x.coin + ' (' + x.s + ' / ' + x.l + ')', text: x.text + '. Veja no Diário se vale continuar ou trocar.' });
+  });
+  if (s.sent && (s.sent.key === 'euforia' || s.sent.key === 'vendido'))
+    out.push({ key: 'sent:' + s.sent.key, kind: 'risco', area: 'mercado', go: 'radar', title: 'Mercado: ' + s.sent.label.toLowerCase(), text: s.sent.text });
+  (s.best || []).forEach(function (b) {
+    if (b.level === 'go') out.push({ key: 'fe:' + b.key, kind: 'entrada', area: 'funding', go: 'fund', coin: b.coin,
+      title: 'Entrada: ' + b.coin + ' (' + b.title + ')', text: (b.stab === 'estavel' ? 'Estável no histórico. ' : '') + 'Projeção: ' + b.netTxt + '.' });
+  });
+  Object.keys(s.edges || {}).forEach(function (f) {
+    var v = s.edges[f];
+    if (isFinite(v) && v >= m && !(s.thin && s.thin[f])) out.push({ key: 'me:' + f, kind: 'entrada', area: 'mineracao', go: 'mine', coin: f,
+      title: 'Mineração: ' + f + ' compensa (' + (v >= 0 ? '+' : '') + v.toFixed(1).replace('.', ',') + '%)', text: 'O aluguel está abaixo do que o hash rende, com a sua margem.' });
+  });
+  return out.sort(function (a, b) { return PRIO[a.kind] - PRIO[b.kind] || (a.title < b.title ? -1 : 1); });
+}
+// Junta várias entradas da mesma área num item só ("4 entradas de funding: ENA, WLD...").
+function groupConditions(list) {
+  var out = [], groups = {};
+  list.forEach(function (a) {
+    if (a.kind !== 'entrada') { out.push(a); return; }
+    var g = groups[a.area];
+    if (!g) { g = groups[a.area] = { key: 'grupo:' + a.area, kind: 'entrada', area: a.area, go: a.go, items: [] }; out.push(g); }
+    g.items.push(a);
+  });
+  return out.map(function (a) {
+    if (!a.items) return a;
+    if (a.items.length === 1) return a.items[0];
+    var names = a.items.map(function (x) { return x.coin; });
+    return Object.assign(a, { title: a.items.length + ' entradas de ' + (a.area === 'funding' ? 'funding' : 'mineração') + ': ' + names.slice(0, 4).join(', ') + (names.length > 4 ? '…' : ''),
+      text: 'Toque para ver cada uma.' });
+  });
+}
+// Mantém o histórico de eventos em até `days` dias e `max` itens.
+function pruneHistory(list, now, days, max) {
+  var lim = now - (days || 7) * 864e5;
+  return (list || []).filter(function (a) { return a.t >= lim; }).slice(-(max || 200));
+}
+// Silenciados (até uma data) e dispensados (até a condição deixar de valer).
+function isMuted(key, prefs, now) {
+  prefs = prefs || {};
+  return !!((prefs.snooze && prefs.snooze[key] > now) || (prefs.dismissed && prefs.dismissed[key]));
+}
+// Remove dispensas de condições que já não valem (se voltarem, avisam de novo).
+function cleanDismissed(prefs, activeKeys) {
+  var d = {}, src = (prefs && prefs.dismissed) || {};
+  Object.keys(src).forEach(function (k) { if (activeKeys.indexOf(k) >= 0) d[k] = src[k]; });
+  return Object.assign({}, prefs, { dismissed: d });
+}
+
 /* ---------- mapa de players (onde operar) ----------
    Conferido em 30/10/2026: o site respondeu, exceto quando indicado. Taxas citadas vêm das fontes indicadas no README;
    confirme sempre na sua conta. api: 'leitura' = o painel já lê dados públicos; 'ordens' = tem API para executar. */
@@ -236,7 +293,8 @@ var FDR = {
   MAJORS: MAJORS, ALGOS: ALGOS, fundingMatrix: fundingMatrix, sentiment: sentiment,
   coinRevenueBtc: coinRevenueBtc, wtmCoins: wtmCoins, btcUsdFrom: btcUsdFrom, bookPerHash: bookPerHash, miningMap: miningMap,
   pushHistory: pushHistory, hourProfile: hourProfile, priceMove: priceMove, evaluateAlerts: evaluateAlerts, COOLDOWN: COOLDOWN,
-  PLAYERS: PLAYERS, PLAYER_CATS: PLAYER_CATS
+  PLAYERS: PLAYERS, PLAYER_CATS: PLAYER_CATS,
+  PRIO: PRIO, activeConditions: activeConditions, groupConditions: groupConditions, pruneHistory: pruneHistory, isMuted: isMuted, cleanDismissed: cleanDismissed
 };
 if (typeof module !== 'undefined' && module.exports) module.exports = FDR;
 else root.FDR = FDR;

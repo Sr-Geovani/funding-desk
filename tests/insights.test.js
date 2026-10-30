@@ -116,3 +116,52 @@ test('plano combinado: divide o capital conforme o que compensa', () => {
   a = I.allocation(2000, { level: 'no' }, { level: 'no', ratio: 0.9, favPct: 20 });
   assert.ok(a.lines.some((l) => l.name === 'Mineração' && l.share === 0.2));
 });
+
+test('curto prazo: spread mínimo por pagamento, em taker e maker', () => {
+  const fees = FD.DEFAULT_FEES;
+  const o = opp({ spread: 120, s: 'Binance', l: 'Bybit', rs: { hours: 8 }, rl: { hours: 8 } });
+  const st = I.shortTerm(o, { fees, slipPct: 0.03 });
+  close(st.costTaker, 0.05 * 2 + 0.055 * 2 + 0.03);           // 0,24%
+  close(st.costMaker, 0.02 * 4 + 0.03);                         // 0,11%
+  close(st.rows[0].minTaker, 0.24 * 8760 / 8, 1e-9);            // ~263% a.a. para 1 pagamento de 8 h
+  close(st.rows[2].minMaker, 0.11 * 8760 / 24, 1e-9);           // ~40% a.a. para 3 pagamentos
+  // 120% a.a. paga ~0,1096% por pagamento de 8 h: 3 em taker, 2 em maker
+  assert.equal(st.needTaker, 3); assert.equal(st.needMaker, 2);
+  assert.match(st.text, /empatar em 1 pagamento \(8 h\) exige spread de 263% a\.a\. em taker ou 120% em maker/);
+  const peak = I.shortTerm(Object.assign({}, o, { capped: true }), { fees, slipPct: 0.03 });
+  assert.ok(peak.peak); assert.match(peak.text, /pico/);
+  // spot + perp usa a taxa spot na perna comprada
+  const sp = I.shortTerm(opp({ spread: 50, s: 'Binance', l: 'Spot', rs: { hours: 8 }, rl: null }), { fees, slipPct: 0.05 });
+  close(sp.costTaker, 0.05 * 2 + 0.1 * 2 + 0.05);
+});
+
+test('permanência: negativo sai (contando pagamentos), abaixo do break-even continua se positivo', () => {
+  const pos = { notional: 1000, beApr: 30, t: NOW - 2 * 864e5 };
+  const out = I.stayAdvice(Object.assign({ negSince: NOW - 17 * H }, pos), -10, { now: NOW, hours: 8 });
+  assert.equal(out.action, 'sair'); assert.match(out.text, /cerca de 3 pagamentos/);
+  assert.equal(I.stayAdvice(pos, 15, { now: NOW, hours: 8 }).action, 'avaliar');
+  const ok = I.stayAdvice(pos, 60, { now: NOW, hours: 8 });
+  assert.equal(ok.action, 'continuar'); assert.match(ok.text, /Não precisa fechar no fim do ciclo/);
+  assert.equal(I.stayAdvice(pos, null, { now: NOW }).action, 'sem-dado');
+});
+
+test('troca: compara ficar com trocar, descontando o custo da nova', () => {
+  const pos = { notional: 1000 };
+  const b = opp({ coin: 'WLD', spread: 120 });
+  const r = I.switchAdvice(pos, 20, b, { days: 3, aprCap: 150 });
+  close(r.stay, 1000 * 20 / 365 * 3 / 100);
+  close(r.go, 1000 * 120 / 365 * 3 / 100 - 1000 * b.m.costPct / 100);
+  assert.equal(r.worth, true); assert.match(r.text, /Vale trocar para WLD/);
+  assert.equal(I.switchAdvice(pos, 100, opp({ spread: 105 }), { days: 3 }).worth, false);
+  assert.equal(I.switchAdvice(pos, 20, null, {}), null);
+});
+
+test('funding recebido pelo histórico público desde a entrada', () => {
+  const pos = { notional: 1000, t: NOW - 20 * H };
+  const a = [{ t: NOW - 24 * H, rate: 0.05 }, { t: NOW - 16 * H, rate: 0.05 }, { t: NOW - 8 * H, rate: 0.04 }, { t: NOW, rate: 0.03 }];
+  const b = [{ t: NOW - 16 * H, rate: 0.01 }, { t: NOW - 8 * H, rate: 0.01 }, { t: NOW, rate: 0.01 }];
+  const r = I.fundingFromHistory(pos, a, b, NOW);
+  close(r.usd, 1000 * (0.05 + 0.04 + 0.03 - 0.03) / 100);  // pagamento anterior à entrada fica fora
+  assert.equal(r.payments, 6);
+  close(I.fundingFromHistory(pos, a, null, NOW).usd, 1000 * 0.12 / 100, 1e-12);
+});

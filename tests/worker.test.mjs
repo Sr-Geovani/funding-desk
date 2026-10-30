@@ -240,3 +240,21 @@ test('integração: proxy da WhatToMine só nas rotas permitidas', async () => {
     assert.equal(bad.status, 404);
   } finally { t.server.close(); }
 });
+
+test('Telegram: saída e risco na hora; entradas em resumo de 30 min', async () => {
+  const t = await setup();
+  try {
+    const sent = [];
+    const env = Object.assign({}, t.env, { TELEGRAM_BOT_TOKEN: 'tg', TELEGRAM_CHAT_ID: '1' });
+    const fetchFn = (u, o) => { if (String(u).includes('api.telegram.org')) { sent.push(JSON.parse(o.body).text); return Promise.resolve(new Response('{}')); } return fetch(u, o); };
+    const T0 = Date.now();
+    await tick(env, { fetchFn, now: T0 });                 // primeira leitura: sem entrada
+    await tick(env, { fetchFn, now: T0 + 5 * 60e3 });       // entrada persistente → vai para o resumo (primeiro resumo sai já)
+    assert.equal(sent.filter((x) => /resumo: 1 alerta novo: Entrada: ENA/.test(x)).length, 1, JSON.stringify(sent));
+    const n = sent.length;
+    // novas entradas dentro de 30 min ficam na fila
+    await t.call('PUT', '/api/config', { alertHold: 4 });  // muda a chave do alerta? não: mesma chave, intervalo de 6 h segura
+    await tick(env, { fetchFn, now: T0 + 10 * 60e3 });
+    assert.equal(sent.length, n, 'nada novo dentro do intervalo');
+  } finally { t.server.close(); }
+});

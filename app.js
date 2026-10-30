@@ -370,6 +370,7 @@ function renderScan(){
     '<p class="note" style="margin:0"><b>O que fazer:</b> '+esc(v.action)+'</p>'+
     (v.level!=='no'?'<div class="box" style="margin-top:0"><b>Plano do ciclo</b>'+esc(FDI.planText(plan,o,Date.now()))+
       (bt!==undefined?'<div style="margin-top:4px">'+esc(FDI.backtestText(bt,p.hold))+'</div>':'')+
+      '<div style="margin-top:4px">'+esc(FDI.shortTerm(o,{fees:FEES,slipPct:num('slip'),stab:st}).text)+'</div>'+
       (tgt?'<div style="margin-top:4px">Para buscar '+usd(num('f_target'),0)+' neste ciclo: capital de ~'+usd(tgt.capital,0)+' ('+usd(tgt.perLeg,0)+' por perna)'+
         (tgt.maxCapital?(tgt.feasible?'; cabe na liquidez (até ~'+usd(tgt.maxCapital,0)+').':'; acima do que a liquidez comporta (~'+usd(tgt.maxCapital,0)+'): use outra moeda ou divida.'):'.')+'</div>':'')+
       '</div>':'')+
@@ -728,6 +729,7 @@ function posAlerts(){
   return pos.filter(function(p){return !p.closed}).map(function(p){var ca=state.live?FD.currentSpread(state.rows,p):null;return {p:p,ca:ca,al:FD.positionAlert(ca,p)}});
 }
 function renderPositions(){
+  trackNeg();
   var open=pos.filter(function(p){return !p.closed}),closed=pos.filter(function(p){return p.closed});
   var real=closed.reduce(function(a,p){return a+p.pnl},0);
   var wins=closed.filter(function(p){return p.pnl>0}).length;
@@ -746,10 +748,11 @@ function renderPositions(){
     var chip=al?'<span class="chip '+(al.level==='none'?'':al.level)+'">'+al.text+'</span>':'';
     var age=((p.closed||Date.now())-p.t)/864e5;
     h+='<div class="card opp '+(p.closed?'':LV[al.level])+'"><div class="h"><span><span class="coin">'+esc(p.coin)+'</span></span>'+(p.closed?'<span class="big '+(p.pnl>=0?'good':'bad')+'">'+usd(p.pnl)+'</span>':chip)+'</div>'+
-    '<div class="legs">Short <b>'+esc(p.s)+'</b> · Long <b>'+esc(p.l)+'</b> · '+usd(p.notional)+' por perna · entrada '+new Date(p.t).toLocaleDateString('pt-BR')+' · '+age.toFixed(1)+(p.days?' de '+p.days:'')+' dias</div>'+
+    '<div class="legs">Short <b>'+esc(p.s)+'</b> · Long <b>'+esc(p.l)+'</b> · '+usd(p.notional)+' por perna · entrada '+new Date(p.t).toLocaleDateString('pt-BR')+' · '+nf(age,1)+(p.days?' de '+p.days:'')+' dias</div>'+
     '<div class="kv"><div><small>Spread entrada</small><span>'+pct(p.apr,1)+'</span></div>'+
     '<div><small>Spread agora</small><span class="'+(ca===null?'':al.level==='ok'?'good':al.level)+'">'+(ca===null?'—':pct(ca,1))+'</span></div>'+
     '<div><small>Break-even</small><span>'+(isFinite(p.beApr)&&p.beApr!==undefined?pct(p.beApr,1):'—')+'</span></div></div>';
+    if(!p.closed)h+=positionAdvice(p,ca);
     if(!p.closed){
       h+='<div class="row"><label style="flex:1;min-width:110px">Funding líquido recebido (US$)<input data-f="'+i+'" type="number" inputmode="decimal" value="'+(p.funding||0)+'"></label>'+
       '<label style="flex:1;min-width:110px">Taxas de saída (US$)<input data-x="'+i+'" type="number" inputmode="decimal" value="0"></label>'+
@@ -759,6 +762,41 @@ function renderPositions(){
     h+='<div class="row"><button class="sm" data-del="'+i+'">Excluir</button></div></div>';
   });
   $('p_list').innerHTML=h||'<div class="card note">Nenhuma posição registrada. Use o scanner e toque em Registrar posição, ou preencha acima.</div>';
+}
+
+// Ficar ou sair, vale trocar, e funding recebido pelo histórico público (por posição aberta).
+var posHist={};
+function legSym(coin,venue){var r=state.rows[FD.normBase(coin)]||state.rows[coin];return r&&r[venue]?r[venue]:null}
+function positionAdvice(p,ca){
+  var leg=legSym(p.coin,p.s),hours=leg?leg.hours:8,now=Date.now();
+  var st=FDI.stayAdvice(p,ca,{now:now,hours:hours});
+  var html='<div class="box" style="margin-top:0"><b>Ficar ou sair</b>'+esc(st.text)+'</div>';
+  if(ca!==null&&state.live){
+    var pp=scanParams(),c=verdictCtx(pp),myKey=FD.normBase(p.coin)+'|'+p.s+'|'+p.l;
+    var best=(state.ops||[]).filter(function(o){return oppKey(o)!==myKey&&FDC.fundingVerdict(o,Object.assign({stab:stabOf(o)},c)).level==='go'})[0];
+    var left=p.days?Math.max(1,p.days-(now-p.t)/864e5):pp.hold;
+    var sw=FDI.switchAdvice(p,ca,best,{days:Math.round(left*10)/10,aprCap:pp.aprCap<1e8?pp.aprCap:null});
+    if(sw)html+='<div class="box"><b>Vale trocar?</b>'+esc(sw.text)+'</div>';
+  }
+  var ph=posHist[p.id];
+  if(ph&&ph.usd!==null)html+='<div class="box"><b>Funding pelo histórico público</b>'+(ph.payments?usd(ph.usd)+' em '+ph.payments+' pagamentos desde a entrada (estimativa com o tamanho registrado; o extrato da exchange é o oficial). <button class="sm" data-usehist="'+esc(p.id)+'">Usar este valor</button>':'Ainda sem pagamentos desde a entrada. O valor aparece aqui depois do primeiro pagamento.')+'</div>';
+  else if(!ph)loadPosHist(p);
+  return html;
+}
+function loadPosHist(p){
+  var a=legSym(p.coin,p.s),b=p.l==='Spot'?null:legSym(p.coin,p.l);
+  if(!state.live||!a||(p.l!=='Spot'&&!b)){posHist[p.id]={usd:null};return}
+  posHist[p.id]={pending:true,usd:null};
+  Promise.all([loadHist(p.s,a.sym,a.hours),b?loadHist(p.l,b.sym,b.hours):Promise.resolve(null)]).then(function(r){
+    var f=FDI.fundingFromHistory(p,r[0],r[1],Date.now());posHist[p.id]={usd:f.usd,payments:f.payments};renderPositions();
+  },function(){posHist[p.id]={usd:null}});
+}
+// Marca desde quando o funding da posição está negativo (para "saia: negativo há N pagamentos").
+function trackNeg(){
+  var changed=false;
+  pos.forEach(function(p){if(p.closed)return;var ca=state.live?FD.currentSpread(state.rows,p):null;if(ca===null)return;
+    if(ca<=0&&!p.negSince){p.negSince=Date.now();changed=true}else if(ca>0&&p.negSince){delete p.negSince;changed=true}});
+  if(changed)savePos();
 }
 
 /* ---------- sessões de mineração ---------- */
@@ -834,7 +872,7 @@ function renderHome(){
   $('h_alerts').innerHTML='<div class="eyebrow">Suas operações</div><div class="lead">'+(al.length?plural(al.length,'posição pede atenção','posições pedem atenção'):'Nada pede atenção agora')+'</div>'+
     (lines.length?'<ul class="rules">'+lines.join('')+'</ul>':'')+
     '<p class="note">'+plural(openN,'posição de funding aberta','posições de funding abertas')+' · '+plural(ms.n,'sessão de mineração registrada','sessões de mineração registradas')+(ms.n?' (líquido '+usd(ms.net)+')':'')+(bs2?' · robô '+MODE_TXT[bs2.config.mode].toLowerCase():'')+'.</p>'+
-    (alerts.length?'<p class="note" style="margin:0 0 8px">Radar: '+plural(unseen(),'alerta novo','alertas novos')+'. Último: '+esc(alerts[alerts.length-1].title)+'.</p>':'')+
+    ((state.active||[]).length?'<p class="note" style="margin:0 0 8px">Radar agora: '+plural((state.active||[]).length,'item','itens')+' ('+esc(state.active[0].title)+(state.active.length>1?'…':'')+').</p>':'')+
     '<div class="row"><button class="sm" data-go="radar">Abrir radar</button><button class="sm" data-go="diary">Abrir diário</button>'+(settings.apiUrl?'<button class="sm" data-go="mine:ops">Operar</button>':'')+'</div>';
   renderJourneys(V);
   renderPlanCard(pp,sp,V,L);
@@ -980,7 +1018,8 @@ function radarSnapshot(){
   if(state.live){var p=scanParams(),c=verdictCtx(p);(state.ops||[]).slice(0,10).forEach(function(o){
     var st=stabOf(o),v=FDC.fundingVerdict(o,Object.assign({stab:st},c));
     if(v.level==='go')best.push({key:oppKey(o),coin:o.coin,title:(o.l==='Spot'?'spot + short na '+o.s:'short '+o.s+', long '+o.l),level:'go',stab:st?st.key:null,netTxt:'~'+usd(o.m.netUsd)+' em '+p.hold+' dias'})})}
-  return {t:Date.now(),sent:state.live?FDR.sentiment(state.rows,VENUES):null,edges:edges,prices:prices,best:best.slice(0,5)};
+  var thin={};if(V.thin)['BCH','BSV','BTC'].forEach(function(c){thin[c]=true});(market.map||[]).forEach(function(m){if(m.thin)thin[m.label]=true});
+  return {t:Date.now(),sent:state.live?FDR.sentiment(state.rows,VENUES):null,edges:edges,prices:prices,best:best.slice(0,5),thin:thin};
 }
 function updateRadar(){
   var snap=radarSnapshot(),prev=null;
@@ -989,9 +1028,13 @@ function updateRadar(){
   var r=FDR.evaluateAlerts({snap:snap,prev:prev||{},hist:hist,positions:positions,mem:amem,now:snap.t,minEdgePct:minEdge()});
   amem=r.mem;ls('fd_amem',amem);
   hist=FDR.pushHistory(hist,snap);ls('fd_hist',hist);
-  if(r.alerts.length){alerts=alerts.concat(r.alerts).slice(-60);ls('fd_alerts',alerts);notifyLocal(r.alerts)}
+  var active=FDR.activeConditions({snap:snap,positions:positions,minEdgePct:minEdge()});
+  state.active=active;aprefs=FDR.cleanDismissed(aprefs,active.map(function(a){return a.key}));ls('fd_aprefs',aprefs);
+  alerts=FDR.pruneHistory(alerts.concat(r.alerts),snap.t,7,200);ls('fd_alerts',alerts);
+  if(r.alerts.length)notifyLocal(r.alerts.filter(function(a){return HIGH[a.kind]&&!FDR.isMuted(a.key,aprefs,Date.now())}));
   renderRadar();renderBadge();
 }
+var aprefs=ls('fd_aprefs')||{snooze:{},dismissed:{}},HIGH={saida:1,risco:1,entrada:1},alertsOpen=false;
 function notifyLocal(list){
   try{
     if(!('Notification' in window)||Notification.permission!=='granted')return;
@@ -1000,9 +1043,9 @@ function notifyLocal(list){
       list.slice(0,3).forEach(function(a){new Notification(a.title,{body:a.text})});
   }catch(e){}
 }
-function unseen(){var seen=+(ls('fd_aseen')||0);return alerts.filter(function(a){return a.t>seen}).length}
+function unseen(){var seen=+(ls('fd_aseen')||0),now=Date.now();return alerts.filter(function(a){return a.t>seen&&HIGH[a.kind]&&!FDR.isMuted(a.key,aprefs,now)}).length}
 function renderBadge(){var n=unseen(),b=$('r_badge');b.hidden=!n;b.textContent=n>9?'9+':n}
-var KIND={entrada:['Entrada','ok','✓'],saida:['Saída','bad','✕'],risco:['Risco','warn','!'],oportunidade:['Oportunidade','ok','↗']};
+var KIND={entrada:['Entrada','ok','✓'],saida:['Saída','bad','✕'],risco:['Risco','warn','!'],atencao:['Atenção','warn','!'],oportunidade:['Oportunidade','ok','↗']};
 var VABBR={Binance:'BIN',Bybit:'BYB',Hyperliquid:'HL',OKX:'OKX',Bitget:'BGT',Gate:'GATE'};
 function heatBg(apr){
   if(!isFinite(apr))return 'transparent';
@@ -1012,17 +1055,32 @@ function heatBg(apr){
 }
 function fmtApr(a){return Math.abs(a)<10?nf(a,1):nf(a,0)}
 var radarSel=null,plCat='funding';
-function alertHTML(a){var k=KIND[a.kind]||['Info','',''];
-  return '<div class="alert '+a.kind+'"><div class="row between"><span class="chip '+k[1]+'">'+k[2]+' '+k[0]+'</span><span class="note mono">'+new Date(a.t).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})+'</span></div>'+
-    '<b>'+esc(a.title)+'</b><span class="note">'+esc(a.text)+'</span>'+(a.go?'<div><button class="sm" data-go="'+(a.go==='radar'?'radar':a.go)+'">Abrir</button></div>':'')+'</div>'}
+function alertHTML(a,opts){opts=opts||{};var k=KIND[a.kind]||['Info','',''];
+  var when=a.t?'<span class="note mono">'+(Date.now()-a.t<864e5?ago(a.t)+' atrás':new Date(a.t).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}))+'</span>':'';
+  var resolved=opts.history&&state.active&&!state.active.some(function(x){return x.key===a.key})&&/^(fe|fs|me|sent):/.test(a.key||'');
+  var body=a.items?'<details><summary>'+esc(a.title)+'</summary><div class="stack" style="gap:6px;margin-top:6px">'+a.items.map(function(x){return alertHTML(x,{nested:true})}).join('')+'</div></details>':
+    '<b>'+esc(a.title)+'</b><span class="note">'+esc(a.text)+'</span>';
+  var acts=opts.nested||opts.history?(a.go&&!opts.history?'<div><button class="sm" data-go="'+a.go+'">Abrir</button></div>':''):
+    '<div class="row">'+(a.go?'<button class="sm" data-go="'+a.go+'">Abrir</button>':'')+(a.items?'':'<button class="sm" data-dismiss="'+esc(a.key)+'">Dispensar</button><button class="sm" data-snooze="'+esc(a.key)+'">Silenciar 24 h</button>')+'</div>';
+  return '<div class="alert '+a.kind+'"'+(resolved?' style="opacity:.6"':'')+'><div class="row between"><span class="chip '+k[1]+'">'+k[2]+' '+k[0]+'</span>'+(resolved?'<span class="note">resolvido</span>':when)+'</div>'+body+acts+'</div>'}
+function dayLabel(t){var d=new Date(t),n=new Date(),y=new Date(n.getTime()-864e5);
+  return d.toDateString()===n.toDateString()?'Hoje':d.toDateString()===y.toDateString()?'Ontem':d.toLocaleDateString('pt-BR',{weekday:'long',day:'2-digit',month:'2-digit'})}
 function renderRadar(){
   if(!$('r_alerts'))return;
-  var list=alerts.slice().reverse().slice(0,12),srv=ops.status&&ops.status.state&&ops.status.state.alerts||[];
+  var now=Date.now(),srv=ops.status&&ops.status.state&&ops.status.state.alerts||[];
+  var act=FDR.groupConditions((state.active||[]).filter(function(a){return !FDR.isMuted(a.key,aprefs,now)}));
+  var muted=(state.active||[]).length-(state.active||[]).filter(function(a){return !FDR.isMuted(a.key,aprefs,now)}).length;
+  var shown=alertsOpen?act:act.slice(0,5),histList=alerts.slice().reverse(),byDay={};
+  histList.forEach(function(a){var d=dayLabel(a.t);(byDay[d]=byDay[d]||[]).push(a)});
   var canNotify='Notification' in window&&Notification.permission==='default';
-  $('r_alerts').innerHTML='<div class="row between"><div class="eyebrow">Alertas</div>'+(canNotify?'<button class="sm" id="r_notify">Avisar neste aparelho</button>':'')+'</div>'+
-    '<div class="lead">'+(list.length?plural(list.length,'alerta recente','alertas recentes'):'Nenhum alerta ainda')+'</div>'+
-    (list.length?'<div class="stack" style="gap:8px">'+list.map(alertHTML).join('')+'</div>':
-      '<p class="note" style="margin:0">O radar compara cada leitura com as anteriores. Entradas aparecem quando uma oportunidade compensa e se mantém (ou está estável no histórico); saídas, quando uma posição sua ou a mineração deixa de compensar.</p>')+
+  $('r_alerts').innerHTML='<div class="row between"><div class="eyebrow">Alertas</div><div class="row">'+(canNotify?'<button class="sm" id="r_notify">Avisar neste aparelho</button>':'')+(unseen()?'<button class="sm" id="r_read">Marcar como lidos</button>':'')+'</div></div>'+
+    '<div class="lead">Agora: '+(act.length?plural(act.length,'item pede atenção','itens pedem atenção'):'nada pede ação')+'</div>'+
+    (shown.length?'<div class="stack" style="gap:8px">'+shown.map(function(a){return alertHTML(a)}).join('')+'</div>':
+      '<p class="note" style="margin:0">Aqui aparecem só condições que valem neste momento, por prioridade: saída, risco, atenção, entrada. Elas somem sozinhas quando deixam de valer.</p>')+
+    (act.length>5?'<div style="margin-top:6px"><button class="sm" id="r_more">'+(alertsOpen?'Mostrar menos':'Ver todos ('+act.length+')')+'</button></div>':'')+
+    (muted?'<p class="note" style="margin:6px 0 0">'+plural(muted,'item silenciado ou dispensado','itens silenciados ou dispensados')+'. <button class="sm" id="r_unmute">Mostrar de novo</button></p>':'')+
+    '<details style="margin-top:10px"><summary>Histórico (7 dias): '+histList.length+' eventos</summary>'+
+      (histList.length?Object.keys(byDay).map(function(d){return '<div class="eyebrow" style="margin:8px 0 4px">'+esc(d)+'</div><div class="stack" style="gap:6px">'+byDay[d].slice(0,20).map(function(a){return alertHTML(a,{history:true})}).join('')+'</div>'}).join(''):'<p class="note">Sem eventos.</p>')+'</details>'+
     (srv.length?'<details style="margin-top:8px"><summary>Do servidor (Telegram): '+srv.length+'</summary><div class="stack" style="gap:8px">'+srv.slice(0,8).map(alertHTML).join('')+'</div></details>':
       '<p class="note" style="margin:8px 0 0">'+(settings.apiUrl?'Servidor sem alertas recentes.':'Sem backend, os alertas só são calculados com o painel aberto. Com o backend ligado e o Telegram configurado, chegam 24 h por dia.')+'</p>');
   var sent=state.live?FDR.sentiment(state.rows,VENUES):null;
@@ -1067,6 +1125,11 @@ document.addEventListener('click',function(e){
   var tr=e.target.closest('#r_fmap tr[data-coin]');if(tr){radarSel=tr.dataset.coin;renderRadar();return}
   var pl=e.target.closest('[data-pl]');if(pl){plCat=pl.dataset.pl;renderRadar();return}
   if(e.target.id==='r_notify'){try{Notification.requestPermission().then(function(){renderRadar()})}catch(err){}}
+  if(e.target.id==='r_read'){ls('fd_aseen',Date.now());renderBadge();renderRadar()}
+  if(e.target.id==='r_more'){alertsOpen=!alertsOpen;renderRadar()}
+  if(e.target.id==='r_unmute'){aprefs={snooze:{},dismissed:{}};ls('fd_aprefs',aprefs);renderRadar();renderBadge()}
+  var dm=e.target.closest('[data-dismiss]');if(dm){aprefs.dismissed=aprefs.dismissed||{};aprefs.dismissed[dm.dataset.dismiss]=Date.now();ls('fd_aprefs',aprefs);renderRadar();renderBadge()}
+  var sz=e.target.closest('[data-snooze]');if(sz){aprefs.snooze=aprefs.snooze||{};aprefs.snooze[sz.dataset.snooze]=Date.now()+864e5;ls('fd_aprefs',aprefs);renderRadar();renderBadge()}
 });
 
 /* ---------- navegação ---------- */
@@ -1163,6 +1226,11 @@ $('p_add').addEventListener('click',function(){
   pos.push(FD.ensureId(p));
   savePos();['p_coin','p_not','p_apr','p_be'].forEach(function(i){$(i).value=''});$('p_fee').value=0;renderPositions();renderHome();
 });
+$('p_list').addEventListener('click',function(e){
+  var b=e.target.closest('[data-usehist]');if(!b)return;
+  var p=pos.filter(function(x){return x.id===b.dataset.usehist})[0],h=posHist[b.dataset.usehist];
+  if(p&&h&&h.usd!==null){p.funding=Math.round(h.usd*100)/100;savePos();renderPositions()}
+});
 $('p_list').addEventListener('input',function(e){
   if(e.target.dataset.f!==undefined){pos[+e.target.dataset.f].funding=parseFloat(e.target.value)||0;savePos();}
 });
@@ -1194,6 +1262,12 @@ $('api_save').addEventListener('click',function(){
   opsMsg('api_msg','Testando…');
   apiCall('GET','/status').then(function(st){opsMsg('api_msg','Conectado. NiceHash: '+st.nhEnv+' · chaves '+(st.keys?'ok':'faltando')+' · robô '+MODE_TXT[st.config.mode]+'.');cache={};loadOps();loadMining()},function(e){opsMsg('api_msg','Falhou: '+e.message,true)});
 });
+$('su_gen').addEventListener('click',function(){
+  var b=new Uint8Array(24);crypto.getRandomValues(b);
+  var t=btoa(String.fromCharCode.apply(null,b)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+  ls('fd_tok',t);$('su_tok').textContent=t;$('su_copy').hidden=false;$('api_token').placeholder='token salvo neste aparelho';
+});
+$('su_copy').addEventListener('click',function(){var b=$('su_copy');try{navigator.clipboard.writeText($('su_tok').textContent).then(function(){b.textContent='Copiado'},function(){b.textContent='Selecione e copie'})}catch(e){b.textContent='Selecione e copie'}});
 $('api_clear').addEventListener('click',function(){try{localStorage.removeItem('fd_tok')}catch(e){}$('api_token').placeholder='';opsMsg('api_msg','Token apagado deste aparelho.')});
 $('o_refresh').addEventListener('click',loadOps);
 BOT_FIELDS.forEach(function(k){$('b_'+k).addEventListener('input',function(){ops.dirty=true})});

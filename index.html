@@ -161,7 +161,9 @@ ul.rules{margin:0;padding-left:18px;display:grid;gap:6px}
 .steps .ok .n{background:var(--good);border-color:var(--good);color:var(--accent-ink)}
 .steps .now .n{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
 .steps .now b{color:var(--fg)}
-.steps p{margin:2px 0 0;font-size:14px}
+.steps p{margin:2px 0 0;font-size:14px;overflow-wrap:anywhere}
+.steps>li>div{min-width:0}
+code{font-family:var(--f-mono);font-size:.92em;word-break:break-all;overflow-wrap:anywhere}
 .steps .d{font-size:13px;color:var(--accent);margin-top:2px}
 .coinrow{border-top:1px solid var(--line);padding:10px 0;display:grid;gap:4px}
 .coinrow:first-of-type{border-top:0}
@@ -504,6 +506,20 @@ details.card>summary{color:var(--fg);font-size:15px}
   <!-- AJUSTES -->
   <section id="tab-set" class="stack" hidden>
     <div class="card" id="prod"></div>
+    <details class="card" id="setup"><summary>Configurar o backend: passo a passo (dá para fazer pelo celular)</summary>
+      <p class="note" style="margin:8px 0">O backend guarda as chaves da NiceHash (nunca no painel), roda o robô e manda alertas no Telegram 24 h. Leva uns 15 minutos. Guia completo: <a href="https://github.com/Sr-Geovani/funding-desk/blob/main/docs/configurar-backend.md" target="_blank" rel="noopener">docs/configurar-backend.md</a>.</p>
+      <ol class="steps">
+        <li class="info"><span class="n">1</span><div><b>Conta no Cloudflare (grátis)</b><p class="note">Crie em <a href="https://dash.cloudflare.com/sign-up" target="_blank" rel="noopener">dash.cloudflare.com/sign-up</a> e abra <a href="https://dash.cloudflare.com/?to=/:account/workers-and-pages" target="_blank" rel="noopener">Workers &amp; Pages</a> uma vez para escolher o seu subdomínio <code>*.workers.dev</code>.</p></div></li>
+        <li class="info"><span class="n">2</span><div><b>Token do Cloudflare</b><p class="note">Em <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noopener">API Tokens</a>: Create Token → modelo "Edit Cloudflare Workers" → Use template → Continue → Create Token. Copie o token. Copie também o <b>Account ID</b> (aparece na lateral de Workers &amp; Pages).</p></div></li>
+        <li class="info"><span class="n">3</span><div><b>Token do painel</b><p class="note">Senha que só o seu painel conhece. Fica salva neste aparelho.</p><div class="row"><button class="sm" id="su_gen">Gerar token do painel</button><button class="sm" id="su_copy" hidden>Copiar</button></div><code id="su_tok" style="word-break:break-all;font-size:12px"></code></div></li>
+        <li class="info"><span class="n">4</span><div><b>Segredos no GitHub</b><p class="note">Em <a href="https://github.com/Sr-Geovani/funding-desk/settings/secrets/actions/new" target="_blank" rel="noopener">New repository secret</a>, crie um de cada vez: <code>CLOUDFLARE_API_TOKEN</code>, <code>CLOUDFLARE_ACCOUNT_ID</code> e <code>PANEL_TOKEN</code> (o do passo 3). Segredos do GitHub ficam cifrados e não aparecem no código.</p></div></li>
+        <li class="info"><span class="n">5</span><div><b>Publicar</b><p class="note">Abra <a href="https://github.com/Sr-Geovani/funding-desk/actions/workflows/worker.yml" target="_blank" rel="noopener">Deploy do backend</a> → Run workflow → Run. Quando terminar (~2 min), abra a execução: o resumo mostra o <b>endereço do backend</b> e se ele respondeu.</p></div></li>
+        <li class="info"><span class="n">6</span><div><b>Conectar</b><p class="note">Cole o endereço em "Backend (operação)", logo acima, e toque em Salvar e testar. O token do passo 3 já está salvo.</p></div></li>
+        <li class="info"><span class="n">7</span><div><b>NiceHash de teste</b><p class="note">Crie conta em <a href="https://test.nicehash.com" target="_blank" rel="noopener">test.nicehash.com</a> (dinheiro de teste). Em Configurações → Chaves de API, crie uma chave com permissão de <b>ver saldos e gerenciar ordens de hashpower</b>, <b>sem saque</b>. Crie no GitHub os segredos <code>NH_API_KEY</code>, <code>NH_API_SECRET</code> e <code>NH_ORG_ID</code> (Organization ID, na mesma página) e rode o passo 5 de novo.</p></div></li>
+        <li class="info"><span class="n">8</span><div><b>Telegram (alertas 24 h)</b><p class="note">No Telegram, fale com <b>@BotFather</b> → /newbot → copie o token. Mande "oi" para o seu bot e abra <code>https://api.telegram.org/bot&lt;TOKEN&gt;/getUpdates</code>: o número em <code>"chat":{"id":...}</code> é o chat. Segredos <code>TELEGRAM_BOT_TOKEN</code> e <code>TELEGRAM_CHAT_ID</code> → rode o passo 5.</p></div></li>
+        <li class="info"><span class="n">9</span><div><b>Validar e ir para produção</b><p class="note">Em Mineração → Operar: endereço BCH, pool e robô em <b>Observar</b> por alguns dias, lendo o log. Depois troque <code>NH_ENV</code> para <code>"prod"</code> em <code>worker/wrangler.toml</code>, substitua os segredos NH_* pelos da conta real e rode o passo 5.</p></div></li>
+      </ol>
+    </details>
     <div class="card">
       <h2>Conexões</h2>
       <div class="scroll"><table id="conn"></table></div>
@@ -541,7 +557,7 @@ details.card>summary{color:var(--fg);font-size:15px}
     <div class="card">
       <h2>Regras: funding</h2>
       <ul class="rules">
-        <li>Sair se o spread cair abaixo do break-even do ciclo ou o sinal do funding virar.</li>
+        <li>Entrar só com spread acima do break-even do ciclo. Depois de entrar, ficar enquanto o funding for positivo; sair quando ficar negativo.</li>
         <li>No máximo 2x por perna e margem isolada. Mantenha 30% da margem de cada exchange livre.</li>
         <li>No máximo 50% do capital em uma moeda. Prefira moedas com volume alto.</li>
         <li>Chaves de API só com permissão de trade, sem saque, com IP fixo quando a exchange permitir.</li>

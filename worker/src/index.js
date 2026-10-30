@@ -174,7 +174,16 @@ export async function tick(env, opts = {}) {
     const ra = runAlerts({ state, funding, edges: mkt.ok ? { BCH: mkt.edgeAtBidPct } : {}, now, minEdgePct: cfg.minEdgePct });
     newAlerts = ra.alerts; alertState = ra.state;
     for (const a of newAlerts) log.push({ t: now, kind: 'alerta', text: a.title + ': ' + a.text });
-    for (const a of newAlerts.slice(0, 3)) await notify(env, a.title + '. ' + a.text, fetchFn);
+    // Saída e risco vão na hora; entradas e oportunidades viram um resumo a cada 30 min (menos ruído no celular).
+    const urgent = newAlerts.filter((a) => a.kind === 'saida' || a.kind === 'risco');
+    for (const a of urgent.slice(0, 3)) await notify(env, a.title + '. ' + a.text, fetchFn);
+    let queue = (state.digest || []).concat(newAlerts.filter((a) => urgent.indexOf(a) < 0).map((a) => a.title));
+    let lastDigest = state.lastDigest || 0;
+    if (queue.length && now - lastDigest >= 30 * 60e3) {
+      await notify(env, 'resumo: ' + queue.length + (queue.length > 1 ? ' alertas novos' : ' alerta novo') + ': ' + queue.slice(0, 6).join('; ') + (queue.length > 6 ? '…' : ''), fetchFn);
+      queue = []; lastDigest = now;
+    }
+    alertState.digest = queue.slice(-30); alertState.lastDigest = lastDigest;
   }
 
   const next = Object.assign({}, dec.state, alertState, {

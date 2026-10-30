@@ -156,9 +156,9 @@ function journey(kind, c) {
       { title: 'Conferir', status: 'info', text: 'Antes de entrar: taxa real da sua conta, volume da moeda, horário do próximo pagamento, se é listing novo e se o spread não é "extremo".' },
       { title: 'Entrar', status: 'info', text: 'Short na exchange de funding mais alto e long na de mais baixo, mesmo tamanho, ao mesmo tempo. Registre a entrada no Diário.' },
       { title: 'Acompanhar', status: c.openPositions ? 'now' : 'wait',
-        text: 'O painel recalcula a cada 2 min. Vermelho na posição = spread abaixo do break-even ou invertido.',
+        text: 'O painel recalcula a cada 2 min e diz, por posição, se vale continuar, sair ou trocar. Vermelho = funding negativo (você está pagando); amarelo = abaixo do break-even de entrada.',
         detail: c.openPositions ? c.openPositions + ' posição(ões) aberta(s)' + (c.alerts ? ', ' + c.alerts + ' em alerta.' : ', nenhuma em alerta.') : '' },
-      { title: 'Sair', status: c.alerts ? 'now' : 'wait', text: 'Feche as duas pernas juntas quando o ciclo terminar, o spread cair abaixo do break-even ou inverter.' },
+      { title: 'Sair', status: c.alerts ? 'now' : 'wait', text: 'Fique enquanto o funding for positivo: o fim do ciclo planejado não obriga a fechar. Saia quando ficar negativo, ou troque quando outra oportunidade pagar mais do que o custo da troca. Feche as duas pernas juntas.' },
       { title: 'Registrar', status: 'info', text: 'Copie do extrato o funding recebido e as taxas, e feche a posição no Diário. É o seu histórico auditável.' }
     ];
   }
@@ -184,7 +184,8 @@ var MOMENTS = {
     'Spread que se mantém por dias (selo "Estável" ou o gráfico do Histórico) vale mais que um pico de minutos.',
     'Entre antes do próximo pagamento da perna short: cada pagamento perdido é renda perdida.',
     'Evite listings recentes e spreads marcados como "extremo": as regras e o preço mudam rápido.',
-    'Saia quando o spread cair abaixo do break-even ou inverter, mesmo antes do fim do ciclo.',
+    'Depois de entrar, a taxa de entrada já foi paga: fique enquanto o funding for positivo e saia quando ficar negativo. Trocar de moeda só vale se o ganho extra cobrir a nova entrada e saída.',
+    'Curto prazo (abrir e fechar no mesmo dia) só fecha a conta com spreads muito altos e confirmados, de preferência com ordens maker e saldo já nas duas exchanges.',
     'Ciclos mais longos diluem as taxas: em 1 dia quase nada compensa; em 3 a 5 dias, sim.',
     'Cada perna tem a sua própria margem e pode ser liquidada sozinha: deixe folga nas duas exchanges (o risco mais citado em fóruns, junto com a inversão do funding).',
     'Exchanges pagam em horários diferentes: confira os dois próximos pagamentos antes de entrar e de sair.',

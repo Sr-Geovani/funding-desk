@@ -190,10 +190,73 @@ function allocation(capital, f, mi) {
   return { lines: lines, summary: summary };
 }
 
+/* ---------- funding: curto prazo ---------- */
+// Spread mínimo (% a.a.) para empatar segurando k pagamentos da perna short, em taker e em maker.
+// Supõe saldo já nas duas exchanges (sem transferência). fees: tabela de taxas; slipPct: % do nocional.
+function legCost(o, fees, kind, slipPct) {
+  var fs = fees[o.s] || {}, sp = o.l === 'Spot', fl = sp ? (fees[o.s] || {}) : (fees[o.l] || {});
+  var a = kind === 'maker' ? fs.maker : fs.taker, b = sp ? (kind === 'maker' ? fl.spotMaker : fl.spotTaker) : (kind === 'maker' ? fl.maker : fl.taker);
+  return 2 * (a || 0) + 2 * (b || 0) + (slipPct || 0);
+}
+function shortTerm(o, opts) {
+  var h = (o.rs && o.rs.hours) || 8, cT = legCost(o, opts.fees, 'taker', opts.slipPct), cM = legCost(o, opts.fees, 'maker', opts.slipPct);
+  var rows = [1, 2, 3].map(function (k) {
+    var hours = k * h;
+    return { k: k, hours: hours, minTaker: cT * 8760 / hours, minMaker: cM * 8760 / hours, okTaker: o.spread >= cT * 8760 / hours, okMaker: o.spread >= cM * 8760 / hours };
+  });
+  var perPay = o.spread / 8760 * h; // % do nocional por pagamento da perna short
+  var need = function (c) { return perPay > 0 ? Math.ceil(c / perPay) : null; };
+  var peak = !!(o.capped || (opts.stab && opts.stab.key === 'pico'));
+  var nT = need(cT), nM = need(cM);
+  var text = 'Curto prazo (sem transferência): empatar em 1 pagamento (' + h + ' h) exige spread de ' + nf(rows[0].minTaker, 0) + '% a.a. em taker ou ' +
+    nf(rows[0].minMaker, 0) + '% em maker; em 3 pagamentos, ' + nf(rows[2].minTaker, 0) + '% ou ' + nf(rows[2].minMaker, 0) + '%. ' +
+    (nT ? 'Com o spread de agora: ' + nT + ' pagamento' + (nT > 1 ? 's' : '') + ' (' + dur(nT * h * HOUR) + ') em taker, ' + nM + ' (' + dur(nM * h * HOUR) + ') em maker.' : '');
+  if (peak) text += ' Atenção: o spread de agora parece pico; operar curto prazo em cima dele costuma virar prejuízo.';
+  return { costTaker: cT, costMaker: cM, rows: rows, needTaker: nT, needMaker: nM, peak: peak, text: text };
+}
+
+/* ---------- funding: ficar ou sair ---------- */
+// pos: posição registrada (negSince = quando o funding ficou ≤ 0); cur: spread atual (% a.a.); hours: intervalo da perna short
+function stayAdvice(pos, cur, opts) {
+  if (cur === null || cur === undefined) return { action: 'sem-dado', text: 'Sem dado ao vivo desta moeda nas exchanges da posição.' };
+  var h = opts.hours || 8, now = opts.now, perDay = pos.notional * cur / 365 / 100;
+  if (cur <= 0) {
+    var n = pos.negSince ? Math.max(1, Math.floor((now - pos.negSince) / (h * HOUR)) + 1) : 1;
+    return { action: 'sair', text: 'Saia: o funding está negativo há ' + (pos.negSince ? 'cerca de ' + n + ' pagamento' + (n > 1 ? 's' : '') + ' (' + dur(now - pos.negSince) + ')' : 'esta leitura') +
+      '; manter custa ~' + money(-perDay) + ' por dia. Feche as duas pernas juntas.' };
+  }
+  if (isFinite(pos.beApr) && cur < pos.beApr) return { action: 'avaliar', text: 'Continue enquanto ficar positivo: a entrada já foi paga e cada pagamento ainda soma (~' + money(perDay) + '/dia). Só vale sair antes se houver algo melhor (veja a troca) ou se virar negativo.' };
+  return { action: 'continuar', text: 'Continue: o spread (' + pctS(cur) + ' a.a.) segue acima do break-even, rendendo ~' + money(perDay) + ' por dia. Não precisa fechar no fim do ciclo planejado.' };
+}
+
+/* ---------- funding: vale trocar? ---------- */
+// Compara ficar na posição (spread atual) com ir para a oportunidade b, no mesmo tamanho, durante `days`.
+// A saída da posição atual é paga nos dois casos; a troca soma a entrada e a saída da nova (b.m.costPct).
+function switchAdvice(pos, cur, b, opts) {
+  if (!b || cur === null || cur === undefined) return null;
+  var days = opts.days || 3, n = pos.notional, cap = opts.aprCap || Infinity;
+  var stay = n * cur / 365 * days / 100;
+  var go = n * Math.min(b.spread, cap) / 365 * days / 100 - n * b.m.costPct / 100;
+  var extra = go - stay;
+  return { worth: extra > 0, extra: extra, stay: stay, go: go, days: days,
+    text: extra > 0 ? 'Vale trocar para ' + b.coin + ' (' + (b.l === 'Spot' ? 'spot + short na ' + b.s : 'short ' + b.s + ', long ' + b.l) + '): ~' + money(extra) + ' a mais em ' + days + ' dias, já descontado o custo da troca. Feche esta e abra a nova juntas.'
+      : 'Não vale trocar para ' + b.coin + ' agora: o ganho extra em ' + days + ' dias não cobre o custo da troca (diferença de ' + money(extra) + ').' };
+}
+
+/* ---------- funding: recebido pelo histórico público ---------- */
+// a, b: séries de pagamentos ({t, rate em %}) da perna short e da long (null no spot). Soma desde a entrada.
+function fundingFromHistory(pos, a, b, until) {
+  var n = pos.notional, sum = 0, count = 0;
+  (a || []).forEach(function (x) { if (x.t > pos.t && x.t <= until) { sum += n * x.rate / 100; count++; } });
+  (b || []).forEach(function (x) { if (x.t > pos.t && x.t <= until) { sum -= n * x.rate / 100; count++; } });
+  return { usd: sum, payments: count };
+}
+
 var FDI = {
   dur: dur, fundingPlan: fundingPlan, planText: planText, capitalForTarget: capitalForTarget,
   backtestFunding: backtestFunding, backtestText: backtestText, nextBlockChance: nextBlockChance,
-  poolOf: poolOf, networkSplit: networkSplit, lastBlockStory: lastBlockStory, miningOutlook: miningOutlook, allocation: allocation
+  poolOf: poolOf, networkSplit: networkSplit, lastBlockStory: lastBlockStory, miningOutlook: miningOutlook, allocation: allocation,
+  legCost: legCost, shortTerm: shortTerm, stayAdvice: stayAdvice, switchAdvice: switchAdvice, fundingFromHistory: fundingFromHistory
 };
 if (typeof module !== 'undefined' && module.exports) module.exports = FDI;
 else root.FDI = FDI;
