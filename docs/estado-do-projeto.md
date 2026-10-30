@@ -34,8 +34,11 @@ sempre identificado; nada de prometer previsão de sorte (Poisson é sem memóri
 
 ## Estado e pendências
 - [x] Painel publicado; dados ao vivo validados do Brasil (Binance/Bybit diretos no iPhone).
-- [ ] **Backend no Cloudflare**: o dono cria um token "Edit Cloudflare Workers" e o Claude roda `scripts/deploy-backend.sh`;
-      o dono abre o link de conexão e cadastra NiceHash e Telegram em Ajustes → Conectar contas (nunca no chat).
+- [x] **Backend no Cloudflare** publicado pelo workflow em `https://funding-desk-api.<subdomínio>.workers.dev` (KV e ENC_KEY criados).
+      Obs.: o segredo `CLOUDFLARE_ACCOUNT_ID` do GitHub guarda o comando de teste (curl), não o ID; o script descobre a conta pelo token.
+- [ ] `PANEL_TOKEN`: segredo no GitHub (o workflow grava no Worker) e link de conexão no celular.
+- [ ] NiceHash (teste, sem saque) e Telegram em Ajustes → Conectar contas (nunca no chat).
+- [ ] Proxy da Binance pelo Worker responde 403 (bloqueio de região do Cloudflare/EUA); o painel usa chamada direta do Brasil.
 - [ ] Validar robô em Observar (NiceHash de teste), depois ambiente Produção em Conectar contas.
 - [ ] Funding automático: exige servidor no Brasil (Binance/Bybit bloqueiam EUA), chaves de trade sem saque.
 - [ ] Robô multi-algoritmo (pool PPS) para Scrypt/RandomX/Equihash etc.

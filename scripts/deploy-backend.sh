@@ -146,6 +146,10 @@ if [ -n "$NEW_TOKEN" ]; then
   echo "Token do painel: $NEW_TOKEN"
   echo "Link para abrir no celular (conecta o painel sozinho):"
   echo "${PANEL_URL}#api=${URL}&tok=${NEW_TOKEN}"
-else
+elif [ -n "$PANEL_TOKEN" ]; then
+  echo "Token do painel: o informado (segredo PANEL_TOKEN)."
+elif grep -qx PANEL_TOKEN <<<"$HAVE"; then
   echo "Token do painel: o mesmo de antes (já salvo no seu celular)."
+else
+  echo "Token do painel: NÃO configurado (veja o aviso acima)."
 fi
