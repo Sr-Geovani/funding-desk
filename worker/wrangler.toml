@@ -1,3 +1,27 @@
-name = "funding-proxy"
-main = "proxy.js"
+name = "funding-desk-api"
+main = "src/index.js"
 compatibility_date = "2026-01-01"
+
+# Robô de mineração: um ciclo a cada 3 min (cabe no limite grátis de escritas do KV).
+[triggers]
+crons = ["*/3 * * * *"]
+
+# Armazena configuração, estado e log do robô. O id é preenchido pelo workflow de deploy.
+[[kv_namespaces]]
+binding = "FD_KV"
+id = "__KV_ID__"
+
+[vars]
+# "test" usa api-test.nicehash.com; troque para "prod" só depois de validar em modo observar.
+NH_ENV = "test"
+# Origem do painel (GitHub Pages). Separe várias com vírgula.
+ALLOWED_ORIGIN = "https://sr-geovani.github.io"
+# Tetos que o servidor impõe a qualquer pedido (painel ou robô).
+MAX_ORDER_BTC = "0.01"
+MAX_LIMIT_PH = "100"
+MAX_DAILY_USD = "1000"
+
+# Segredos (NUNCA aqui): configure no painel do Cloudflare → Worker → Settings → Variables and Secrets
+#   PANEL_TOKEN         token do painel (mínimo 24 caracteres)
+#   NH_API_KEY, NH_API_SECRET, NH_ORG_ID   chave da NiceHash (sem permissão de saque)
+#   TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID   avisos (opcional)

@@ -16,9 +16,11 @@ function phDaysPerBlock(D) { return D * TWO32 / PH / DAY_S; }
 // Blocos esperados (λ) com `ph` PH/s durante `hours` horas.
 function expectedBlocks(ph, hours, D) { return ph * PH * hours * 3600 / (D * TWO32); }
 function poissonPmf(k, lam) {
-  var p = Math.exp(-lam);
-  for (var i = 1; i <= k; i++) p *= lam / i;
-  return p;
+  if (lam <= 0) return k === 0 ? 1 : 0;
+  // em log para não estourar com λ grande
+  var lg = -lam + k * Math.log(lam);
+  for (var i = 2; i <= k; i++) lg -= Math.log(i);
+  return Math.exp(lg);
 }
 function poissonCdf(k, lam) {
   var s = 0;
@@ -159,13 +161,84 @@ function sessionsToCSV(list) {
   }).join('\n');
 }
 
+/* ---------- investimento × retorno ---------- */
+// Custo médio (US$) de um bloco comprando hash a `usdPerPhDay`.
+function costPerBlock(D, usdPerPhDay) { return phDaysPerBlock(D) * usdPerPhDay; }
+// Menor k com P(N ≤ k) ≥ q.
+function poissonQuantile(q, lam) {
+  var k = 0, c = poissonPmf(0, lam);
+  while (c < q && k < 100000) { k++; c += poissonPmf(k, lam); }
+  return k;
+}
+// Gastar `spend` (US$) inteiro em hash: blocos ~ Poisson(spend / custo por bloco).
+// blockNet = recompensa líquida de um bloco (após taxa do pool).
+function investment(spend, cpb, blockNet) {
+  var lam = spend / cpb, kProfit = Math.floor(spend / blockNet) + 1;
+  function net(k) { return k * blockNet - spend; }
+  return {
+    spend: spend, lambda: lam, kProfit: kProfit,
+    expectedReturn: lam * blockNet, expectedNet: lam * blockNet - spend, roiPct: (blockNet / cpb - 1) * 100,
+    pProfit: probAtLeast(kProfit, lam), pLossAll: Math.exp(-lam),
+    p10: net(poissonQuantile(0.1, lam)), p50: net(poissonQuantile(0.5, lam)), p90: net(poissonQuantile(0.9, lam))
+  };
+}
+// Gerador pseudoaleatório com semente (resultados reproduzíveis).
+function rng(seed) {
+  var a = seed >>> 0;
+  return function () {
+    a = (a + 0x6D2B79F5) >>> 0;
+    var t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function poissonSample(lam, r) {
+  if (lam > 50) { // aproximação normal para λ grande
+    var u = r(), v = r(), z = Math.sqrt(-2 * Math.log(u || 1e-12)) * Math.cos(2 * Math.PI * v);
+    return Math.max(0, Math.round(lam + Math.sqrt(lam) * z));
+  }
+  var L = Math.exp(-lam), k = 0, p = 1;
+  do { k++; p *= r(); } while (p > L);
+  return k - 1;
+}
+// Simula `sessions` sessões de orçamento `budget` (US$) cada.
+// stopOnBlock: a sessão termina no primeiro bloco (o saldo não gasto volta).
+// Retorna a distribuição do resultado total (US$).
+function simulateSessions(o) {
+  var r = rng(o.seed || 1), runs = o.runs || 5000, res = [], spentTot = 0, blocksTot = 0;
+  for (var i = 0; i < runs; i++) {
+    var net = 0;
+    for (var s = 0; s < o.sessions; s++) {
+      if (o.stopOnBlock) {
+        // gasto até o primeiro bloco ~ Exponencial(média = custo por bloco)
+        var x = -o.cpb * Math.log(1 - r());
+        if (x < o.budget) { net += o.blockNet - x; spentTot += x; blocksTot++; }
+        else { net -= o.budget; spentTot += o.budget; }
+      } else {
+        var k = poissonSample(o.budget / o.cpb, r);
+        net += k * o.blockNet - o.budget; spentTot += o.budget; blocksTot += k;
+      }
+    }
+    res.push(net);
+  }
+  res.sort(function (a, b) { return a - b; });
+  function q(p) { return res[Math.min(res.length - 1, Math.floor(p * res.length))]; }
+  return {
+    runs: runs, mean: mean(res), p10: q(0.1), p50: q(0.5), p90: q(0.9), worst: res[0], best: res[res.length - 1],
+    pProfit: res.filter(function (x) { return x > 0; }).length / runs,
+    avgSpent: spentTot / runs, avgBlocks: blocksTot / runs
+  };
+}
+
 var FDM = {
   TWO32: TWO32, hashesPerBlock: hashesPerBlock, phDaysPerBlock: phDaysPerBlock, expectedBlocks: expectedBlocks,
   poissonPmf: poissonPmf, poissonCdf: poissonCdf, probAtLeast: probAtLeast, hoursPerBlock: hoursPerBlock,
   hashpriceUsd: hashpriceUsd, rentalUsdPerPhDay: rentalUsdPerPhDay, plan: plan, budgetForProb: budgetForProb,
   parseNiceHashBook: parseNiceHashBook, coinbaseTag: coinbaseTag, parseBlocks: parseBlocks, blockStats: blockStats,
   signal: signal, sessionLambda: sessionLambda, summarize: summarize, byTag: byTag, ensureSessionId: ensureSessionId,
-  SESSION_COLS: SESSION_COLS, sessionsToCSV: sessionsToCSV
+  SESSION_COLS: SESSION_COLS, sessionsToCSV: sessionsToCSV,
+  costPerBlock: costPerBlock, poissonQuantile: poissonQuantile, investment: investment, rng: rng,
+  poissonSample: poissonSample, simulateSessions: simulateSessions
 };
 if (typeof module !== 'undefined' && module.exports) module.exports = FDM;
 else root.FDM = FDM;

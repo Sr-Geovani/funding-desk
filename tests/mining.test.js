@@ -141,3 +141,39 @@ test('diário: sorte real vs esperado e etiquetas', () => {
   assert.ok(csv.split('\n')[0].startsWith('id,inicio'));
   assert.ok(csv.includes('rede-rapida|burst'));
 });
+
+test('investimento × retorno: Poisson exato', () => {
+  const cpb = 900, net = 870;          // custo médio por bloco e bloco líquido
+  const a = M.investment(900, cpb, net);
+  close(a.lambda, 1);
+  assert.equal(a.kProfit, 2);          // 1 bloco (870) não paga 900: precisa de 2
+  close(a.pProfit, M.probAtLeast(2, 1));
+  close(a.pLossAll, Math.exp(-1));
+  close(a.expectedNet, 870 - 900);
+  close(a.roiPct, (870 / 900 - 1) * 100);
+  // com edge negativo, investir mais deixa o prejuízo mais provável
+  const big = M.investment(90000, cpb, net);
+  assert.ok(big.pProfit < 0.45 && big.pProfit < M.investment(9000, cpb, net).pProfit + 0.2);
+  // com edge positivo, investir mais deixa o lucro mais provável
+  const g1 = M.investment(2000, 800, 870), g2 = M.investment(50000, 800, 870);
+  assert.ok(g2.pProfit > g1.pProfit && g2.pProfit > 0.7, `${g1.pProfit} ${g2.pProfit}`);
+  assert.ok(a.p10 <= a.p50 && a.p50 <= a.p90);
+});
+
+test('Poisson estável com λ grande', () => {
+  let s = 0; for (let k = 0; k < 2000; k++) s += M.poissonPmf(k, 800); close(s, 1, 1e-9);
+  close(M.poissonQuantile(0.5, 800), 800, 2);
+});
+
+test('simulação: parar no bloco não muda o retorno esperado por dólar', () => {
+  const base = { sessions: 10, budget: 300, cpb: 900, blockNet: 870, runs: 20000, seed: 7 };
+  const stop = M.simulateSessions(Object.assign({ stopOnBlock: true }, base));
+  const cont = M.simulateSessions(Object.assign({ stopOnBlock: false }, base));
+  // retorno por dólar ≈ 870/900 nos dois casos (Wald)
+  close((stop.mean + stop.avgSpent) / stop.avgSpent, 870 / 900, 0.02);
+  close((cont.mean + cont.avgSpent) / cont.avgSpent, 870 / 900, 0.02);
+  // parar no bloco gasta menos em média
+  assert.ok(stop.avgSpent < cont.avgSpent);
+  // mesma semente, mesmo resultado
+  assert.equal(M.simulateSessions(Object.assign({ stopOnBlock: true }, base)).mean, stop.mean);
+});

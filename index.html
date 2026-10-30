@@ -214,6 +214,7 @@ ul.rules{margin:0;padding-left:18px;display:grid;gap:6px}
       <button data-sub="now" aria-pressed="true">Agora</button>
       <button data-sub="plan" aria-pressed="false">Planejar</button>
       <button data-sub="net" aria-pressed="false">Rede BCH</button>
+      <button data-sub="ops" aria-pressed="false">Operar</button>
     </div>
     <div id="mine-now" class="stack">
       <div class="card sig" id="m_sig"></div>
@@ -255,7 +256,75 @@ ul.rules{margin:0;padding-left:18px;display:grid;gap:6px}
       </div>
       <div class="card"><div class="res" id="mp_out"></div></div>
       <div class="row"><button class="pri" id="mp_reg">Registrar no diário</button></div>
+      <div class="card">
+        <h2>Investimento × retorno <span class="tag">projeção</span></h2>
+        <div class="seg" id="invSeg" style="margin-bottom:10px">
+          <button data-sc="now" aria-pressed="true">Ao preço acima</button>
+          <button data-sc="cap" aria-pressed="false">Só com margem mínima</button>
+        </div>
+        <div class="grid2">
+          <label>Investimento total (US$)<input id="iv_total" type="number" inputmode="decimal" value="1000"></label>
+          <label>Orçamento por sessão (US$)<input id="iv_sess" type="number" inputmode="decimal" value="300"></label>
+          <label>Margem mínima (%)<input id="iv_edge" type="number" inputmode="decimal" value="3" step="0.5"></label>
+          <label style="align-self:end"><span class="checks"><label><input type="checkbox" id="iv_stop" checked>parar no bloco</label></span></label>
+        </div>
+        <div class="res" id="iv_out" style="margin-top:10px"></div>
+        <div class="scroll" style="margin-top:10px"><table id="iv_tab"></table></div>
+        <p class="note" style="margin:8px 0 0">Blocos seguem Poisson: com retorno por dólar abaixo de 1, investir mais torna o prejuízo mais provável; acima de 1, torna o lucro mais provável. "Só com margem mínima" supõe que você só compra quando o mercado está no teto ou abaixo (o robô faz isso); nesses períodos o hash pode simplesmente não estar disponível. Sessões: simulação de 5.000 cenários.</p>
+      </div>
       <p class="note">Taxas NiceHash: 3% sobre o gasto e 0,00001 BTC por ordem (tabela pública). Pacotes EasyMining têm preço fechado: use taxa do aluguel 0% e o preço equivalente do pacote.</p>
+    </div>
+    <div id="mine-ops" class="stack" hidden>
+      <div class="card" id="o_conn"></div>
+      <div class="card sig" id="o_status"></div>
+      <div class="card"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Ordens na NiceHash</h2><button class="sm" id="o_refresh">Atualizar</button></div>
+        <div id="o_bal" class="note" style="margin:6px 0 10px"></div><div id="o_orders" style="display:grid;gap:10px"></div></div>
+      <div class="card">
+        <h2>Robô</h2>
+        <div class="grid2">
+          <label>Modo<select id="b_mode"><option value="off">Desligado</option><option value="observe">Observar</option><option value="active">Ativo</option></select></label>
+          <label>Ao achar bloco<select id="b_onBlock"><option value="cancel">Encerrar ordem</option><option value="min">Reduzir</option><option value="continue">Continuar</option></select></label>
+          <label style="grid-column:1/-1">Endereço BCH da recompensa<input id="b_payoutAddress" autocomplete="off" placeholder="bitcoincash:q..."></label>
+          <label>Margem mínima (%)<input id="b_minEdgePct" type="number" inputmode="decimal" step="0.5"></label>
+          <label>Lance acima do menor (%)<input id="b_bidPremiumPct" type="number" inputmode="decimal" step="0.1"></label>
+          <label>Potência alvo (PH/s)<input id="b_targetPh" type="number" inputmode="decimal"></label>
+          <label>Potência de pausa (PH/s)<input id="b_minPh" type="number" inputmode="decimal" step="0.1"></label>
+          <label>Stop-loss por sessão (US$)<input id="b_sessionBudgetUsd" type="number" inputmode="decimal"></label>
+          <label>Limite diário (US$)<input id="b_dailyBudgetUsd" type="number" inputmode="decimal"></label>
+          <label>Taxa do pool (%)<input id="b_poolFeePct" type="number" inputmode="decimal" step="0.5"></label>
+          <label>Taxa do aluguel (%)<input id="b_rentFeePct" type="number" inputmode="decimal" step="0.5"></label>
+          <label>Pool para ordens novas<select id="b_poolId"></select></label>
+          <label>Valor da ordem nova (BTC)<input id="b_orderAmountBtc" type="number" inputmode="decimal" step="0.001"></label>
+        </div>
+        <div class="checks" style="margin-top:10px"><label><input type="checkbox" id="b_autoCreate">criar ordem sozinho quando o sinal ficar verde</label></div>
+        <div class="row" style="margin-top:10px"><button class="pri" id="b_save">Salvar robô</button><button id="b_tick">Rodar ciclo agora</button></div>
+        <p class="note" id="b_msg" style="margin:8px 0 0">Observar: calcula e registra, não executa. Ativo: executa. O robô só mexe nas ordens marcadas como "robô gerencia". Preço máximo = preço de empate menos a margem mínima, recalculado a cada ciclo (3 min). A NiceHash só deixa baixar o preço aos poucos; nesse intervalo o robô reduz à potência de pausa.</p>
+      </div>
+      <div class="card">
+        <h2>Nova ordem</h2>
+        <div class="grid2">
+          <label>Pool<select id="n_pool"></select></label>
+          <label>Preço (BTC/EH/dia)<input id="n_price" type="number" inputmode="decimal" step="0.0001"></label>
+          <label>Potência (PH/s)<input id="n_limit" type="number" inputmode="decimal" value="10"></label>
+          <label>Valor (BTC)<input id="n_amount" type="number" inputmode="decimal" value="0.002" step="0.001"></label>
+        </div>
+        <div class="checks" style="margin-top:10px"><label><input type="checkbox" id="n_managed" checked>robô gerencia esta ordem</label></div>
+        <div class="row" style="margin-top:10px"><button class="pri" id="n_create">Criar ordem</button></div>
+        <details style="margin-top:10px"><summary>Cadastrar pool na NiceHash</summary>
+          <div class="grid2">
+            <label>Nome<input id="pl_name" value="BlockSniper solo"></label>
+            <label>Host<input id="pl_host" value="solo.blocksniper.ai" autocomplete="off"></label>
+            <label>Porta<input id="pl_port" type="number" inputmode="numeric" value="3333"></label>
+            <label>Usuário (seu endereço BCH)<input id="pl_user" autocomplete="off"></label>
+            <label>Senha<input id="pl_pass" value="x" autocomplete="off"></label>
+          </div>
+          <div class="row" style="margin-top:10px"><button id="pl_add">Cadastrar pool</button></div>
+        </details>
+      </div>
+      <div class="card"><h3 style="margin-bottom:8px">Margem no lance, histórico do servidor (%)</h3><div class="chart" id="o_edge"></div>
+        <p class="note" style="margin:6px 0 0">Um ponto a cada 15 min. Mostra em que horários o aluguel costuma ficar abaixo do preço de empate.</p></div>
+      <div class="card"><h2>Log do robô</h2><div id="o_log" class="res"></div></div>
+      <div class="card"><button id="o_kill" style="width:100%;background:var(--bad);border-color:var(--bad);color:#fff">Emergência: desligar robô e cancelar ordens gerenciadas</button></div>
     </div>
     <div id="mine-net" class="stack" hidden>
       <div class="card"><h2>Rede Bitcoin Cash <span class="tag">dado real</span></h2><div class="kv" id="n_kv"></div></div>
@@ -329,6 +398,15 @@ ul.rules{margin:0;padding-left:18px;display:grid;gap:6px}
       <h2>Conexões</h2>
       <div class="scroll"><table id="conn"></table></div>
       <p class="note" style="margin:8px 0 0">Conectar conta (saldo, posições, ordens) exige chave de API. Chave nunca fica no navegador nem no repositório: isso só será feito com um backend próprio que guarde as chaves cifradas, só leitura, sem saque. Até lá, registre manualmente no Diário.</p>
+    </div>
+    <div class="card">
+      <h2>Backend (operação)</h2>
+      <div class="grid2">
+        <label style="grid-column:1/-1">Endereço do backend<input id="api_url" type="url" inputmode="url" placeholder="https://funding-desk-api.seu-nome.workers.dev" autocomplete="off"></label>
+        <label style="grid-column:1/-1">Token do painel<input id="api_token" type="password" autocomplete="off" placeholder="o PANEL_TOKEN que você definiu no Cloudflare"></label>
+      </div>
+      <div class="row" style="margin-top:10px"><button class="pri" id="api_save">Salvar e testar</button><button id="api_clear">Esquecer token</button></div>
+      <p class="note" id="api_msg" style="margin:8px 0 0">O token fica só neste aparelho. As chaves da NiceHash ficam só no servidor (segredos do Cloudflare) e nunca passam pelo painel. Com o backend configurado, ele também serve de proxy em tempo real.</p>
     </div>
     <div class="card">
       <h2>Fonte de dados</h2>

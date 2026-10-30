@@ -14,7 +14,7 @@ var FEES=cloneFees();
     else for(var f in s[k])if(isFinite(s[k][f]))FEES[k][f]=s[k][f];}})();
 var settings=ls('fd_set')||{};
 var SCAN_INPUTS=['cap','lev','hold','minvol','exS','exL','rebal','slip','minoi','acap','newdays','sort'];
-var PLAN_INPUTS=['mp_ph','mp_h','mp_rfee','mp_pfee','mp_ofee','mp_rw'];
+var PLAN_INPUTS=['mp_ph','mp_h','mp_rfee','mp_pfee','mp_ofee','mp_rw','iv_total','iv_sess','iv_edge'];
 SCAN_INPUTS.concat(PLAN_INPUTS).forEach(function(id){if(settings[id]!==undefined)$(id).value=settings[id]});
 $('proxy').value=settings.proxy||'';
 function saveSettings(){SCAN_INPUTS.concat(PLAN_INPUTS).forEach(function(id){settings[id]=$(id).value});settings.proxy=$('proxy').value.trim();ls('fd_set',settings)}
@@ -70,7 +70,7 @@ function fetchJSON(u,opt){
   return fetch(u,o).then(function(r){clearTimeout(to);if(!r.ok)throw new Error('HTTP '+r.status);return r.json()},function(e){clearTimeout(to);throw e});
 }
 function proxied(u){
-  var p=(settings.proxy||'').replace(/\/+$/,'');if(!p)return null;
+  var p=(settings.proxy||settings.apiUrl||'').replace(/\/+$/,'');if(!p)return null;
   var x=new URL(u),k=PROXY_KEY[x.host];return k?p+'/'+k+x.pathname+x.search:null;
 }
 // Direto primeiro; se falhar e houver proxy configurado, tenta pelo proxy.
@@ -158,7 +158,7 @@ function load(){
 }
 
 /* ---------- mineração: coleta ---------- */
-var mineLoading=false;
+var mineLoading=false,mineAgain=false;
 function loadBook(){
   var direct='https://api2.nicehash.com/main/api/v2/hashpower/orderBook?algorithm=SHA256';
   var pu=proxied(direct);
@@ -167,7 +167,7 @@ function loadBook(){
   return snap();
 }
 function loadMining(){
-  if(mineLoading)return;mineLoading=true;
+  if(mineLoading){mineAgain=true;return}mineLoading=true;mineAgain=false;
   Promise.all([
     fetchJSON('https://api.blockchair.com/bitcoin-cash/stats'),
     fetchJSON('https://mempool.space/api/v1/mining/hashrate/3d'),
@@ -185,6 +185,7 @@ function loadMining(){
     if(r[5].ok)mine.mp=r[5].v;
     fillPlanLive(false);
     renderMine();renderHome();renderConn();renderSessions();
+    if(mineAgain)loadMining();
   });
 }
 // Valores ao vivo consolidados (com fallback entre fontes).
@@ -472,6 +473,116 @@ function renderPlan(){
     ['Orçamento p/ 90% de chance',cpd>0?usd(FDM.budgetForProb(0.9,q.D,cpd)):'—',''],
     ['Preço de empate',p.breakEvenPrice.toFixed(4)+' BTC/EH/dia','']
   ]);
+  renderInvest();
+}
+
+/* ---------- investimento × retorno ---------- */
+var invScenario='now';
+function renderInvest(){
+  var q=planParams();
+  if(!(q.D>0&&q.coinUsd>0&&q.btcUsd>0&&q.priceBtcPerEhDay>0)){$('iv_out').innerHTML='<div class="note">Preencha preço, dificuldade e cotações acima.</div>';$('iv_tab').innerHTML='';return}
+  var p=FDM.plan(q),blockNet=p.blockNet,edge=num('iv_edge');
+  var cpbNow=FDM.costPerBlock(q.D,FDM.rentalUsdPerPhDay(q.priceBtcPerEhDay,q.btcUsd,q.rentFeePct));
+  var cpb=invScenario==='cap'?blockNet*(1-edge/100):cpbNow;
+  var total=num('iv_total')||1000,sess=num('iv_sess')||total,stop=$('iv_stop').checked;
+  var a=FDM.investment(total,cpb,blockNet),n=Math.max(1,Math.round(total/sess));
+  var sim=FDM.simulateSessions({sessions:n,budget:sess,cpb:cpb,blockNet:blockNet,stopOnBlock:stop,runs:5000,seed:42});
+  var ratio=blockNet/cpb;
+  $('iv_out').innerHTML=resRows([
+    ['Custo médio por bloco',usd(cpb),''],
+    ['Bloco líquido (após pool)',usd(blockNet),''],
+    ['Retorno por US$1','US$'+ratio.toFixed(3),ratio>=1?'good':'bad'],
+    ['Blocos esperados com '+usd(total),a.lambda.toFixed(2),''],
+    ['Blocos necessários para lucrar',String(a.kProfit),''],
+    ['Chance de lucro gastando tudo',pctp(a.pProfit*100),a.pProfit>=0.5?'good':'warn'],
+    ['Chance de nenhum bloco',pctp(a.pLossAll*100),a.pLossAll>0.3?'bad':''],
+    ['Resultado esperado',usd(a.expectedNet),a.expectedNet>=0?'good':'bad'],
+    ['Faixa provável (10% a 90%)',usd(a.p10)+' a '+usd(a.p90),''],
+    [n+' sessões de '+usd(sess)+(stop?', parando no bloco':''),'lucro em '+pctp(sim.pProfit*100)+' dos cenários',sim.pProfit>=0.5?'good':'warn'],
+    ['Sessões: resultado médio / mediano',usd(sim.mean)+' / '+usd(sim.p50),sim.mean>=0?'good':'bad'],
+    ['Sessões: gasto médio / blocos médios',usd(sim.avgSpent)+' / '+sim.avgBlocks.toFixed(2),'']
+  ]);
+  var inv=[500,1000,2000,5000,10000,20000,50000];
+  $('iv_tab').innerHTML='<tr><th>Investe</th><th>Blocos</th><th>P(lucro)</th><th>Esperado</th><th>10%–90%</th></tr>'+inv.map(function(v){
+    var x=FDM.investment(v,cpb,blockNet);
+    return '<tr><td>'+usd(v).replace(',00','')+'</td><td>'+x.lambda.toFixed(1)+'</td><td class="'+(x.pProfit>=0.5?'good':'bad')+'">'+pctp(x.pProfit*100,0)+'</td><td class="'+(x.expectedNet>=0?'good':'bad')+'">'+usd(x.expectedNet).replace(/,\d\d$/,'')+'</td><td>'+nf(x.p10)+' a '+nf(x.p90)+'</td></tr>'}).join('');
+}
+
+/* ---------- backend (operação) ---------- */
+var ops={status:null,orders:[],pools:[],log:[],bal:null,err:{},at:0,dirty:false};
+function apiCfg(){return {url:(settings.apiUrl||'').replace(/\/+$/,''),token:ls('fd_tok')||''}}
+function apiCall(method,path,body){
+  var c=apiCfg();
+  if(!c.url)return Promise.reject(new Error('backend não configurado (Ajustes)'));
+  return fetch(c.url+'/api'+path,{method:method,headers:{Authorization:'Bearer '+c.token,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined})
+    .then(function(r){return r.json().catch(function(){return {}}).then(function(j){if(!r.ok)throw new Error(j.error||('HTTP '+r.status));return j})});
+}
+var opsLoading=false;
+function loadOps(){
+  if(!apiCfg().url){renderOps();return}
+  if(opsLoading)return;opsLoading=true;
+  Promise.all([apiCall('GET','/status'),apiCall('GET','/orders'),apiCall('GET','/balance'),apiCall('GET','/pools'),apiCall('GET','/log')].map(settle)).then(function(r){
+    opsLoading=false;ops.at=Date.now();ops.err={};
+    if(r[0].ok)ops.status=r[0].v;else{ops.status=null;ops.err.status=r[0].e.message}
+    if(r[1].ok)ops.orders=r[1].v.orders||[];else ops.err.orders=r[1].e.message;
+    if(r[2].ok)ops.bal=r[2].v;else ops.err.bal=r[2].e.message;
+    if(r[3].ok)ops.pools=r[3].v.list||[];else ops.err.pools=r[3].e.message;
+    if(r[4].ok)ops.log=r[4].v.log||[];
+    renderOps();renderHome();
+  });
+}
+setInterval(function(){if(document.visibilityState==='visible'&&!$('mine-ops').hidden&&!$('tab-mine').hidden)loadOps()},30000);
+var MODE_TXT={off:'Desligado',observe:'Observando',active:'Ativo'},MODE_CHIP={off:'',observe:'warn',active:'ok'};
+var BOT_FIELDS=['mode','onBlock','payoutAddress','minEdgePct','bidPremiumPct','targetPh','minPh','sessionBudgetUsd','dailyBudgetUsd','poolFeePct','rentFeePct','poolId','orderAmountBtc'];
+function renderOps(){
+  var c=apiCfg(),st=ops.status;
+  if(!c.url){
+    $('o_conn').innerHTML='<h2>Backend não configurado</h2><p class="note">Para operar (ordens, robô, parada no bloco) é preciso publicar o backend no Cloudflare e informar o endereço e o token. O passo a passo está no README do repositório.</p><div class="row"><button class="sm" data-go="set">Abrir Ajustes</button></div>';
+    ['o_status','o_orders','o_log'].forEach(function(id){$(id).innerHTML=''});$('o_bal').textContent='';return;
+  }
+  $('o_conn').innerHTML=st?'<div class="row" style="justify-content:space-between"><h2 style="margin:0">Backend</h2><span class="chip ok">conectado</span></div>'+
+    '<div class="kv" style="margin-top:10px"><div><small>NiceHash</small><span class="'+(st.nhEnv==='produção'?'warn':'')+'">'+esc(st.nhEnv)+'</span></div><div><small>Chaves</small><span class="'+(st.keys?'good':'bad')+'">'+(st.keys?'ok':'faltando')+'</span></div><div><small>Telegram</small><span>'+(st.telegram?'ok':'—')+'</span></div>'+
+    '<div><small>Teto por ordem</small><span>'+st.limits.maxOrderBtc+' BTC</span></div><div><small>Teto de potência</small><span>'+st.limits.maxLimitPh+' PH/s</span></div><div><small>Versão</small><span>'+esc(st.version)+'</span></div></div>'
+    :'<div class="row" style="justify-content:space-between"><h2 style="margin:0">Backend</h2><span class="chip bad">sem conexão</span></div><p class="note">'+esc(ops.err.status||'carregando…')+'</p>';
+  if(!st){$('o_status').innerHTML='';return}
+  var cfg=st.config,s=st.state||{},m=s.market||{};
+  var lvl=m.green===undefined?'sem-dado':(m.green?'favoravel':(m.edgeAtBidPct>=0?'neutro':'desfavoravel'));
+  $('o_status').className='card sig '+lvl;
+  $('o_status').innerHTML='<div class="row" style="justify-content:space-between"><h2 style="margin:0">Robô</h2><span class="chip '+MODE_CHIP[cfg.mode]+'">'+MODE_TXT[cfg.mode]+'</span></div>'+
+    (m.bidEH?'<div class="row" style="margin-top:10px;align-items:baseline"><span class="huge '+(m.green?'good':m.edgeAtBidPct>=0?'warn':'bad')+'">'+pct(m.edgeAtBidPct,1)+'</span><span class="note">margem no lance (servidor)</span></div>'+
+    '<div class="kv" style="margin-top:8px"><div><small>Lance</small><span>'+m.bidEH.toFixed(4)+'</span></div><div><small>Teto</small><span>'+m.capEH.toFixed(4)+'</span></div><div><small>Empate</small><span>'+m.breakEvenEH.toFixed(4)+'</span></div>'+
+    '<div><small>Custo/bloco</small><span>'+usd(m.costPerBlockUsd)+'</span></div><div><small>Gasto hoje</small><span>'+usd(s.dailyUsd||0)+'</span></div><div><small>Blocos achados</small><span>'+(s.myBlocks||[]).length+'</span></div></div>'
+    :'<p class="note">'+esc(m.reason||'Sem ciclo ainda. Toque em Rodar ciclo agora.')+'</p>')+
+    '<div class="legs" style="margin-top:6px">Último ciclo: '+(s.lastTick?'<b data-ago="'+s.lastTick+'">'+ago(s.lastTick)+'</b> atrás':'nunca')+(s.lastHeight?' · bloco BCH '+s.lastHeight:'')+'</div>'+
+    ((s.errors||[]).length?'<div class="note bad">'+esc(s.errors.join('; '))+'</div>':'')+
+    ((s.myBlocks||[]).length?'<div class="legs">Seus blocos: '+s.myBlocks.slice(-5).reverse().map(function(b){return '<b>'+b.height+'</b> ('+(+b.bch).toFixed(4)+' BCH)'}).join(' · ')+'</div>':'');
+  var btcUsd=m.btcUsd||live().btcUsd;
+  $('o_bal').innerHTML=ops.bal?'Saldo disponível: <b>'+(+ops.bal.available).toFixed(8)+' BTC</b>'+(btcUsd?' ('+usd(+ops.bal.available*btcUsd)+')':''):esc(ops.err.bal||'');
+  $('o_orders').innerHTML=ops.orders.length?ops.orders.map(function(o){
+    return '<div class="card opp '+(o.managed?'g':'')+'" style="background:var(--panel2)"><div class="h"><span><b class="mono">'+esc(String(o.id).slice(0,8))+'</b>'+(o.managed?'<span class="chip ok">robô gerencia</span>':'<span class="chip">manual</span>')+'</span><span class="mono">'+esc(o.status)+'</span></div>'+
+      '<div class="kv"><div><small>Preço</small><span>'+o.priceEH.toFixed(4)+'</span></div><div><small>Limite</small><span>'+nf(o.limitPH,2)+' PH</span></div><div><small>Entregando</small><span>'+nf(o.speedPH,2)+' PH</span></div>'+
+      '<div><small>Gasto</small><span>'+o.paidBtc.toFixed(6)+'</span></div><div><small>Disponível</small><span>'+o.availableBtc.toFixed(6)+'</span></div><div><small>Pool</small><span style="font-size:12px">'+esc(o.poolName||'—')+'</span></div></div>'+
+      '<div class="grid2"><label>Novo preço<input data-op="'+esc(o.id)+'" type="number" inputmode="decimal" step="0.0001" value="'+o.priceEH.toFixed(4)+'"></label><label>Nova potência (PH/s)<input data-ol="'+esc(o.id)+'" type="number" inputmode="decimal" value="'+o.limitPH.toFixed(2)+'"></label></div>'+
+      '<div class="row"><button class="sm pri" data-oupd="'+esc(o.id)+'">Aplicar</button><button class="sm" data-orefill="'+esc(o.id)+'">Reabastecer</button><button class="sm" data-oman="'+esc(o.id)+'" data-v="'+(o.managed?0:1)+'">'+(o.managed?'Tirar do robô':'Robô gerencia')+'</button><button class="sm" data-ocancel="'+esc(o.id)+'">Cancelar</button></div></div>';
+  }).join(''):'<p class="note">'+esc(ops.err.orders||'Nenhuma ordem ativa.')+'</p>';
+  var popts='<option value="">—</option>'+ops.pools.map(function(p){return '<option value="'+esc(p.id)+'">'+esc(p.name)+' ('+esc(p.stratumHostname)+')</option>'}).join('');
+  $('b_poolId').innerHTML=popts;$('n_pool').innerHTML=popts;
+  if(!ops.dirty)BOT_FIELDS.forEach(function(k){var el=$('b_'+k);if(el)el.value=cfg[k]===undefined?'':cfg[k]});
+  $('b_autoCreate').checked=!!cfg.autoCreate;
+  if(cfg.poolId)$('n_pool').value=cfg.poolId;
+  if(m.bidEH&&!$('n_price').value)$('n_price').value=m.bidEH.toFixed(4);
+  if(!$('pl_user').value&&cfg.payoutAddress)$('pl_user').value=cfg.payoutAddress;
+  var eh=(s.edgeHist||[]).map(function(x){return {t:x[0],v:x[1]}});
+  if(eh.length>1){$('o_edge').innerHTML=chartSVG(eh,0,function(v){return pct(v,1)})+'<div class="tip" hidden></div>';bindChart($('o_edge'),eh,function(v){return pct(v,1)})}
+  else $('o_edge').innerHTML='<p class="note">O histórico aparece depois de algumas horas de ciclos.</p>';
+  var KC={acao:'ok',simulado:'warn',erro:'bad',bloco:'ok',config:''};
+  $('o_log').innerHTML=ops.log.slice(0,40).map(function(l){return '<div><span class="note" style="flex:1"><span class="chip '+(KC[l.kind]||'')+'">'+esc(l.kind)+'</span> '+esc(l.text)+'</span><span class="mono note">'+new Date(l.t).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})+'</span></div>'}).join('')||'<div class="note">Sem eventos.</div>';
+}
+function opsMsg(id,t,bad){$(id).textContent=t;$(id).className='note'+(bad?' bad':'')}
+function botForm(){
+  var o={autoCreate:$('b_autoCreate').checked};
+  BOT_FIELDS.forEach(function(k){var v=$('b_'+k).value;o[k]=['mode','onBlock','payoutAddress','poolId'].indexOf(k)>=0?v:parseFloat(v)});
+  return o;
 }
 var PRESETS={
   low:{ph:10,h:24,rfee:3},mid:{ph:100,h:4,rfee:3},
@@ -565,6 +676,7 @@ function renderHome(){
   var L=live();
   rows.push(srcRow('Cotações',L.bchUsd&&L.btcUsd?'ok':'…',L.bchUsd?'BCH '+usd(L.bchUsd)+' · BTC '+usd(L.btcUsd):'',L.bchUsd?'good':'mute'));
   rows.push(srcRow('NiceHash',mine.book?(mine.bookSrc==='proxy'?'ok':'atrasado'):(mine.err.book?'falhou':'…'),mine.book?mine.bookSrc+(mine.bookAt?' · '+ago(mine.bookAt):''):(mine.err.book||''),mine.book?(mine.bookSrc==='proxy'?'good':'warn'):(mine.err.book?'bad':'mute')));
+  if(settings.apiUrl){var bs=ops.status;rows.push(srcRow('Backend',bs?'ok':(ops.err.status?'falhou':'…'),bs?('robô '+MODE_TXT[bs.config.mode].toLowerCase()+' · NiceHash '+bs.nhEnv):(ops.err.status||''),bs?'good':(ops.err.status?'bad':'mute')))}
   $('h_src').innerHTML='<tr><th>Fonte</th><th>Estado</th><th>Detalhe</th></tr>'+rows.join('');
   var o=state.ops&&state.ops[0];
   $('h_fund').innerHTML='<div class="row" style="justify-content:space-between"><h2 style="margin:0">Funding agora</h2>'+(state.live?'':'<span class="chip demo">exemplo</span>')+'</div>'+
@@ -584,7 +696,7 @@ function renderHome(){
 function renderConn(){
   var rows=[['Binance','dados públicos',state.src.Binance?SRC_NAME[state.src.Binance]:'sem acesso'],['Bybit','dados públicos',state.src.Bybit?SRC_NAME[state.src.Bybit]:'sem acesso'],
     ['Hyperliquid','dados públicos',state.src.Hyperliquid?'direto':'sem acesso'],['NiceHash','livro de ordens',mine.bookSrc||'sem acesso'],['Rede BCH','Blockchair',mine.blocks.length?'direto':'sem acesso'],
-    ['Contas (saldo, ordens)','não conectadas','requer backend']];
+    ['Contas (saldo, ordens)',settings.apiUrl?'backend':'não conectadas',ops.status?(ops.status.keys?'NiceHash '+ops.status.nhEnv:'chaves faltando'):(settings.apiUrl?'sem conexão':'requer backend')]];
   $('conn').innerHTML='<tr><th>Conexão</th><th>Tipo</th><th>Estado</th></tr>'+rows.map(function(r){return '<tr><td>'+r[0]+'</td><td>'+r[1]+'</td><td>'+r[2]+'</td></tr>'}).join('');
 }
 
@@ -648,9 +760,10 @@ function tab(t,sub){
   if((t==='mine'||t==='home')&&(!mine.at||Date.now()-mine.at>300000))loadMining();
   window.scrollTo(0,0);
 }
-var SUBS={fund:['fundSeg',['scan','calc']],mine:['mineSeg',['now','plan','net']],diary:['diarySeg',['pos','mine']]};
+var SUBS={fund:['fundSeg',['scan','calc']],mine:['mineSeg',['now','plan','net','ops']],diary:['diarySeg',['pos','mine']]};
 function subTab(t,sub){
   var cfg=SUBS[t];
+  if(t==='mine'&&sub==='ops')loadOps();
   cfg[1].forEach(function(x){$(t+'-'+x).hidden=x!==sub});
   document.querySelectorAll('#'+cfg[0]+' button').forEach(function(b){b.setAttribute('aria-pressed',b.dataset.sub===sub?'true':'false')});
 }
@@ -744,11 +857,68 @@ $('feeReset').addEventListener('click',function(){FEES=cloneFees();ls('fd_fees',
 // Atualiza funding a cada 2 min com a aba visível.
 setInterval(function(){if(document.visibilityState==='visible'&&state.live)load()},120000);
 
+/* ---------- eventos: investimento e operação ---------- */
+['iv_total','iv_sess','iv_edge','iv_stop'].forEach(function(id){$(id).addEventListener('input',function(){saveSettings();renderInvest()})});
+document.querySelectorAll('#invSeg button').forEach(function(b){b.addEventListener('click',function(){
+  invScenario=b.dataset.sc;document.querySelectorAll('#invSeg button').forEach(function(x){x.setAttribute('aria-pressed',x===b?'true':'false')});renderInvest()})});
+$('api_url').value=settings.apiUrl||'';
+if(ls('fd_tok'))$('api_token').placeholder='token salvo neste aparelho';
+$('api_save').addEventListener('click',function(){
+  settings.apiUrl=$('api_url').value.trim().replace(/\/+$/,'');ls('fd_set',settings);
+  if($('api_token').value)ls('fd_tok',$('api_token').value.trim());
+  $('api_token').value='';$('api_token').placeholder=ls('fd_tok')?'token salvo neste aparelho':'';
+  if(!settings.apiUrl){opsMsg('api_msg','Endereço vazio: backend desligado.');renderOps();return}
+  opsMsg('api_msg','Testando…');
+  apiCall('GET','/status').then(function(st){opsMsg('api_msg','Conectado. NiceHash: '+st.nhEnv+' · chaves '+(st.keys?'ok':'faltando')+' · robô '+MODE_TXT[st.config.mode]+'.');cache={};loadOps();loadMining()},function(e){opsMsg('api_msg','Falhou: '+e.message,true)});
+});
+$('api_clear').addEventListener('click',function(){try{localStorage.removeItem('fd_tok')}catch(e){}$('api_token').placeholder='';opsMsg('api_msg','Token apagado deste aparelho.')});
+$('o_refresh').addEventListener('click',loadOps);
+BOT_FIELDS.forEach(function(k){$('b_'+k).addEventListener('input',function(){ops.dirty=true})});
+$('b_save').addEventListener('click',function(){
+  var f=botForm();
+  if(f.mode==='active'&&ops.status&&ops.status.config.mode!=='active'&&!confirm('Ativar o robô? Ele vai alterar e cancelar as ordens marcadas como "robô gerencia" na NiceHash ('+(ops.status?ops.status.nhEnv:'')+').'))return;
+  apiCall('PUT','/config',f).then(function(){ops.dirty=false;opsMsg('b_msg','Robô salvo.');loadOps()},function(e){opsMsg('b_msg','Erro: '+e.message,true)});
+});
+$('b_tick').addEventListener('click',function(){
+  opsMsg('b_msg','Rodando ciclo…');
+  apiCall('POST','/tick').then(function(r){
+    var a=r.actions||[];
+    opsMsg('b_msg',(a.length?a.map(function(x){return (x.executed?'feito':'simulado')+': '+x.type+' · '+x.reason}).join(' | '):'Nenhuma ação necessária.')+(r.notes&&r.notes.length?' · '+r.notes.join('; '):'')+(r.errors&&r.errors.length?' · erros: '+r.errors.join('; '):''));
+    loadOps();
+  },function(e){opsMsg('b_msg','Erro: '+e.message,true)});
+});
+$('n_create').addEventListener('click',function(){
+  var b={poolId:$('n_pool').value,priceEH:num('n_price'),limitPH:num('n_limit'),amountBtc:num('n_amount'),managed:$('n_managed').checked};
+  if(!b.poolId){alert('Escolha um pool (cadastre abaixo se ainda não tiver).');return}
+  var m=ops.status&&ops.status.state.market;
+  var warn=m&&m.capEH&&b.priceEH>m.capEH?'\n\nATENÇÃO: preço acima do teto ('+m.capEH.toFixed(4)+'): valor esperado negativo.':'';
+  if(!confirm('Criar ordem na NiceHash ('+(ops.status?ops.status.nhEnv:'')+')?\n'+b.priceEH+' BTC/EH/dia · '+b.limitPH+' PH/s · '+b.amountBtc+' BTC'+warn))return;
+  apiCall('POST','/orders',b).then(function(){loadOps()},function(e){alert('Erro: '+e.message)});
+});
+$('pl_add').addEventListener('click',function(){
+  var b={name:$('pl_name').value.trim(),host:$('pl_host').value.trim(),port:num('pl_port'),username:$('pl_user').value.trim(),password:$('pl_pass').value||'x'};
+  apiCall('POST','/pools',b).then(function(){alert('Pool cadastrado.');loadOps()},function(e){alert('Erro: '+e.message)});
+});
+$('o_kill').addEventListener('click',function(){
+  if(!confirm('EMERGÊNCIA: desligar o robô e cancelar todas as ordens que ele gerencia?'))return;
+  apiCall('POST','/kill').then(function(r){alert('Robô desligado. Canceladas: '+r.cancelled.length+(r.failed.length?' · falhas: '+r.failed.join(', '):''));loadOps()},function(e){alert('Erro: '+e.message)});
+});
+$('o_orders').addEventListener('click',function(e){
+  var b=e.target.closest('button');if(!b)return;
+  if(b.dataset.oupd){var id=b.dataset.oupd,pr=parseFloat(document.querySelector('[data-op="'+CSS.escape(id)+'"]').value),li=parseFloat(document.querySelector('[data-ol="'+CSS.escape(id)+'"]').value);
+    if(!confirm('Alterar a ordem '+id.slice(0,8)+' para '+pr+' BTC/EH/dia e '+li+' PH/s?'))return;
+    apiCall('POST','/orders/'+encodeURIComponent(id),{priceEH:pr,limitPH:li}).then(loadOps,function(err){alert('Erro: '+err.message)})}
+  if(b.dataset.ocancel&&confirm('Cancelar a ordem '+b.dataset.ocancel.slice(0,8)+'? O saldo não gasto volta para a carteira da NiceHash.'))
+    apiCall('DELETE','/orders/'+encodeURIComponent(b.dataset.ocancel)).then(loadOps,function(err){alert('Erro: '+err.message)});
+  if(b.dataset.orefill){var v=parseFloat(prompt('Reabastecer com quantos BTC?','0.001'));if(v>0)apiCall('POST','/orders/'+encodeURIComponent(b.dataset.orefill)+'/refill',{amountBtc:v}).then(loadOps,function(err){alert('Erro: '+err.message)})}
+  if(b.dataset.oman)apiCall('POST','/orders/'+encodeURIComponent(b.dataset.oman)+'/manage',{managed:b.dataset.v==='1'}).then(loadOps,function(err){alert('Erro: '+err.message)});
+});
+
 /* ---------- início ---------- */
 applyTheme();setMode(state.mode);fillVenueSelects();fillTagSel();
 renderCalc();renderLiq();renderFees();renderPositions();renderSessions();renderPlan();renderConn();
 state.rows=FD.demoData(Date.now());renderScan();renderHome();
 tab(TABS.indexOf(settings.tab)>=0?settings.tab:'home');
-load();loadMining();
+load();loadMining();if(settings.apiUrl)loadOps();
 if('serviceWorker' in navigator&&/^https?:/.test(location.protocol))navigator.serviceWorker.register('sw.js').catch(function(){});
 })();

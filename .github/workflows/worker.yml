@@ -1,0 +1,62 @@
+name: Deploy do backend (Cloudflare Worker)
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['worker/**', '.github/workflows/worker.yml']
+permissions:
+  contents: read
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Testes
+        run: node --test tests/*.test.js tests/*.test.mjs
+      - name: Conferir credenciais do Cloudflare
+        id: creds
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::warning::Defina CLOUDFLARE_API_TOKEN e CLOUDFLARE_ACCOUNT_ID em Settings → Secrets and variables → Actions. Deploy pulado."
+            echo "ok=0" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=1" >> "$GITHUB_OUTPUT"
+          fi
+      - name: KV do robô (cria se não existir)
+        if: steps.creds.outputs.ok == '1'
+        working-directory: worker
+        run: |
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/storage/kv/namespaces"
+          ID=$(curl -sf -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$API?per_page=100" | jq -r '.result[] | select(.title=="funding-desk-kv") | .id')
+          if [ -z "$ID" ]; then
+            ID=$(curl -sf -X POST -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" -d '{"title":"funding-desk-kv"}' "$API" | jq -r '.result.id')
+          fi
+          test -n "$ID" && test "$ID" != "null"
+          sed -i "s/__KV_ID__/$ID/" wrangler.toml
+      - name: Deploy
+        if: steps.creds.outputs.ok == '1'
+        working-directory: worker
+        run: npx --yes wrangler@4.149.0 deploy
+      # Opcional: se estes segredos existirem no GitHub, são copiados para o Worker.
+      # Recomendado: cadastrar as chaves da NiceHash direto no painel do Cloudflare (ficam só lá).
+      - name: Segredos do Worker (opcionais)
+        if: steps.creds.outputs.ok == '1'
+        working-directory: worker
+        env:
+          PANEL_TOKEN: ${{ secrets.PANEL_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          NH_API_KEY: ${{ secrets.NH_API_KEY }}
+          NH_API_SECRET: ${{ secrets.NH_API_SECRET }}
+          NH_ORG_ID: ${{ secrets.NH_ORG_ID }}
+        run: |
+          for k in PANEL_TOKEN TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID NH_API_KEY NH_API_SECRET NH_ORG_ID; do
+            v="${!k}"
+            if [ -n "$v" ]; then printf '%s' "$v" | npx --yes wrangler@4.149.0 secret put "$k" >/dev/null && echo "segredo $k atualizado"; fi
+          done

@@ -25,8 +25,8 @@ Abas: Início (fontes e sinais) · Funding (scanner, calculadora) · Mineração
 
 | Exchange | Endpoints | Observações |
 |---|---|---|
-| Binance USDⓈ-M | `premiumIndex`, `ticker/24hr`, `fundingInfo`, `exchangeInfo`, `fundingRate` (histórico) | Intervalo padrão 8h; `fundingInfo` lista só símbolos com intervalo/teto ajustado. **Bloqueia IPs dos EUA (HTTP 451).** |
-| Bybit v5 linear | `tickers`, `instruments-info` (paginado, `fundingInterval` em minutos), `funding/history` | **Bloqueia IPs dos EUA (HTTP 403, CloudFront).** |
+| Binance USDⓈ-M | `premiumIndex`, `ticker/24hr`, `fundingInfo`, `exchangeInfo`, `fundingRate` (histórico) | Intervalo padrão 8h; `fundingInfo` lista só símbolos com intervalo/teto ajustado. **Bloqueia IPs dos EUA (HTTP 451).** Do Brasil, direto do navegador: ok (testado em 30/10/2026). |
+| Bybit v5 linear | `tickers`, `instruments-info` (paginado, `fundingInterval` em minutos), `funding/history` | **Bloqueia IPs dos EUA (HTTP 403, CloudFront).** Do Brasil, direto do navegador: ok (testado em 30/10/2026). |
 | Hyperliquid | `metaAndAssetCtxs`, `predictedFundings`, `fundingHistory` (POST `/info`) | Funding horário. CORS liberado (`*`). |
 
 Tickers com multiplicador são unificados: `1000PEPE`, `kPEPE`, `SHIB1000`, `1MBABYDOGE` → `PEPE`, `SHIB`, `BABYDOGE`.
@@ -62,7 +62,7 @@ Abrir o `index.html` direto do disco funciona, mas sem service worker. Não abra
 Testes (Node 18+ e nenhuma dependência):
 
 ```bash
-node --test tests/*.test.js
+node --test tests/*.test.js tests/*.test.mjs
 ```
 
 `diagnostico.html` chama cada endpoint do navegador atual e mostra status, CORS e campos. Use para checar se a sua rede ou região é atendida.
@@ -84,18 +84,59 @@ No iPhone: abra no Safari → Compartilhar → **Adicionar à Tela de Início**.
 Edite, rode os testes e faça push em `main`. O deploy leva cerca de 1 minuto. O service worker busca na rede primeiro;
 se o app aberto no celular parecer antigo, feche e abra de novo. Ao mudar a lista de arquivos do app, suba `CACHE` em `sw.js`.
 
-## Proxy opcional (se Binance/Bybit falharem no seu navegador)
+## Backend: operação na NiceHash e robô de mineração
 
-`worker/proxy.js` é um Cloudflare Worker que só repassa **GET** de uma lista fechada de endpoints públicos. Ele não usa chaves.
+O painel continua sem chaves. As chaves da NiceHash ficam **só** no servidor (segredos do Cloudflare Worker).
+O painel fala com o backend usando um token seu, guardado apenas no aparelho.
+
+O que o backend faz (`worker/`):
+- **Proxy público** de dados de mercado (Binance, Bybit, NiceHash), só leitura, rotas fixas.
+- **API** (`/api/*`, exige token): saldo, ordens (criar, preço/potência, reabastecer, cancelar), pools, configuração do robô, log, emergência.
+- **Robô** (a cada 3 min):
+  - preço máximo = preço de empate − margem mínima, recalculado com dificuldade e cotação do momento;
+  - com o mercado no teto ou abaixo: lance logo acima do menor preço ativo, na potência alvo; acima do teto: potência de pausa
+    (a NiceHash só deixa baixar o preço 0,01 BTC/EH a cada ~10 min; o robô respeita isso);
+  - **bloco pago no seu endereço** (confere a coinbase de cada bloco novo): encerra a ordem, reduz ou continua, conforme escolhido;
+  - stop-loss por sessão, limite diário e botão de emergência; avisos no Telegram (opcional).
+- Modos: **desligado**, **observar** (calcula e registra, não executa; padrão) e **ativo**.
+- Tetos que o servidor impõe a qualquer pedido: `MAX_ORDER_BTC`, `MAX_LIMIT_PH`, `MAX_DAILY_USD` (`worker/wrangler.toml`).
+- Começa no **ambiente de teste da NiceHash** (`NH_ENV = "test"`, api-test.nicehash.com). Produção só trocando para `"prod"`.
+
+### Instalar (dá para fazer tudo pelo celular)
+
+1. **Cloudflare** (grátis): crie a conta em dash.cloudflare.com e abra *Workers & Pages* uma vez para escolher o subdomínio `*.workers.dev`.
+2. **Token do Cloudflare**: *My Profile → API Tokens → Create Token → modelo "Edit Cloudflare Workers"*. Copie o token
+   e o *Account ID* (aparece na página inicial da conta).
+3. **GitHub**: no repositório, *Settings → Secrets and variables → Actions → New repository secret*:
+   `CLOUDFLARE_API_TOKEN` e `CLOUDFLARE_ACCOUNT_ID`.
+4. **Deploy**: *Actions → "Deploy do backend (Cloudflare Worker)" → Run workflow*. O workflow roda os testes, cria o KV
+   `funding-desk-kv` e publica `funding-desk-api`. O endereço fica `https://funding-desk-api.<seu-subdominio>.workers.dev`.
+5. **Segredos do Worker**: no Cloudflare, *Workers → funding-desk-api → Settings → Variables and Secrets → Add (tipo Secret)*:
+   - `PANEL_TOKEN`: uma senha longa e aleatória (mínimo 24 caracteres), que você vai digitar no painel;
+   - `NH_API_KEY`, `NH_API_SECRET`, `NH_ORG_ID`: chave da NiceHash. Crie primeiro em **test.nicehash.com** (conta separada).
+     Permissões: ver saldo e gerenciar ordens de hashpower. **Nunca** marque saque/retirada;
+   - opcional: `TELEGRAM_BOT_TOKEN` e `TELEGRAM_CHAT_ID` para avisos.
+   (Alternativa: cadastrar esses mesmos nomes como segredos no GitHub; o workflow copia para o Worker.)
+6. **Painel**: *Ajustes → Backend*: cole o endereço e o `PANEL_TOKEN` → *Salvar e testar*.
+7. **Mineração → Operar**: cadastre o pool (ex.: `solo.blocksniper.ai:3333`, usuário = seu endereço BCH), informe o
+   endereço da recompensa, deixe o robô em **Observar** por alguns dias e leia o log. Só depois mude para **Ativo**.
+8. Para produção: troque `NH_ENV = "prod"` em `worker/wrangler.toml` (o push publica sozinho) e cadastre as chaves da conta real.
+
+### Testar localmente (sem dinheiro e sem chaves)
+
+`worker/dev/mock.mjs` é uma NiceHash falsa que confere a assinatura de cada pedido com o algoritmo do cliente oficial,
+e simula a rede BCH (incluindo "minerar um bloco para o seu endereço"). `worker/dev/server.mjs` roda o Worker no Node.
 
 ```bash
-cd worker
-npx wrangler deploy
+node worker/dev/mock.mjs
 ```
 
-Depois cole a URL do Worker em **Risco → Fonte de dados**. O painel só usa o proxy quando a chamada direta falha.
-Restrinja `ALLOWED_ORIGIN` ao domínio do painel. Atenção: o Worker roda no data center da Cloudflare mais próximo
-de quem acessa, mas a Binance e a Bybit podem bloquear IPs da Cloudflare. Teste com `diagnostico.html` usando o proxy.
+```bash
+PANEL_TOKEN=um-token-local-com-mais-de-24-caracteres ALLOWED_ORIGIN=http://localhost:8000 NH_BASE=http://127.0.0.1:9100/nh BCH_REST=http://127.0.0.1:9100/bch PRICE_URL=http://127.0.0.1:9100/cg/x NH_API_KEY=mock-key NH_API_SECRET=mock-secret-0123456789 NH_ORG_ID=mock-org node worker/dev/server.mjs
+```
+
+No painel local (`python3 -m http.server 8000`), use o backend `http://localhost:8787` e o mesmo token.
+Para simular um bloco: `curl -X POST localhost:9100/_mine -d '{"address":"bitcoincash:q..."}'`.
 
 ## Conferência manual com os sites (tarefa pendente)
 
@@ -114,7 +155,7 @@ mining.js         lógica pura de mineração (Poisson, hashprice, aluguel, livr
 scripts/          foto do livro da NiceHash (rodada pelo workflow)
 diagnostico.html  teste dos endpoints a partir do navegador
 sw.js, manifest.json, icons/   PWA
-worker/           proxy opcional (Cloudflare Workers)
+worker/           backend: API, robô, proxy (Cloudflare Workers); worker/dev: NiceHash falsa e servidor local
 tests/            node --test; fixtures reais (Hyperliquid, Blockchair, NiceHash) e sintéticas (Binance/Bybit)
 ```
 
