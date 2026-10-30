@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="pt-BR" translate="no">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="google" content="notranslate">
+<title>Diagnóstico de APIs</title>
+<style>
+:root{--bg:#0c1210;--fg:#e6efe9;--mute:#8aa095;--good:#4fd28a;--bad:#f2675a;--line:#25352d;color-scheme:dark}
+@media (prefers-color-scheme:light){:root{--bg:#f3f6f1;--fg:#14201a;--mute:#5b6e63;--good:#14803f;--bad:#c23a2e;--line:#d3ddd1;color-scheme:light}}
+body{background:var(--bg);color:var(--fg);font:14px/1.45 system-ui,sans-serif;margin:0 auto;max-width:720px;padding:16px}
+.r{border-bottom:1px solid var(--line);padding:8px 0;font-variant-numeric:tabular-nums}
+.r b{display:block;word-break:break-all}.ok{color:var(--good)}.no{color:var(--bad)}small{color:var(--mute)}
+pre{white-space:pre-wrap;word-break:break-all;font-size:12px}
+button{font:inherit;padding:9px 12px;border-radius:8px}
+</style>
+</head>
+<body>
+<h1>Diagnóstico de APIs</h1>
+<p><small>Chama cada endpoint público deste navegador e confere status, CORS e campos usados pelo painel. Nenhuma chave é usada.</small></p>
+<button id="go">Rodar teste</button> <button id="copy">Copiar resultado</button>
+<div id="out"></div>
+<script>
+var T=[
+ {n:'Binance premiumIndex',u:'https://fapi.binance.com/fapi/v1/premiumIndex',f:['symbol','markPrice','lastFundingRate','nextFundingTime'],pick:function(d){return d}},
+ {n:'Binance ticker/24hr',u:'https://fapi.binance.com/fapi/v1/ticker/24hr',f:['symbol','quoteVolume'],pick:function(d){return d}},
+ {n:'Binance fundingInfo',u:'https://fapi.binance.com/fapi/v1/fundingInfo',f:['symbol','fundingIntervalHours','adjustedFundingRateCap','adjustedFundingRateFloor'],pick:function(d){return d}},
+ {n:'Binance fundingRate (histórico)',u:'https://fapi.binance.com/fapi/v1/fundingRate?symbol=BTCUSDT&limit=5',f:['symbol','fundingRate','fundingTime'],pick:function(d){return d}},
+ {n:'Bybit tickers',u:'https://api.bybit.com/v5/market/tickers?category=linear',f:['symbol','fundingRate','nextFundingTime','turnover24h','markPrice'],pick:function(d){return d.result.list}},
+ {n:'Bybit instruments-info',u:'https://api.bybit.com/v5/market/instruments-info?category=linear&limit=1000',f:['symbol','fundingInterval','launchTime','status'],pick:function(d){return d.result.list},extra:function(d){return 'nextPageCursor='+(d.result.nextPageCursor||'(vazio)')}},
+ {n:'Bybit funding/history',u:'https://api.bybit.com/v5/market/funding/history?category=linear&symbol=BTCUSDT&limit=5',f:['symbol','fundingRate','fundingRateTimestamp'],pick:function(d){return d.result.list}},
+ {n:'Hyperliquid metaAndAssetCtxs',u:'https://api.hyperliquid.xyz/info',body:{type:'metaAndAssetCtxs'},f:['funding','dayNtlVlm','markPx','premium'],pick:function(d){return d[1]},extra:function(d){return 'universe='+d[0].universe.length}},
+ {n:'Hyperliquid fundingHistory',u:'https://api.hyperliquid.xyz/info',body:{type:'fundingHistory',coin:'BTC',startTime:Date.now()-864e5},f:['coin','fundingRate','time'],pick:function(d){return d}}
+];
+var log=[];
+function line(t,ok,msg){var d=document.createElement('div');d.className='r';d.innerHTML='<b class="'+(ok?'ok':'no')+'">'+(ok?'OK ':'FALHA ')+t.n+'</b><small>'+msg+'</small>';document.getElementById('out').appendChild(d);log.push((ok?'OK ':'FALHA ')+t.n+' | '+msg.replace(/<[^>]+>/g,''))}
+function run(){
+  document.getElementById('out').innerHTML='';log=[];
+  T.reduce(function(p,t){return p.then(function(){
+    var t0=performance.now();
+    var opt=t.body?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(t.body)}:{};
+    return fetch(t.u,opt).then(function(r){
+      var ms=Math.round(performance.now()-t0);
+      if(!r.ok)return r.text().then(function(x){line(t,false,'HTTP '+r.status+' em '+ms+' ms (CORS passou; bloqueio de região se 403/451) · '+x.slice(0,120))});
+      return r.json().then(function(d){
+        var list=t.pick(d)||[],miss=t.f.filter(function(k){return !list.some(function(i){return i&&i[k]!==undefined})});
+        var s='HTTP 200 em '+ms+' ms · '+list.length+' itens'+(t.extra?' · '+t.extra(d):'')+(miss.length?' · <span class="no">faltam: '+miss.join(', ')+'</span>':' · campos ok')+'<pre>'+JSON.stringify(list[0]).slice(0,240)+'</pre>';
+        line(t,!miss.length,s);
+      });
+    }).catch(function(e){line(t,false,'Erro de rede ou CORS bloqueado: '+e.message)});
+  })},Promise.resolve()).then(function(){log.unshift('UA: '+navigator.userAgent+' | '+new Date().toISOString())});
+}
+document.getElementById('go').onclick=run;
+document.getElementById('copy').onclick=function(){navigator.clipboard.writeText(log.join('\n')).catch(function(){})};
+</script>
+</body>
+</html>

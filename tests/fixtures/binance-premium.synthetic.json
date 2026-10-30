@@ -1,0 +1,6 @@
+[{"symbol":"BTCUSDT","markPrice":"72000.10","indexPrice":"72010.00","lastFundingRate":"0.00010000","interestRate":"0.00010000","nextFundingTime":1793376000000,"time":1793361600000},
+{"symbol":"ENAUSDT","markPrice":"0.5120","lastFundingRate":"0.00030000","nextFundingTime":1793361600000,"time":1793361600000},
+{"symbol":"1000PEPEUSDT","markPrice":"0.0110","lastFundingRate":"-0.00050000","nextFundingTime":1793376000000,"time":1793361600000},
+{"symbol":"BTCUSDT_261225","markPrice":"73000","lastFundingRate":"","nextFundingTime":0,"time":1793361600000},
+{"symbol":"BTCUSDC","markPrice":"72000","lastFundingRate":"0.00005","nextFundingTime":1793376000000,"time":1793361600000},
+{"symbol":"OLDUSDT","markPrice":"1","lastFundingRate":"0.002","nextFundingTime":1793376000000,"time":1793361600000}]

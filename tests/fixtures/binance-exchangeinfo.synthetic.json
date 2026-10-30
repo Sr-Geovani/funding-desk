@@ -1,0 +1,5 @@
+{"symbols":[{"symbol":"BTCUSDT","contractType":"PERPETUAL","status":"TRADING","onboardDate":1569398400000},
+{"symbol":"ENAUSDT","contractType":"PERPETUAL","status":"TRADING","onboardDate":1793000000000},
+{"symbol":"1000PEPEUSDT","contractType":"PERPETUAL","status":"TRADING","onboardDate":1683000000000},
+{"symbol":"BTCUSDT_261225","contractType":"CURRENT_QUARTER","status":"TRADING","onboardDate":1780000000000},
+{"symbol":"OLDUSDT","contractType":"PERPETUAL","status":"SETTLING","onboardDate":1600000000000}]}

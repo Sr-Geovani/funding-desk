@@ -1,0 +1,7 @@
+{"retCode":0,"retMsg":"OK","result":{"category":"linear","list":[
+{"symbol":"BTCUSDT","markPrice":"72001","fundingRate":"0.0001","nextFundingTime":"1793376000000","turnover24h":"6000000000","openInterestValue":"5000000000"},
+{"symbol":"ENAUSDT","markPrice":"0.512","fundingRate":"0.0006","nextFundingTime":"1793361600000","turnover24h":"90000000","openInterestValue":"120000000"},
+{"symbol":"1000PEPEUSDT","markPrice":"0.011","fundingRate":"0.0001","nextFundingTime":"1793376000000","turnover24h":"200000000","openInterestValue":"90000000"},
+{"symbol":"SHIB1000USDT","markPrice":"0.012","fundingRate":"0.0002","nextFundingTime":"1793376000000","turnover24h":"30000000","openInterestValue":"20000000"},
+{"symbol":"BTC-26DEC26","markPrice":"73000","fundingRate":"","nextFundingTime":"0","turnover24h":"1000"},
+{"symbol":"BTCPERP","markPrice":"72000","fundingRate":"0.0001","nextFundingTime":"1793376000000","turnover24h":"1000"}],"nextPageCursor":""}}

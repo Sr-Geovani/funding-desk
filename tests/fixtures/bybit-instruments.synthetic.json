@@ -1,0 +1,4 @@
+[{"symbol":"BTCUSDT","contractType":"LinearPerpetual","status":"Trading","fundingInterval":480,"launchTime":"1585526400000"},
+{"symbol":"ENAUSDT","contractType":"LinearPerpetual","status":"Trading","fundingInterval":240,"launchTime":"1712000000000"},
+{"symbol":"1000PEPEUSDT","contractType":"LinearPerpetual","status":"Trading","fundingInterval":480,"launchTime":"1683000000000"},
+{"symbol":"SHIB1000USDT","contractType":"LinearPerpetual","status":"Trading","fundingInterval":60,"launchTime":"1793200000000"}]
