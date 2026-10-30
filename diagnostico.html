@@ -33,6 +33,7 @@ var T=[
  {n:'Hyperliquid fundingHistory',u:'https://api.hyperliquid.xyz/info',body:{type:'fundingHistory',coin:'BTC',startTime:Date.now()-864e5},f:['coin','fundingRate','time'],pick:function(d){return d}},
  {n:'Blockchair BCH stats',u:'https://api.blockchair.com/bitcoin-cash/stats',f:['difficulty','market_price_usd','blocks_24h'],pick:function(d){return [d.data]}},
  {n:'Blockchair BCH blocos',u:'https://api.blockchair.com/bitcoin-cash/blocks?limit=5',f:['id','time','difficulty','coinbase_data_hex'],pick:function(d){return d.data}},
+ {n:'WhatsOnChain BSV',u:'https://api.whatsonchain.com/v1/bsv/main/chain/info',f:['blocks','difficulty'],pick:function(d){return [d]}},
  {n:'CoinGecko cotações',u:'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,bitcoin-cash&vs_currencies=usd',f:['bitcoin','bitcoin-cash'],pick:function(d){return [d]}},
  {n:'NiceHash foto (GitHub)',u:'data/nicehash.json',f:['market','minActive','medianWeighted'],pick:function(d){return d.markets},extra:function(d){return 'foto de '+d.at+(d.error?' · erro: '+d.error:'')}},
  {n:'NiceHash direto (esperado falhar: CORS)',u:'https://api2.nicehash.com/main/api/v2/hashpower/orderBook?algorithm=SHA256',f:['orders'],pick:function(d){return Object.values(d.stats)}}

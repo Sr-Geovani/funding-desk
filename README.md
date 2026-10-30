@@ -5,7 +5,12 @@ Painel web (PWA simples) para acompanhar e operar **manualmente**:
 - **Funding:** arbitragem de funding em perpétuos, Perp × Perp (short onde o funding é mais alto, long onde é mais baixo) e Spot + Perp.
 - **Mineração:** mineração solo de Bitcoin Cash com hashrate alugado (NiceHash, MRR), com sinal de valor esperado, planejador de sessão e diário que testa hipóteses.
 
-Abas: Início (fontes e sinais) · Funding (scanner, calculadora) · Mineração (agora, planejar, rede BCH) · Diário (posições e sessões) · Ajustes.
+Abas: Início (copiloto) · Funding (oportunidades, jornada, calculadora) · Mineração (agora, jornada, planejar, operar, rede) · Diário · Ajustes.
+
+**Copiloto** (`copilot.js`, testado): cada operação mostra o veredito (Compensa / No limite / Não compensa agora), o porquê
+em uma frase, quando passa a compensar e o que fazer. Os números técnicos ficam em "Números" / "Entender os números",
+com glossário no Início. Funding ganha o selo de estabilidade (estável, oscila, pico) pelo histórico pago de 72 h.
+Mineração compara BTC, BCH e BSV (mesmo hash SHA-256): receita por PH·dia, margem contra o aluguel e variação.
 
 - **Só lê dados públicos.** Não executa ordens e não guarda chaves de API. Não coloque segredos neste repositório.
 - HTML/CSS/JS sem build. Lógica pura em `core.js` (testada); interface em `index.html`.
@@ -46,7 +51,7 @@ Não entram no sinal, porque não mudam a chance de um hash (cada hash é indepe
 tempo desde o último bloco, blocos rápidos/lentos, potência de quem achou o último. Para testar essas teses com dados,
 registre as sessões com etiquetas: o diário compara blocos reais com os esperados por etiqueta.
 
-Fontes: Blockchair (dificuldade, blocos e cotação do BCH; grátis tem limite por IP, por isso a leitura é a cada 5 min),
+Fontes: WhatsOnChain (BSV), Blockchair (dificuldade, blocos e cotação do BCH; grátis tem limite por IP, por isso a leitura é a cada 5 min),
 mempool.space e CoinGecko (BTC), NiceHash (livro de ordens). A NiceHash não aceita chamadas do navegador (CORS):
 o workflow publica `data/nicehash.json` a cada ~10 min (o GitHub pode atrasar) ou use o proxy em tempo real.
 
@@ -151,6 +156,7 @@ Para 3 moedas (ex.: BTC, ETH, SOL), anote ao mesmo tempo:
 index.html        marcação e estilos
 app.js            interface (abas, renderização, coleta de dados)
 core.js           lógica pura de funding (normalização, parsers, cycle(), scanner, histórico, CSV/JSON)
+copilot.js        vereditos, jornadas, momentos e glossário em linguagem simples
 mining.js         lógica pura de mineração (Poisson, hashprice, aluguel, livro NiceHash, blocos BCH, diário)
 scripts/          foto do livro da NiceHash (rodada pelo workflow)
 diagnostico.html  teste dos endpoints a partir do navegador

@@ -36,12 +36,13 @@
   --accent:#2f5d0a; --accent-ink:#ffffff; --good:#14803f; --warn:#996a00; --bad:#c23a2e; --series:#2a78d6; color-scheme:light}
 *{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%}
-body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 var(--f-body);overflow-x:hidden;
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 var(--f-body);overflow-x:hidden;
   padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
-  padding-block:0 calc(84px + env(safe-area-inset-bottom,0px))}
+  /* reserva a barra de status do iPhone (tela cheia): o cabeçalho não fica embaixo dela */
+  padding-top:env(safe-area-inset-top,0px);padding-bottom:calc(84px + env(safe-area-inset-bottom,0px))}
 body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);background:var(--bg);z-index:10}
 .wrap{max-width:720px;margin:0 auto}
-header{position:sticky;top:env(safe-area-inset-top,0px);background:var(--bg);z-index:9;padding:12px 0 10px;border-bottom:1px solid var(--line)}
+header{position:sticky;top:env(safe-area-inset-top,0px);background:var(--bg);z-index:9;padding:10px 0;border-bottom:1px solid var(--line)}
 .top{display:flex;align-items:center;justify-content:space-between;gap:10px}
 .top .row{flex-wrap:nowrap}
 h1{font:700 20px/1 var(--f-display);margin:0;letter-spacing:-.01em}
@@ -73,6 +74,10 @@ button.sm{padding:6px 9px;font-size:12px}
 button.icon{padding:5px 9px;font-size:12px;font-family:var(--f-mono)}
 .seg{display:flex;gap:6px;flex-wrap:wrap}
 .seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+/* abas internas: uma linha só; se não couber, rola dentro da própria faixa */
+#fundSeg,#mineSeg,#diarySeg{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+#fundSeg::-webkit-scrollbar,#mineSeg::-webkit-scrollbar,#diarySeg::-webkit-scrollbar{display:none}
+#fundSeg button,#mineSeg button,#diarySeg button{flex:0 0 auto;padding:8px 9px;font-size:14px}
 details>summary{cursor:pointer;color:var(--mute);font-size:13px;font-weight:600;padding:4px 0;list-style-position:inside}
 details[open]>summary{margin-bottom:8px}
 .opp{display:grid;gap:8px;border-left:3px solid var(--line)}
@@ -106,6 +111,7 @@ ul.rules{margin:0;padding-left:18px;display:grid;gap:6px}
 .res div{display:flex;justify-content:space-between;gap:10px;border-bottom:1px dashed var(--line);padding-bottom:5px}
 .res div:last-child{border:0}
 .note{font-size:12px;color:var(--mute)}
+.note.warn{color:var(--warn)}.note.bad{color:var(--bad)}
 .tag{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:var(--mute);border:1px dashed var(--line);border-radius:4px;padding:1px 4px;margin-left:4px;vertical-align:middle}
 .sig{border-left:4px solid var(--line)}
 .sig.favoravel{border-left-color:var(--good)} .sig.neutro{border-left-color:var(--warn)} .sig.desfavoravel{border-left-color:var(--bad)}
@@ -124,6 +130,27 @@ ul.rules{margin:0;padding-left:18px;display:grid;gap:6px}
 .chart .dot{fill:var(--series);stroke:var(--panel);stroke-width:2}
 .tip{position:absolute;top:0;pointer-events:none;background:var(--panel2);border:1px solid var(--line);border-radius:6px;padding:4px 6px;font:11px/1.3 var(--f-mono);white-space:nowrap;transform:translateX(-50%)}
 .cd{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+/* copiloto: linguagem simples primeiro, números depois */
+.eyebrow{font-size:12px;font-weight:600;color:var(--mute);letter-spacing:.02em}
+.lead{font:600 17px/1.35 var(--f-display);margin:6px 0 4px}
+.why{margin:6px 0;color:var(--fg)}
+.between{justify-content:space-between}
+.box{background:var(--panel2);border-radius:8px;padding:10px 12px;margin-top:8px;font-size:14px}
+.box b{display:block;font-size:12px;color:var(--mute);font-weight:600;margin-bottom:2px}
+.risks{margin:6px 0 0;padding-left:18px;font-size:13px;color:var(--warn)}
+.steps{list-style:none;margin:0;padding:0;display:grid;gap:12px}
+.steps li{display:grid;grid-template-columns:28px 1fr;gap:10px;align-items:start}
+.steps .n{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;font:600 13px var(--f-mono);border:1px solid var(--line);color:var(--mute)}
+.steps .ok .n{background:var(--good);border-color:var(--good);color:var(--accent-ink)}
+.steps .now .n{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.steps .now b{color:var(--fg)}
+.steps p{margin:2px 0 0;font-size:14px}
+.steps .d{font-size:13px;color:var(--accent);margin-top:2px}
+.coinrow{border-top:1px solid var(--line);padding:10px 0;display:grid;gap:4px}
+.coinrow:first-of-type{border-top:0}
+dl.gloss{margin:0;display:grid;gap:8px}dl.gloss dt{font-weight:600}dl.gloss dd{margin:0;color:var(--mute);font-size:14px}
+details.card>summary{color:var(--fg);font-size:15px}
+.nums{margin-top:8px}
 @media (prefers-reduced-motion:no-preference){.opp{transition:border-color .2s}}
 @media (max-width:360px){.kv{grid-template-columns:repeat(2,minmax(0,1fr))}}
 </style>
@@ -132,25 +159,37 @@ ul.rules{margin:0;padding-left:18px;display:grid;gap:6px}
 <div class="wrap" translate="no">
 <header>
   <div class="top"><h1>Funding Desk</h1>
-    <div class="row"><button class="icon" id="theme" aria-label="Tema">auto</button><span id="status" class="chip demo">carregando</span></div></div>
-  <div class="note mono" id="stamp" style="margin-top:6px"></div>
+    <div class="row"><span id="status" class="chip demo">carregando</span><button class="icon" id="theme" aria-label="Tema">auto</button></div></div>
 </header>
 <main>
-  <div id="banner" class="banner" hidden></div>
 
   <!-- INÍCIO -->
   <section id="tab-home" class="stack">
-    <div class="card"><h2>Fontes de dados</h2><div class="scroll"><table id="h_src"></table></div>
-      <p class="note" style="margin:8px 0 0">Tudo aqui é leitura de dados públicos. O painel não guarda chaves e não executa ordens.</p></div>
-    <div class="card" id="h_fund"></div>
-    <div class="card sig" id="h_mine"></div>
+    <div class="card"><div class="eyebrow">Copiloto</div><div class="lead" id="h_title">Lendo o mercado…</div><p class="why note" id="h_sub" style="margin:0"></p></div>
+    <div id="h_ops" class="stack"></div>
     <div class="card" id="h_alerts"></div>
+    <details class="card"><summary>Como ler os sinais</summary>
+      <ul class="rules" style="margin-top:8px">
+        <li><span class="chip ok">✓ Compensa</span> a conta fecha com folga, considerando taxas e custos.</li>
+        <li><span class="chip warn">! No limite</span> fecha com pouca folga, ou há um risco que pode virar a conta (pico, spread extremo, listing novo).</li>
+        <li><span class="chip bad">✕ Não compensa agora</span> os custos superam o que se espera receber. Veja "quando passa a compensar".</li>
+        <li>Tudo é <b>projeção</b> sobre o mercado deste momento. Funding e preço do aluguel mudam a cada hora.</li>
+      </ul>
+    </details>
+    <details class="card"><summary>Fontes de dados <span id="h_srcsum" class="note"></span></summary>
+      <div id="banner" class="banner" hidden style="margin-top:8px"></div>
+      <div class="scroll" style="margin-top:8px"><table id="h_src"></table></div>
+      <p class="note" id="stamp" style="margin:8px 0 0"></p>
+      <p class="note" style="margin:4px 0 0">Tudo é leitura de dados públicos. Operações na NiceHash passam pelo seu backend.</p>
+    </details>
+    <details class="card"><summary>Glossário</summary><dl class="gloss" id="gloss" style="margin-top:8px"></dl></details>
   </section>
 
   <!-- FUNDING -->
   <section id="tab-fund" hidden>
     <div class="seg" id="fundSeg" style="margin-bottom:12px">
-      <button data-sub="scan" aria-pressed="true">Scanner</button>
+      <button data-sub="scan" aria-pressed="true">Oportunidades</button>
+      <button data-sub="journey" aria-pressed="false">Jornada</button>
       <button data-sub="calc" aria-pressed="false">Calculadora</button>
     </div>
     <div id="fund-scan">
@@ -159,6 +198,9 @@ ul.rules{margin:0;padding-left:18px;display:grid;gap:6px}
           <button data-mode="pp" aria-pressed="true">Perp × Perp</button>
           <button data-mode="sp" aria-pressed="false">Spot + Perp</button>
         </div>
+        <p class="note" id="f_mode" style="margin:0 0 8px"></p>
+        <div class="row between"><span id="f_scen" class="note"></span><button class="sm pri" id="reload">Atualizar</button></div>
+        <details style="margin-top:8px"><summary>Ajustar cenário</summary>
         <div class="grid2">
           <label>Capital total (US$)<input id="cap" type="number" inputmode="decimal" value="1000"></label>
           <label>Alavancagem por perna<input id="lev" type="number" inputmode="decimal" value="2" step="0.5"></label>
@@ -175,18 +217,23 @@ ul.rules{margin:0;padding-left:18px;display:grid;gap:6px}
             <label>Open interest mín. (US$ mi)<input id="minoi" type="number" inputmode="decimal" value="0"></label>
             <label>Teto de spread no cálculo (% a.a.)<input id="acap" type="number" inputmode="decimal" value="150"></label>
             <label>Aviso de listing novo (dias)<input id="newdays" type="number" inputmode="decimal" value="30"></label>
+            <label>Ordenar por<select id="sort"><option value="net">Retorno líquido do ciclo</option><option value="apr">Spread anualizado</option><option value="be">Menor break-even</option></select></label>
           </div>
           <p class="note" style="margin:8px 0 0">Maker reduz a taxa, mas a ordem pode não ser executada a tempo e deixar uma perna descoberta. Rebalanceamento é a transferência entre exchanges (ex.: saque USDT pela TRON), cobrada uma vez por ciclo. OI: a Binance não informa em lote, então o filtro vale só onde há dado. Spreads extremos costumam normalizar em poucas horas; o retorno usa o spread limitado ao teto.</p>
         </details>
-        <div class="row" style="margin-top:10px">
-          <button class="pri" id="reload">Atualizar</button>
-          <label style="flex:1;min-width:120px">Ordenar por
-            <select id="sort"><option value="net">Retorno líquido do ciclo</option><option value="apr">Spread anualizado</option><option value="be">Menor break-even</option></select>
-          </label>
-        </div>
+        </details>
       </div>
       <div id="best" class="card" style="margin-bottom:12px"></div>
       <div id="list" style="display:grid;gap:10px"></div>
+    </div>
+    <div id="fund-journey" class="stack" hidden>
+      <div class="card"><div class="eyebrow">Jornada</div><div class="lead">Arbitragem de funding, do começo ao fim</div>
+        <p class="note">Ganha-se o funding pago entre quem está comprado e vendido, sem apostar na direção do preço: uma perna compensa a outra.</p>
+        <ol class="steps" id="j_fund" style="margin-top:10px"></ol></div>
+      <div class="card"><div class="eyebrow">Momentos</div><div class="lead">Quando cada tipo de operação faz sentido</div><ul class="rules" id="mo_fund" style="margin-top:8px"></ul>
+        <div class="box"><b>Perp × Perp</b>Short na exchange que paga funding mais alto, long na que paga mais baixo. Não precisa ter a moeda; usa margem nas duas.</div>
+        <div class="box"><b>Spot + Perp</b>Compra a moeda à vista e vende o perpétuo na mesma exchange. Só funciona com funding positivo; uma exchange só, sem rebalancear.</div>
+      </div>
     </div>
     <div id="fund-calc" hidden>
       <div class="card" style="margin-bottom:12px">
@@ -212,24 +259,32 @@ ul.rules{margin:0;padding-left:18px;display:grid;gap:6px}
   <section id="tab-mine" hidden>
     <div class="seg" id="mineSeg" style="margin-bottom:12px">
       <button data-sub="now" aria-pressed="true">Agora</button>
+      <button data-sub="journey" aria-pressed="false">Jornada</button>
       <button data-sub="plan" aria-pressed="false">Planejar</button>
-      <button data-sub="net" aria-pressed="false">Rede BCH</button>
       <button data-sub="ops" aria-pressed="false">Operar</button>
+      <button data-sub="net" aria-pressed="false">Rede</button>
     </div>
     <div id="mine-now" class="stack">
       <div class="card sig" id="m_sig"></div>
-      <div class="card"><h2>Números de agora <span class="tag">dado real</span></h2><div class="kv" id="m_kv"></div></div>
-      <div class="card"><h2>Livro de ordens NiceHash (SHA-256)</h2><div id="m_book"></div></div>
-      <div class="card">
-        <h2>O que decide e o que não decide</h2>
-        <ul class="rules">
-          <li><b>Decide:</b> preço do aluguel com taxas contra a receita esperada por hash. Abaixo dela, o valor esperado é positivo; acima, negativo.</li>
-          <li><b>Decide:</b> dificuldade e cotação do BCH no momento (a receita esperada muda com as duas).</li>
-          <li><b>Não decide:</b> esforço/luck acima de 100%, best share "quase pegou", tempo desde o último bloco, blocos rápidos ou lentos, potência de quem achou o último. Cada hash é uma tentativa independente.</li>
-          <li><b>Não decide:</b> parar ao achar bloco, stop loss, burst ou ordem lenta. Mudam o risco e o tamanho da aposta, não o retorno esperado por dólar. Burst ainda costuma pagar mais caro no leilão.</li>
+      <div class="card"><div class="eyebrow">Comparar</div><div class="lead">Onde o hash alugado rende mais hoje</div>
+        <p class="note" style="margin:0">BTC, BCH e BSV usam o mesmo algoritmo (SHA-256): a mesma ordem da NiceHash pode minerar qualquer um, trocando só o pool.</p>
+        <div id="m_coins" style="margin-top:6px"></div></div>
+      <details class="card"><summary>Entender os números</summary>
+        <div class="kv nums" id="m_kv"></div>
+        <h3 style="margin:14px 0 6px">Livro de ordens da NiceHash (SHA-256)</h3><div id="m_book"></div>
+        <ul class="rules note" style="margin-top:10px">
+          <li><b>Receita por PH·dia</b>: quanto 1 PH/s rende em média num dia, já sem a taxa do pool. Muda com a dificuldade e a cotação.</li>
+          <li><b>Aluguel por PH·dia</b>: o preço típico da NiceHash (mediana do livro) convertido para dólar, com a taxa de 3%.</li>
+          <li><b>Preço de empate</b>: o preço do aluguel em que custo e receita se igualam. O robô usa um teto um pouco abaixo dele.</li>
+          <li><b>PH·dia por bloco</b>: quanto hash, em média, sai um bloco. Quanto maior, mais "loteria".</li>
         </ul>
-        <p class="note" style="margin:8px 0 0">Quer testar uma tese (ex.: "rede rápida funciona melhor")? Registre cada sessão no Diário com a etiqueta. O painel compara blocos achados com os esperados por etiqueta.</p>
-      </div>
+      </details>
+    </div>
+    <div id="mine-journey" class="stack" hidden>
+      <div class="card"><div class="eyebrow">Jornada</div><div class="lead">Mineração solo com hash alugado</div>
+        <p class="note">Você aluga potência na NiceHash e aponta para um pool solo. Se a sua potência achar um bloco, a recompensa inteira vai para o seu endereço; se não achar, o aluguel é perdido.</p>
+        <ol class="steps" id="j_mine" style="margin-top:10px"></ol></div>
+      <div class="card"><div class="eyebrow">Momentos</div><div class="lead">O que melhora a conta e o que é ilusão</div><ul class="rules" id="mo_mine" style="margin-top:8px"></ul></div>
     </div>
     <div id="mine-plan" class="stack" hidden>
       <div class="card">
@@ -341,6 +396,7 @@ ul.rules{margin:0;padding-left:18px;display:grid;gap:6px}
       <button data-sub="mine" aria-pressed="false">Mineração</button>
     </div>
     <div id="diary-pos">
+      <p class="note" style="margin:0 0 10px">Seu histórico de funding: registre a entrada pelo scanner e, ao fechar, copie do extrato o funding recebido e as taxas.</p>
       <div class="card" style="margin-bottom:12px"><div class="kv" id="sum"></div></div>
       <div class="card" style="margin-bottom:12px">
         <h2>Nova posição</h2>
@@ -360,6 +416,7 @@ ul.rules{margin:0;padding-left:18px;display:grid;gap:6px}
       <div id="p_list" style="display:grid;gap:10px"></div>
     </div>
     <div id="diary-mine" class="stack" hidden>
+      <p class="note" style="margin:0">Seu histórico de mineração. Registre todas as sessões, inclusive as que perderam: é assim que se mede a sorte real e se testa cada tese.</p>
       <div class="card"><h2>Resultado real vs esperado</h2><div class="kv" id="s_sum"></div><p class="note" id="s_luck" style="margin:8px 0 0"></p></div>
       <div class="card"><h2>Teses por etiqueta</h2><div class="scroll"><table id="s_tags"></table></div>
         <p class="note" style="margin:8px 0 0">Sorte = blocos achados ÷ blocos esperados (1,00 = exatamente a média). Com poucas sessões, qualquer número é ruído; veja a coluna "por acaso".</p></div>
@@ -464,6 +521,7 @@ ul.rules{margin:0;padding-left:18px;display:grid;gap:6px}
 
 <script src="core.js"></script>
 <script src="mining.js"></script>
+<script src="copilot.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
