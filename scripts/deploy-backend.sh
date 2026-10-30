@@ -35,6 +35,16 @@ cf() { # método caminho [json]
 ok() { jq -e '.success == true' >/dev/null 2>&1; }
 err() { jq -r '[.errors[]? | "\(.code): \(.message)"] | join("; ")' 2>/dev/null || true; }
 
+# Account ID válido = 32 caracteres hexadecimais. Qualquer outra coisa é ignorada e a conta é descoberta pelo token.
+if [ -n "$CLOUDFLARE_ACCOUNT_ID" ] && ! [[ "$CLOUDFLARE_ACCOUNT_ID" =~ ^[0-9a-f]{32}$ ]]; then
+  case "$CLOUDFLARE_ACCOUNT_ID" in
+    curl*) W="CLOUDFLARE_ACCOUNT_ID contém o comando de teste (curl) que o Cloudflare mostra ao criar o token, não o Account ID." ;;
+    *) W="CLOUDFLARE_ACCOUNT_ID não parece um Account ID (são 32 letras e números; tem ${#CLOUDFLARE_ACCOUNT_ID})." ;;
+  esac
+  if [ -n "$CI_MODE" ]; then echo "::warning::$W Vou descobrir a conta pelo token. Corrija o segredo quando puder."; else echo "Aviso: $W Vou descobrir a conta pelo token."; fi
+  CLOUDFLARE_ACCOUNT_ID=""
+fi
+
 echo "1/7 Conferindo o token..."
 R=$(cf GET /user/tokens/verify)
 if ! echo "$R" | ok; then
@@ -55,6 +65,8 @@ if [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
   fi
   CLOUDFLARE_ACCOUNT_ID=$(echo "$R" | jq -r '.result[0].id')
 fi
+[ -n "$CI_MODE" ] && echo "::add-mask::$CLOUDFLARE_ACCOUNT_ID"
+[ -n "${GITHUB_OUTPUT:-}" ] && echo "account=$CLOUDFLARE_ACCOUNT_ID" >> "$GITHUB_OUTPUT"
 export CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_TOKEN
 A="/accounts/$CLOUDFLARE_ACCOUNT_ID"
 echo "  conta $CLOUDFLARE_ACCOUNT_ID"
