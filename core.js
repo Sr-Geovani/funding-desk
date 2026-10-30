@@ -31,6 +31,29 @@ function normBase(b) {
   if (m) return m[1];
   return b;
 }
+/* ---------- tipo de ativo (filtro "só cripto") ----------
+   Perpétuos de ações, ETFs, índices, metais e commodities têm funding guiado pela bolsa tradicional
+   (fecham à noite e no fim de semana, saltam na abertura). A Gate informa o tipo de cada contrato; esta lista
+   cobre os mesmos tickers nas outras exchanges e o caso de a Gate não responder. */
+var TRADFI = {};
+('AAPL AMD AMZN BABA COIN CRCL GOOGL HOOD INTC META MSFT MSTR NFLX NVDA PLTR SAMSUNG SKHYNIX TSLA ORCL AVGO ' +
+ 'GME MCD JPM V UBER SHOP ARM TSM ASML SMCI RIVN').split(' ').forEach(function (t) { TRADFI[t] = 'ação'; });
+'SPY QQQ TQQQ SOXL ARKK IWM GLD SLV'.split(' ').forEach(function (t) { TRADFI[t] = 'ETF'; });
+'SPX NDX DJI US30 NAS100 US500'.split(' ').forEach(function (t) { TRADFI[t] = 'índice'; });
+'XAU XAG XPT XPD PAXG XAUT GOLD SILVER'.split(' ').forEach(function (t) { TRADFI[t] = 'metal'; });
+'CL NG NATGAS BRENT WTI COPPER HG'.split(' ').forEach(function (t) { TRADFI[t] = 'commodity'; });
+var GATE_KIND = { stocks: 'ação', commodities: 'commodity', metals: 'metal', indices: 'índice', forex: 'câmbio', etf: 'ETF' };
+// Tipo de cada moeda base nos dados lidos: '' = cripto. Usa o que a exchange informa e a lista acima.
+function assetKinds(rows) {
+  var k = {};
+  Object.keys(rows).forEach(function (c) {
+    var v = rows[c], found = '';
+    Object.keys(v).forEach(function (x) { if (v[x] && v[x].kind) found = v[x].kind; });
+    k[c] = found || TRADFI[c] || '';
+  });
+  return k;
+}
+
 // Em colisão (ex.: PEPE e 1000PEPE na mesma exchange) fica o contrato de maior volume.
 function put(out, base, row) {
   var b = normBase(base), cur = out[b];
@@ -191,7 +214,8 @@ function parseGate(contracts, tickers) {
     put(out, c.name.slice(0, -5), {
       sym: c.name, rate: r * 100, apr: aprFrom(r, h), hours: h, vol: vol[c.name] || 0, oi: null,
       mark: parseFloat(c.mark_price) || null, next: c.funding_next_apply ? c.funding_next_apply * 1000 : null,
-      listed: c.create_time ? c.create_time * 1000 : null, capPct: null, src: 'api'
+      listed: c.create_time ? c.create_time * 1000 : null, capPct: null, src: 'api',
+      kind: GATE_KIND[c.contract_type] || (c.contract_type ? c.contract_type : '')
     });
   });
   return out;
@@ -289,6 +313,7 @@ function opportunities(rows, p) {
     return a.length ? Math.min.apply(null, a) : null;
   }
   Object.keys(rows).forEach(function (c) {
+    if (p.cryptoOnly && p.kinds && p.kinds[c]) return;
     var vs = Object.keys(rows[c]);
     if (p.mode === 'sp') {
       vs.forEach(function (s) {
@@ -449,7 +474,7 @@ var FD = {
   VENUES: VENUES, DEFAULT_FEES: DEFAULT_FEES, HOUR: HOUR, DAY: DAY,
   aprFrom: aprFrom, rateFromApr: rateFromApr, normBase: normBase, nextHour: nextHour,
   parseBinance: parseBinance, parseBybit: parseBybit, parseHL: parseHL, parsePredicted: parsePredicted,
-  parseOKX: parseOKX, parseBitget: parseBitget, parseGate: parseGate,
+  parseOKX: parseOKX, parseBitget: parseBitget, parseGate: parseGate, TRADFI: TRADFI, assetKinds: assetKinds,
   parseBinanceHist: parseBinanceHist, parseBybitHist: parseBybitHist, parseHLHist: parseHLHist,
   parseOKXHist: parseOKXHist, parseBitgetHist: parseBitgetHist, parseGateHist: parseGateHist,
   historySeries: historySeries, spreadSeries: spreadSeries, seriesStats: seriesStats,

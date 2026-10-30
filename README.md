@@ -17,6 +17,42 @@ Mineração (agora, jornada, planejar, operar, rede) · Diário · Ajustes.
 
 Pesquisa global (6 idiomas), lacunas e roteiro até a execução automática: [`docs/pesquisa-global.md`](docs/pesquisa-global.md).
 
+**Copiloto preditivo** (`insights.js`, testado):
+- **Funding, por oportunidade:**
+  - **Cronograma:** quando cai o primeiro recebimento e quanto vale, quantos pagamentos há no ciclo e em qual deles empata.
+  - **Teste no histórico real:** entrando sempre que o spread estava acima do break-even, quantas vezes o ciclo deu lucro nos últimos 7 dias (média e pior caso). Quando o spread só ficou alto no fim do período, o teste avisa que é pico.
+  - **Meta:** capital necessário para buscar US$X no ciclo, com teto de liquidez (cada perna até 0,1% do volume diário).
+- **Filtro "só cripto":** ligado por padrão. Esconde ações, ETFs, índices, metais e commodities tokenizados; a Gate informa o tipo de cada contrato e há uma lista fixa de reserva. O porquê e o quando usar "todos" estão no próprio painel.
+- **Mineração:** recomendação entre entrar (com potência sugerida para o orçamento), ordem com teto ou esperar. Mostra os fatores a favor e contra:
+  - margem do aluguel e livro raso;
+  - dificuldade contra a média;
+  - preço em 24 h;
+  - próximo reajuste do Bitcoin.
+
+  Também mostra a % do tempo em que compensou, o melhor horário, a chance de bloco na sessão sugerida, a chance real do próximo bloco da rede (sem memória), a divisão da rede entre pools e o último bloco.
+- **Plano combinado:** quanto colocar em funding, em mineração e em caixa, com projeção de 30 dias ajustada pela taxa de acerto do histórico.
+
+## O que é real e o que é registro
+
+| Parte | Hoje |
+|---|---|
+| Dados, mapas, recomendações, alertas | Reais, ao vivo (APIs públicas) |
+| Ordens de funding | **Você** abre e fecha na exchange. O painel não executa funding |
+| Diário (funding e mineração) | Registro manual; o extrato da exchange/NiceHash é o oficial |
+| Ordens na NiceHash | **Reais** quando o backend está publicado com as chaves: manuais (aba Operar) e do robô em modo Ativo. Em Observar, o robô só registra o que faria |
+
+## Para colocar em produção
+
+1. Publicar o backend no Cloudflare (seção "Backend") e conectar em Ajustes.
+2. Chaves da NiceHash, **sem saque**: primeiro de test.nicehash.com e depois da conta real.
+3. Telegram, para alertas 24 h.
+4. Endereço BCH e pool cadastrados (Operar); robô em **Observar** por alguns dias, lendo o log.
+5. `NH_ENV = "prod"`, tetos (`MAX_ORDER_BTC`, `MAX_DAILY_USD`) do tamanho do seu risco, e robô em **Ativo**.
+6. Funding automático (abrir e fechar as duas pernas): ainda a construir. Precisa de servidor no Brasil
+   (Binance e Bybit bloqueiam os EUA), chaves de trade sem saque e regras de execução simultânea.
+
+O cartão "Produção" em Ajustes mostra esse checklist com o estado ao vivo.
+
 **Copiloto** (`copilot.js`, testado): cada operação mostra o veredito (Compensa / No limite / Não compensa agora), o porquê
 em uma frase, quando passa a compensar e o que fazer. Os números técnicos ficam em "Números" / "Entender os números",
 com glossário no Início. Funding ganha o selo de estabilidade (estável, oscila, pico) pelo histórico pago de 72 h.
@@ -170,6 +206,7 @@ index.html        marcação e estilos
 app.js            interface (abas, renderização, coleta de dados)
 core.js           lógica pura de funding (normalização, parsers, cycle(), scanner, histórico, CSV/JSON)
 copilot.js        vereditos, jornadas, momentos e glossário em linguagem simples
+insights.js       cronograma, backtest, meta, previsão de mineração e plano combinado
 radar.js          mapas de funding e mineração, sentimento, padrões, alertas e players
 mining.js         lógica pura de mineração (Poisson, hashprice, aluguel, livro NiceHash, blocos BCH, diário)
 scripts/          foto do livro da NiceHash (rodada pelo workflow)

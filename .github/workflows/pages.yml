@@ -34,7 +34,7 @@ jobs:
       - name: Montar site (só arquivos públicos do app)
         run: |
           mkdir _site
-          cp -r index.html diagnostico.html core.js mining.js copilot.js radar.js app.js sw.js manifest.json icons _site/
+          cp -r index.html diagnostico.html core.js mining.js copilot.js radar.js insights.js app.js sw.js manifest.json icons _site/
       - uses: actions/setup-node@v4
         with:
           node-version: 22

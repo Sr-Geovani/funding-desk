@@ -244,3 +244,19 @@ test('seis exchanges: taxas padrão e oportunidades entre qualquer par', () => {
   assert.deepEqual([o[0].s, o[0].l], ['OKX', 'Gate']);
   assert.ok(Object.keys(FD.demoData(NOW).BTC).length === 3, 'dados de exemplo continuam com 3 exchanges');
 });
+
+test('filtro só cripto: tipo do ativo pela Gate e pela lista de reserva', () => {
+  const gate = FD.parseGate([
+    { name: 'NVDA_USDT', funding_rate: '0.0005', funding_interval: 28800, contract_type: 'stocks' },
+    { name: 'CL_USDT', funding_rate: '0.0001', funding_interval: 28800, contract_type: 'commodities' },
+    { name: 'ETH_USDT', funding_rate: '0.0001', funding_interval: 28800, contract_type: '' }
+  ], []);
+  assert.equal(gate.NVDA.kind, 'ação'); assert.equal(gate.CL.kind, 'commodity'); assert.equal(gate.ETH.kind, '');
+  const rows = { NVDA: { Gate: gate.NVDA, OKX: { apr: 1, vol: 1e9 } }, SOXL: { OKX: { apr: 90, vol: 1e9 }, Bitget: { apr: 1, vol: 1e9 } }, ETH: { Gate: gate.ETH } };
+  const k = FD.assetKinds(rows);
+  assert.deepEqual(k, { NVDA: 'ação', SOXL: 'ETF', ETH: '' });
+  const p = { capital: 1000, lev: 2, hold: 3, minVol: 0, aprCap: 150, mode: 'pp', fees: FD.DEFAULT_FEES, execShort: 'taker', execLong: 'taker', slipPct: 0.03, rebalUsd: 1, sort: 'net', now: NOW };
+  assert.ok(FD.opportunities(rows, p).some((o) => o.coin === 'SOXL'));
+  assert.ok(!FD.opportunities(rows, Object.assign({ cryptoOnly: true, kinds: k }, p)).some((o) => o.coin === 'SOXL'));
+  assert.equal(FD.TRADFI.PAXG, 'metal', 'ouro tokenizado segue o preço do ouro');
+});

@@ -184,6 +184,8 @@ details.card>summary{color:var(--fg);font-size:15px}
   <section id="tab-home" class="stack">
     <div class="card"><div class="eyebrow">Copiloto</div><div class="lead" id="h_title">Lendo o mercado…</div><p class="why note" id="h_sub" style="margin:0"></p></div>
     <div id="h_ops" class="stack"></div>
+    <div class="card" id="h_plan"></div>
+    <div class="card" id="h_real"></div>
     <div class="card" id="h_alerts"></div>
     <details class="card"><summary>Como ler os sinais</summary>
       <ul class="rules" style="margin-top:8px">
@@ -239,6 +241,14 @@ details.card>summary{color:var(--fg);font-size:15px}
           <button data-mode="sp" aria-pressed="false">Spot + Perp</button>
         </div>
         <p class="note" id="f_mode" style="margin:0 0 8px"></p>
+        <div class="row between" style="margin-bottom:6px"><span class="checks"><label><input type="checkbox" id="f_crypto" checked>Só cripto</label></span><span class="note" id="f_hidden"></span></div>
+        <details style="margin:0 0 8px"><summary>Por que filtrar e quando usar "todos"</summary>
+          <p class="note" style="margin:4px 0">As exchanges também listam perpétuos de ações (NVDA, TSLA), ETFs (SOXL, QQQ), índices (SPX), metais (ouro, prata, PAXG) e commodities (petróleo CL, gás NG). Eles costumam aparecer no topo com spreads altos, mas:</p>
+          <ul class="rules note"><li>o preço segue a bolsa tradicional: fecha à noite e no fim de semana e pode saltar na abertura, o que pode liquidar uma perna;</li>
+          <li>o funding fica distorcido enquanto a bolsa está fechada e volta ao normal quando abre;</li>
+          <li>a liquidez nas exchanges cripto é menor e as regras (alavancagem, horários) mudam por exchange.</li></ul>
+          <p class="note" style="margin:4px 0"><b>Use "só cripto"</b> no dia a dia e enquanto estiver aprendendo. <b>Use "todos"</b> só se você conhece o ativo, sabe o horário da bolsa dele e opera com tamanho menor; o painel marca cada um com o tipo (ação, ETF, metal…).</p>
+        </details>
         <div class="row between"><span id="f_scen" class="note"></span><button class="sm pri" id="reload">Atualizar</button></div>
         <details style="margin-top:8px"><summary>Ajustar cenário</summary>
         <div class="grid2">
@@ -257,6 +267,7 @@ details.card>summary{color:var(--fg);font-size:15px}
             <label>Open interest mín. (US$ mi)<input id="minoi" type="number" inputmode="decimal" value="0"></label>
             <label>Teto de spread no cálculo (% a.a.)<input id="acap" type="number" inputmode="decimal" value="150"></label>
             <label>Aviso de listing novo (dias)<input id="newdays" type="number" inputmode="decimal" value="30"></label>
+            <label>Meta por ciclo (US$)<input id="f_target" type="number" inputmode="decimal" value="50"></label>
             <label>Ordenar por<select id="sort"><option value="net">Retorno líquido do ciclo</option><option value="apr">Spread anualizado</option><option value="be">Menor break-even</option></select></label>
           </div>
           <p class="note" style="margin:8px 0 0">Maker reduz a taxa, mas a ordem pode não ser executada a tempo e deixar uma perna descoberta. Rebalanceamento é a transferência entre exchanges (ex.: saque USDT pela TRON), cobrada uma vez por ciclo. OI: a Binance não informa em lote, então o filtro vale só onde há dado. Spreads extremos costumam normalizar em poucas horas; o retorno usa o spread limitado ao teto.</p>
@@ -306,6 +317,7 @@ details.card>summary{color:var(--fg);font-size:15px}
     </div>
     <div id="mine-now" class="stack">
       <div class="card sig" id="m_sig"></div>
+      <div class="card" id="m_out"></div>
       <div class="card"><div class="eyebrow">Comparar</div><div class="lead">Onde o hash alugado rende mais hoje</div>
         <p class="note" style="margin:0">BTC, BCH e BSV usam o mesmo algoritmo (SHA-256): a mesma ordem da NiceHash pode minerar qualquer um, trocando só o pool.</p>
         <div id="m_coins" style="margin-top:6px"></div></div>
@@ -491,6 +503,7 @@ details.card>summary{color:var(--fg);font-size:15px}
 
   <!-- AJUSTES -->
   <section id="tab-set" class="stack" hidden>
+    <div class="card" id="prod"></div>
     <div class="card">
       <h2>Conexões</h2>
       <div class="scroll"><table id="conn"></table></div>
@@ -564,6 +577,7 @@ details.card>summary{color:var(--fg);font-size:15px}
 <script src="mining.js"></script>
 <script src="copilot.js"></script>
 <script src="radar.js"></script>
+<script src="insights.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
