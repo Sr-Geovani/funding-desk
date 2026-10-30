@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: ['worker/**', 'core.js', 'radar.js', 'copilot.js', '.github/workflows/worker.yml']
+    paths: ['worker/**', 'core.js', 'radar.js', 'copilot.js', 'scripts/deploy-backend.sh', '.github/workflows/worker.yml']
 permissions:
   contents: read
 jobs:
@@ -28,54 +28,36 @@ jobs:
           else
             echo "ok=1" >> "$GITHUB_OUTPUT"
           fi
-      - name: KV do robô (cria se não existir)
+      # Mesmo script da instalação manual: conta, subdomínio, KV, deploy, ENC_KEY e PANEL_TOKEN (do segredo do GitHub).
+      # Em Actions o log é público: o script não imprime token nem link.
+      - name: Publicar backend
+        id: deploy
         if: steps.creds.outputs.ok == '1'
-        working-directory: worker
-        run: |
-          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/storage/kv/namespaces"
-          ID=$(curl -sf -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$API?per_page=100" | jq -r '.result[] | select(.title=="funding-desk-kv") | .id')
-          if [ -z "$ID" ]; then
-            ID=$(curl -sf -X POST -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" -d '{"title":"funding-desk-kv"}' "$API" | jq -r '.result.id')
-          fi
-          test -n "$ID" && test "$ID" != "null"
-          sed -i "s/__KV_ID__/$ID/" wrangler.toml
-      - name: Deploy
-        if: steps.creds.outputs.ok == '1'
-        working-directory: worker
-        shell: bash
-        run: npx --yes wrangler@4.149.0 deploy 2>&1 | tee deploy.log
-      # Chave que cifra as contas cadastradas pelo painel. Criada uma vez; nunca trocada (trocar apagaria as contas).
-      - name: Chave de cifra (cria se faltar)
-        if: steps.creds.outputs.ok == '1'
-        working-directory: worker
-        run: |
-          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/funding-desk-api/secrets"
-          if curl -sf -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$API" | jq -e '.result[] | select(.name=="ENC_KEY")' >/dev/null; then
-            echo "ENC_KEY já existe"
-          else
-            openssl rand -hex 32 | tr -d '\n' | npx --yes wrangler@4.149.0 secret put ENC_KEY >/dev/null && echo "ENC_KEY criado"
-          fi
-      # Opcional: se estes segredos existirem no GitHub, são copiados para o Worker.
-      # Recomendado: cadastrar NiceHash e Telegram no painel (Ajustes → Conectar contas), cifrados no backend.
-      - name: Segredos do Worker (opcionais)
-        if: steps.creds.outputs.ok == '1'
-        working-directory: worker
         env:
           PANEL_TOKEN: ${{ secrets.PANEL_TOKEN }}
+        run: bash scripts/deploy-backend.sh
+      # Opcional: segredos NH_*/TELEGRAM_* do GitHub vão para o Worker. Recomendado: Ajustes → Conectar contas (cifrado no backend).
+      - name: Segredos do Worker (opcionais)
+        if: steps.creds.outputs.ok == '1'
+        env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           NH_API_KEY: ${{ secrets.NH_API_KEY }}
           NH_API_SECRET: ${{ secrets.NH_API_SECRET }}
           NH_ORG_ID: ${{ secrets.NH_ORG_ID }}
         run: |
-          for k in PANEL_TOKEN TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID NH_API_KEY NH_API_SECRET NH_ORG_ID; do
+          T=$(printf '%s' "$CLOUDFLARE_API_TOKEN" | tr -d '[:space:]'); A=$(printf '%s' "$CLOUDFLARE_ACCOUNT_ID" | tr -d '[:space:]')
+          echo "::add-mask::$T"
+          for k in TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID NH_API_KEY NH_API_SECRET NH_ORG_ID; do
             v="${!k}"
-            if [ -n "$v" ]; then printf '%s' "$v" | npx --yes wrangler@4.149.0 secret put "$k" >/dev/null && echo "segredo $k atualizado"; fi
+            [ -n "$v" ] || continue
+            curl -sS -X PUT -H "Authorization: Bearer $T" -H 'Content-Type: application/json' \
+              --data "$(jq -n --arg n "$k" --arg v "$v" '{name:$n,text:$v,type:"secret_text"}')" \
+              "https://api.cloudflare.com/client/v4/accounts/$A/workers/scripts/funding-desk-api/secrets" | jq -e '.success' >/dev/null && echo "segredo $k atualizado"
           done
       # Resumo da execução: endereço do backend, saúde e o que falta (aparece na página da execução).
       - name: Resumo
         if: always()
-        working-directory: worker
         env:
           PANEL_TOKEN: ${{ secrets.PANEL_TOKEN }}
         run: |
@@ -85,14 +67,15 @@ jobs:
             echo "Faltam os segredos CLOUDFLARE_API_TOKEN e CLOUDFLARE_ACCOUNT_ID. Alternativa: scripts/deploy-backend.sh com um token do Cloudflare." >> "$S"
             exit 0
           fi
-          URL=$(grep -o 'https://[a-zA-Z0-9.-]*\.workers\.dev' deploy.log | head -1 || true)
-          echo "### Backend publicado" >> "$S"
-          if [ -n "$URL" ]; then
-            echo "Endereço para colar no painel (Ajustes → Backend): **$URL**" >> "$S"
-            H=$(curl -s -m 20 "$URL/health" || true); echo "" >> "$S"; echo "Saúde: \`$H\`" >> "$S"
-          else
-            echo "Não achei o endereço no log. Confira se a conta tem um subdomínio workers.dev (Workers & Pages)." >> "$S"
+          URL="${{ steps.deploy.outputs.url }}"
+          if [ "${{ steps.deploy.outcome }}" != "success" ]; then
+            echo "### Backend não publicado" >> "$S"
+            echo "A etapa **Publicar backend** falhou; o motivo está no log dela (mensagem do Cloudflare)." >> "$S"
+            exit 0
           fi
+          echo "### Backend publicado" >> "$S"
+          echo "Endereço: **$URL**" >> "$S"
+          echo "" >> "$S"; echo "Saúde: \`${{ steps.deploy.outputs.health }}\`" >> "$S"
           echo "" >> "$S"
           [ -n "$PANEL_TOKEN" ] && echo "- PANEL_TOKEN no GitHub: ok" >> "$S" || echo "- PANEL_TOKEN no GitHub: não (normal se a instalação foi pelo script)" >> "$S"
           echo "- NiceHash e Telegram: cadastre no painel, Ajustes → Conectar contas (ficam cifrados no backend)" >> "$S"

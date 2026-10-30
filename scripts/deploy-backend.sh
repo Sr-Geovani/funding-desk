@@ -4,7 +4,9 @@
 #   CLOUDFLARE_API_TOKEN=... bash scripts/deploy-backend.sh
 #
 # Opcionais: CLOUDFLARE_ACCOUNT_ID (descoberto sozinho se o token enxergar uma conta só),
-#            ROTATE_PANEL_TOKEN=1 (gera um token do painel novo), PANEL_URL (endereço do painel).
+#            ROTATE_PANEL_TOKEN=1 (gera um token do painel novo), PANEL_URL (endereço do painel),
+#            PANEL_TOKEN (usa este token do painel em vez de gerar um).
+# No GitHub Actions (log público) nunca imprime token nem link: só usa PANEL_TOKEN se vier dos segredos.
 #
 # Passos: confere o token → acha a conta → cria o subdomínio workers.dev se faltar → cria/acha o KV →
 # publica o Worker → cria os segredos PANEL_TOKEN e ENC_KEY só se faltarem → testa /health.
@@ -12,6 +14,12 @@
 # Chaves da NiceHash e do Telegram NÃO passam por aqui: são cadastradas no painel e ficam cifradas no backend.
 set -euo pipefail
 : "${CLOUDFLARE_API_TOKEN:?defina CLOUDFLARE_API_TOKEN}"
+# Espaço ou quebra de linha colados junto com o token são a causa mais comum de "token inválido".
+CLOUDFLARE_API_TOKEN=$(printf '%s' "$CLOUDFLARE_API_TOKEN" | tr -d '[:space:]')
+CLOUDFLARE_ACCOUNT_ID=$(printf '%s' "${CLOUDFLARE_ACCOUNT_ID:-}" | tr -d '[:space:]')
+PANEL_TOKEN=$(printf '%s' "${PANEL_TOKEN:-}" | tr -d '[:space:]')
+CI_MODE=${GITHUB_ACTIONS:-}
+if [ -n "$CI_MODE" ]; then echo "::add-mask::$CLOUDFLARE_API_TOKEN"; [ -n "$CLOUDFLARE_ACCOUNT_ID" ] && echo "::add-mask::$CLOUDFLARE_ACCOUNT_ID"; [ -n "$PANEL_TOKEN" ] && echo "::add-mask::$PANEL_TOKEN"; fi
 CF=https://api.cloudflare.com/client/v4
 NAME=funding-desk-api
 KV_TITLE=funding-desk-kv
@@ -29,7 +37,12 @@ err() { jq -r '[.errors[]? | "\(.code): \(.message)"] | join("; ")' 2>/dev/null 
 
 echo "1/7 Conferindo o token..."
 R=$(cf GET /user/tokens/verify)
-echo "$R" | ok || { echo "Token recusado: $(echo "$R" | err)"; exit 1; }
+if ! echo "$R" | ok; then
+  E1=$(echo "$R" | err)
+  # Token de conta (Manage Account → API Tokens) se confere em outro endereço.
+  if [ -n "$CLOUDFLARE_ACCOUNT_ID" ] && R2=$(cf GET "/accounts/$CLOUDFLARE_ACCOUNT_ID/tokens/verify") && echo "$R2" | ok; then echo "  token de conta ok"
+  else echo "Token recusado pelo Cloudflare: $E1 ${R2:+/ $(echo "$R2" | err)}"; exit 1; fi
+else echo "  ok"; fi
 
 echo "2/7 Conta..."
 if [ -z "${CLOUDFLARE_ACCOUNT_ID:-}" ]; then
@@ -93,7 +106,11 @@ put_secret() {
 if grep -qx ENC_KEY <<<"$HAVE"; then echo "  ENC_KEY já existe (mantido: trocar apagaria as chaves cadastradas)"
 else put_secret ENC_KEY "$(openssl rand -hex 32)"; echo "  ENC_KEY criado (cifra das chaves cadastradas no painel)"; fi
 NEW_TOKEN=""
-if grep -qx PANEL_TOKEN <<<"$HAVE" && [ "${ROTATE_PANEL_TOKEN:-}" != 1 ]; then echo "  PANEL_TOKEN já existe (mantido; ROTATE_PANEL_TOKEN=1 gera outro)"
+if [ -n "$PANEL_TOKEN" ]; then
+  [ ${#PANEL_TOKEN} -ge 24 ] || { echo "PANEL_TOKEN informado tem menos de 24 caracteres"; exit 1; }
+  put_secret PANEL_TOKEN "$PANEL_TOKEN"; echo "  PANEL_TOKEN gravado (o informado)"
+elif grep -qx PANEL_TOKEN <<<"$HAVE" && [ "${ROTATE_PANEL_TOKEN:-}" != 1 ]; then echo "  PANEL_TOKEN já existe (mantido; ROTATE_PANEL_TOKEN=1 gera outro)"
+elif [ -n "$CI_MODE" ]; then echo "::warning::Backend sem PANEL_TOKEN. Rode scripts/deploy-backend.sh fora do GitHub (gera o token e o link) ou cadastre o segredo PANEL_TOKEN no GitHub."
 else NEW_TOKEN=$(openssl rand -hex 20); put_secret PANEL_TOKEN "$NEW_TOKEN"; echo "  PANEL_TOKEN criado"; fi
 
 echo "7/7 Testando $URL ..."
@@ -109,6 +126,7 @@ if [ -n "$NEW_TOKEN" ]; then
   echo "  login com o token novo: $(echo "$C" | jq -c '{cifra: .encryption, nicehash: .nicehash.set, telegram: .telegram.set}' 2>/dev/null || echo "$C")"
 fi
 
+if [ -n "${GITHUB_OUTPUT:-}" ]; then { echo "url=$URL"; echo "health=$H"; } >> "$GITHUB_OUTPUT"; fi
 echo
 echo "================ PRONTO ================"
 echo "Backend: $URL"
