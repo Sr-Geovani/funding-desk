@@ -17,7 +17,7 @@ button{font:inherit;padding:9px 12px;border-radius:8px}
 </head>
 <body>
 <h1>Diagnóstico de APIs</h1>
-<p><small>Chama cada endpoint público deste navegador e confere status, CORS e campos usados pelo painel. Nenhuma chave é usada.</small></p>
+<p><small>Chama cada endpoint público deste navegador e confere status, CORS e campos usados pelo painel. Nenhuma chave é usada. Abra pelo Safari ou Chrome: visualizadores de arquivo de apps de mensagem bloqueiam a rede e fazem tudo falhar.</small></p>
 <button id="go">Rodar teste</button> <button id="copy">Copiar resultado</button>
 <div id="out"></div>
 <script>
@@ -30,7 +30,12 @@ var T=[
  {n:'Bybit instruments-info',u:'https://api.bybit.com/v5/market/instruments-info?category=linear&limit=1000',f:['symbol','fundingInterval','launchTime','status'],pick:function(d){return d.result.list},extra:function(d){return 'nextPageCursor='+(d.result.nextPageCursor||'(vazio)')}},
  {n:'Bybit funding/history',u:'https://api.bybit.com/v5/market/funding/history?category=linear&symbol=BTCUSDT&limit=5',f:['symbol','fundingRate','fundingRateTimestamp'],pick:function(d){return d.result.list}},
  {n:'Hyperliquid metaAndAssetCtxs',u:'https://api.hyperliquid.xyz/info',body:{type:'metaAndAssetCtxs'},f:['funding','dayNtlVlm','markPx','premium'],pick:function(d){return d[1]},extra:function(d){return 'universe='+d[0].universe.length}},
- {n:'Hyperliquid fundingHistory',u:'https://api.hyperliquid.xyz/info',body:{type:'fundingHistory',coin:'BTC',startTime:Date.now()-864e5},f:['coin','fundingRate','time'],pick:function(d){return d}}
+ {n:'Hyperliquid fundingHistory',u:'https://api.hyperliquid.xyz/info',body:{type:'fundingHistory',coin:'BTC',startTime:Date.now()-864e5},f:['coin','fundingRate','time'],pick:function(d){return d}},
+ {n:'Blockchair BCH stats',u:'https://api.blockchair.com/bitcoin-cash/stats',f:['difficulty','market_price_usd','blocks_24h'],pick:function(d){return [d.data]}},
+ {n:'Blockchair BCH blocos',u:'https://api.blockchair.com/bitcoin-cash/blocks?limit=5',f:['id','time','difficulty','coinbase_data_hex'],pick:function(d){return d.data}},
+ {n:'CoinGecko cotações',u:'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,bitcoin-cash&vs_currencies=usd',f:['bitcoin','bitcoin-cash'],pick:function(d){return [d]}},
+ {n:'NiceHash foto (GitHub)',u:'data/nicehash.json',f:['market','minActive','medianWeighted'],pick:function(d){return d.markets},extra:function(d){return 'foto de '+d.at+(d.error?' · erro: '+d.error:'')}},
+ {n:'NiceHash direto (esperado falhar: CORS)',u:'https://api2.nicehash.com/main/api/v2/hashpower/orderBook?algorithm=SHA256',f:['orders'],pick:function(d){return Object.values(d.stats)}}
 ];
 var log=[];
 function line(t,ok,msg){var d=document.createElement('div');d.className='r';d.innerHTML='<b class="'+(ok?'ok':'no')+'">'+(ok?'OK ':'FALHA ')+t.n+'</b><small>'+msg+'</small>';document.getElementById('out').appendChild(d);log.push((ok?'OK ':'FALHA ')+t.n+' | '+msg.replace(/<[^>]+>/g,''))}

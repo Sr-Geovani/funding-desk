@@ -1,9 +1,10 @@
 // Cloudflare Worker: proxy mínimo, só GET, só dados públicos de mercado. Sem chaves, sem segredos, sem logs de usuário.
-// Rotas: /binance/fapi/v1/<endpoint>?...  e  /bybit/v5/market/<endpoint>?...
-const UPSTREAM = { binance: 'https://fapi.binance.com', bybit: 'https://api.bybit.com' };
+// Rotas: /binance/fapi/v1/<endpoint>?..., /bybit/v5/market/<endpoint>?... e /nicehash/main/api/v2/<endpoint>?...
+const UPSTREAM = { binance: 'https://fapi.binance.com', bybit: 'https://api.bybit.com', nicehash: 'https://api2.nicehash.com' };
 const ALLOW = {
   binance: /^\/fapi\/v1\/(premiumIndex|ticker\/24hr|fundingInfo|fundingRate|exchangeInfo)$/,
-  bybit: /^\/v5\/market\/(tickers|instruments-info|funding\/history)$/
+  bybit: /^\/v5\/market\/(tickers|instruments-info|funding\/history)$/,
+  nicehash: /^\/main\/api\/v2\/(hashpower\/orderBook|public\/stats\/global\/current|mining\/algorithms)$/
 };
 // Restrinja ao domínio do seu painel (ex.: 'https://seu-usuario.github.io'). '*' aceita qualquer origem.
 const ALLOWED_ORIGIN = '*';
@@ -18,7 +19,7 @@ export default {
     if (req.method === 'OPTIONS') return new Response(null, { headers: cors });
     if (req.method !== 'GET') return new Response('method not allowed', { status: 405, headers: cors });
     const url = new URL(req.url);
-    const m = /^\/(binance|bybit)(\/.*)$/.exec(url.pathname);
+    const m = /^\/(binance|bybit|nicehash)(\/.*)$/.exec(url.pathname);
     if (!m || !ALLOW[m[1]].test(m[2])) return new Response('not found', { status: 404, headers: cors });
     const up = await fetch(UPSTREAM[m[1]] + m[2] + url.search, {
       headers: { accept: 'application/json' },

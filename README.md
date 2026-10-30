@@ -1,7 +1,11 @@
 # Funding Desk
 
-Painel web (PWA simples) para acompanhar e operar **manualmente** arbitragem de funding em perpétuos:
-Perp × Perp (short onde o funding é mais alto, long onde é mais baixo) e Spot + Perp.
+Painel web (PWA simples) para acompanhar e operar **manualmente**:
+
+- **Funding:** arbitragem de funding em perpétuos, Perp × Perp (short onde o funding é mais alto, long onde é mais baixo) e Spot + Perp.
+- **Mineração:** mineração solo de Bitcoin Cash com hashrate alugado (NiceHash, MRR), com sinal de valor esperado, planejador de sessão e diário que testa hipóteses.
+
+Abas: Início (fontes e sinais) · Funding (scanner, calculadora) · Mineração (agora, planejar, rede BCH) · Diário (posições e sessões) · Ajustes.
 
 - **Só lê dados públicos.** Não executa ordens e não guarda chaves de API. Não coloque segredos neste repositório.
 - HTML/CSS/JS sem build. Lógica pura em `core.js` (testada); interface em `index.html`.
@@ -28,13 +32,32 @@ Perp × Perp (short onde o funding é mais alto, long onde é mais baixo) e Spot
 Tickers com multiplicador são unificados: `1000PEPE`, `kPEPE`, `SHIB1000`, `1MBABYDOGE` → `PEPE`, `SHIB`, `BABYDOGE`.
 Anualização: `% a.a. = taxa por intervalo × 8760 / horas do intervalo × 100` (APR simples, sem juros compostos).
 
+## Mineração: o que o painel calcula
+
+| Número | Como |
+|---|---|
+| Receita esperada por PH/s·dia (hashprice) | `recompensa × preço ÷ (D × 2^32 / 10^15 / 86400)` |
+| Blocos esperados (λ) | `PH/s × 10^15 × segundos ÷ (D × 2^32)`; chances por Poisson |
+| Aluguel | preço NiceHash (BTC/EH/dia) ÷ 1000 × BTC × (1 + 3%) + 0,00001 BTC por ordem |
+| Sinal | só o aluguel com taxas vs a receita esperada após a taxa do pool. Verde = valor esperado positivo |
+| Sorte real (diário) | blocos achados ÷ λ somado, com a chance de o resultado ser só acaso |
+
+Não entram no sinal, porque não mudam a chance de um hash (cada hash é independente): esforço/luck, best share,
+tempo desde o último bloco, blocos rápidos/lentos, potência de quem achou o último. Para testar essas teses com dados,
+registre as sessões com etiquetas: o diário compara blocos reais com os esperados por etiqueta.
+
+Fontes: Blockchair (dificuldade, blocos e cotação do BCH; grátis tem limite por IP, por isso a leitura é a cada 5 min),
+mempool.space e CoinGecko (BTC), NiceHash (livro de ordens). A NiceHash não aceita chamadas do navegador (CORS):
+o workflow publica `data/nicehash.json` a cada ~10 min (o GitHub pode atrasar) ou use o proxy em tempo real.
+
 ## Rodar local
 
 ```bash
 python3 -m http.server 8000
 ```
 
-Abra http://localhost:8000. Abrir o `index.html` direto do disco também funciona, mas sem service worker.
+Abra http://localhost:8000. Para ter a foto da NiceHash localmente: `node scripts/snapshot-nicehash.js data/nicehash.json`.
+Abrir o `index.html` direto do disco funciona, mas sem service worker. Não abra pelo visualizador de arquivos de apps de mensagem: ele bloqueia a rede.
 
 Testes (Node 18+ e nenhuma dependência):
 
@@ -84,12 +107,15 @@ Para 3 moedas (ex.: BTC, ETH, SOL), anote ao mesmo tempo:
 ## Estrutura
 
 ```
-index.html        interface
-core.js           lógica pura (normalização, parsers, cycle(), scanner, histórico, CSV/JSON)
+index.html        marcação e estilos
+app.js            interface (abas, renderização, coleta de dados)
+core.js           lógica pura de funding (normalização, parsers, cycle(), scanner, histórico, CSV/JSON)
+mining.js         lógica pura de mineração (Poisson, hashprice, aluguel, livro NiceHash, blocos BCH, diário)
+scripts/          foto do livro da NiceHash (rodada pelo workflow)
 diagnostico.html  teste dos endpoints a partir do navegador
 sw.js, manifest.json, icons/   PWA
 worker/           proxy opcional (Cloudflare Workers)
-tests/            node --test; fixtures reais (Hyperliquid) e sintéticas (Binance/Bybit)
+tests/            node --test; fixtures reais (Hyperliquid, Blockchair, NiceHash) e sintéticas (Binance/Bybit)
 ```
 
 ## Próximos passos
