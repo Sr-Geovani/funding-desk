@@ -888,6 +888,8 @@ function renderAct(){
         kvJ('Duração',nf(M.durationH,1)+' h','',null,'janelas costumam durar ~2 h')+
         kvJ('Chance de bloco',pctp(M.chance*100,0),M.chance>=0.25?'good':'neutral',M.chance>=0.25?'↑ boa por sessão':'→ baixa por sessão','sem bloco: perde o orçamento')+
         kvJ('Bloco vale',usd(M.blockUsd||0,0),'',null,'recompensa já sem a taxa do pool')+'</div>'+
+        (M.why?'<details style="margin-top:8px"><summary>Por que '+M.ph+' PH/s?</summary><ol class="note" style="margin:6px 0 0;padding-left:18px">'+M.why.map(function(w){return '<li>'+esc(w)+'</li>'}).join('')+'</ol>'+
+          (M.alt?'<div class="scroll"><table style="margin-top:6px"><tr><th>Potência</th><th>Gasto em 2 h</th><th>Chance de bloco</th></tr>'+M.alt.map(function(a){return '<tr><td>'+a.ph+' PH/s</td><td>'+usd(a.costUsd,0)+'</td><td>'+pctp(a.chance*100,0)+'</td></tr>'}).join('')+'</table></div><p class="note" style="margin:4px 0 0">Chance e gasto crescem juntos: a média por dólar é igual. Se quiser arriscar menos por sessão, baixe o orçamento (Operar → Stop-loss por sessão) que a potência sugerida cai junto.</p>':'')+'</details>':'')+
         '<div class="row" style="margin-top:10px"><button class="sm pri" data-plan="apply">Aplicar plano no robô</button></div>';
     }
     if(P.blockers&&P.blockers.length)h+='<div class="eyebrow" style="margin:12px 0 6px">O que trava para operar ('+P.blockers.length+')</div><div class="stack" style="gap:6px">'+P.blockers.map(function(b,i){

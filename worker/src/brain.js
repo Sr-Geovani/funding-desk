@@ -136,15 +136,22 @@ export function actionPlan(ctx) {
     const perPhDay = mkt.bidEH / 1000 * mkt.btcUsd * (1 + cfg.rentFeePct / 100); // US$ por PH/s por dia no lance
     const hours = 2; // janelas costumam durar ~2 h (pesquisa): gastar o orçamento da sessão nesse tempo
     const book = mkt.bookTotalPH || 0;
-    let ph = Math.floor(budget / (perPhDay * hours / 24));
-    ph = Math.max(1, Math.min(ph, limits.maxLimitPh, book ? Math.floor(book * 0.05) : ph)); // até 5% do hash alugado no mercado
+    const rawPh = Math.floor(budget / (perPhDay * hours / 24)), liq = book ? Math.floor(book * 0.05) : Infinity;
+    let ph = Math.max(1, Math.min(rawPh, limits.maxLimitPh, liq)); // até o teto do servidor e 5% do hash alugado no mercado
+    const capBy = ph < rawPh ? (ph === limits.maxLimitPh ? `teto de segurança do servidor (${limits.maxLimitPh} PH/s)` : 'liquidez: 5% do hash alugado no mercado') : null;
+    // comparação: o que cada potência faz numa janela típica de ~2 h (mesma média por dólar; muda chance e gasto)
+    const alt = [10, 30, ph].filter((x, i, a) => a.indexOf(x) === i).map((x) => { const c = x * perPhDay / 24 * hours, l = x / mkt.phDaysPerBlock * hours / 24; return { ph: x, costUsd: c, chance: 1 - Math.exp(-l) }; });
     const costH = ph * perPhDay / 24, dur = Math.min(24, budget / costH);
     const lam = ph / mkt.phDaysPerBlock * dur / 24, chance = 1 - Math.exp(-lam);
     const amountBtc = Math.max(0.001, Math.min(limits.maxOrderBtc, budget / mkt.btcUsd));
     const green = mkt.green;
     out.mining = {
       action: green ? 'alugar' : 'esperar', edge: mkt.edgeAtBidPct, price: mkt.bidEH, maxPrice: mkt.capEH, ph, budgetUsd: budget, durationH: dur,
-      amountBtc: +amountBtc.toFixed(4), chance, expBlocks: lam, costPerHourUsd: costH, blockUsd: mkt.blockNetUsd,
+      amountBtc: +amountBtc.toFixed(4), chance, expBlocks: lam, costPerHourUsd: costH, blockUsd: mkt.blockNetUsd, alt,
+      why: [`Orçamento por sessão: US$${n(budget, 0)} (o seu stop-loss). É o máximo que você aceita perder se não sair bloco.`,
+        `As janelas boas duram ~2 h (pesquisa de 6 meses). A potência é a que gasta esse orçamento dentro de uma janela: US$${n(budget, 0)} ÷ (US$${n(perPhDay / 24, 2)} por PH/s por hora × 2 h) = ${rawPh} PH/s.`,
+        capBy ? `Limitado a ${ph} PH/s pelo ${capBy}.` : `Cabe no teto de segurança (${limits.maxLimitPh} PH/s) e na liquidez do mercado.`,
+        'Por dólar gasto, a média é a mesma com qualquer potência. Mais potência = mais chance enquanto a janela está aberta (e o orçamento acaba mais rápido); menos potência = a janela fecha antes de você usar o orçamento.'],
       title: green ? `Alugar agora: ${ph} PH/s a até ${n(mkt.capEH, 4)}` : `Esperar: o aluguel está acima do preço que compensa`,
       text: green
         ? `Margem de ${n(mkt.edgeAtBidPct, 1)}% no lance. Com ${ph} PH/s (~US$${n(costH, 0)}/h), o orçamento de US$${n(budget, 0)} dura ~${n(dur, 1)} h e dá ${n(chance * 100, 0)}% de chance de achar um bloco (~US$${n(mkt.blockNetUsd, 0)}). Parar no bloco; stop-loss em US$${n(budget, 0)}.`
