@@ -143,6 +143,7 @@ sempre identificado; nada de prometer previsão de sorte (Poisson é sem memóri
   rede), esperado, custo no preço de cada momento (mediana registrada do livro), receita, lucro e %. Testes de padrão
   em todo o registro (correlação entre blocos seguidos, "fácil depois de fácil", hora do dia, qui² dos sorteios): com
   1.039 blocos reais de 7 dias, tudo dentro do acaso. Tela: Mineração → Rede.
+- Cartilha de entrada (mineração): `worker/src/entry.js` avalia a cada ciclo os 9 fatores em sequência (margem real na NiceHash, margem sem taxa na Braiins, DARR, BCH/BTC × média de 2 dias, blocos em 6 h, reajuste do BTC, horário, potência ideal e capital, a tentativa) e dá o veredito (entrar, cautela, esperar, não entrar); fica em `entryCheck` no status e aparece em Mineração → Agora. Explicação do ecossistema e da sequência: `docs/cartilha-mineracao.md`.
 - Ciclo do servidor: 3 min. Mínimo do Cloudflare é 1 min, mas o KV grátis aceita 1.000 gravações/dia e propaga em até
   60 s; abaixo de 3 min exige plano pago + Durable Objects. Atraso de 3 min custa < US$1 com 10 PH/s.
 

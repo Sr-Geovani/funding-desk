@@ -1038,6 +1038,28 @@ test('placar da sorte: blocos que seriam seus por potência, custo e testes de p
   assert.equal(L.recent.length, 12);
 });
 
+test('cartilha de entrada: 9 fatores em sequência e veredito', async () => {
+  const { entryChecklist } = await import('../worker/src/entry.js');
+  const cfg = Object.assign({}, DEFAULT_CONFIG, { minEdgePct: 3, sessionBudgetUsd: 300 });
+  const mk = (edge) => ({ ok: true, edgeAtBidPct: edge, bidEH: 0.4259, breakEvenEH: 0.4259 * (1 + edge / 100), costPerBlockUsd: 860, blockNetUsd: 885 });
+  const good = { mkt: mk(4), darr: 1.09, mom: { vsEmaPct: 3, ret24Pct: 1 }, ret: { changePct: 5, remainingBlocks: 200, darrAfter: 1.14 }, win: { last6h: 28, bigShare6h: 0.2 },
+    nhWeek: null, hashMkts: { braiins: { matchEH: 0.43, feePct: 0 } }, power: { idealPh: 100, idealProfitDay: 120, bankrollMinUsd: 11000 }, cfg, now: Date.UTC(2026, 9, 31, 15) };
+  const A = entryChecklist(good);
+  assert.equal(A.steps.length, 9); assert.equal(A.verdict, 'entrar'); assert.ok(A.steps.every((x, i) => x.n === i + 1));
+  assert.match(A.steps.find((x) => x.id === 'tentativa').value, /29% de chance/); // 1 − e^(−300 ÷ 860)
+  assert.equal(entryChecklist(Object.assign({}, good, { mom: { vsEmaPct: -3 } })).verdict, 'cautela', 'margem boa mas preço caindo antes da dificuldade');
+  const neg = entryChecklist(Object.assign({}, good, { mkt: mk(-0.4), darr: 1.05, power: { idealPh: 0 }, hashMkts: { braiins: { matchEH: 0.4348, feePct: 0 } } }));
+  assert.equal(neg.verdict, 'nao'); assert.equal(neg.steps.find((x) => x.id === 'margem_nh').status, 'bad'); assert.match(neg.lottery, /0,4%/);
+  const viaBraiins = entryChecklist(Object.assign({}, good, { mkt: mk(-0.4), hashMkts: { braiins: { matchEH: 0.41, feePct: 0 } } }));
+  assert.equal(viaBraiins.verdict, 'esperar'); assert.match(viaBraiins.text, /Braiins/);
+  assert.match(A.lottery, /Margem positiva/);
+  // menor preço com margem boa, mas sem hash para 1 PH/s: vale a margem do tamanho que dá para comprar (profundidade)
+  const thin = entryChecklist(Object.assign({}, good, { mkt: Object.assign(mk(3.9), { bidEH: 0.402, breakEvenEH: 0.4177 }), hashMkts: { braiins: { matchEH: 0.4348, feePct: 0 } }, power: { idealPh: 0, curve: [{ ph: 1, bidEH: 0.4221, edgePct: -1.04, overCap: false }] } }));
+  assert.equal(thin.verdict, 'nao'); assert.match(thin.steps[0].value, /não há hash para 1 PH\/s/);
+  // reajuste longe e horário na média não contam como "atenção"
+  assert.equal(entryChecklist(Object.assign({}, good, { ret: { changePct: 4, remainingBlocks: 800 } })).steps.find((x) => x.id === 'reajuste').status, 'info');
+});
+
 test('auditoria IA: mesma régua do robô, reajuste real, funding acompanhado e grupo de controle', () => {
   const T0 = Date.UTC(2026, 9, 31, 12), H = 36e5;
   const base = { now: T0, edge: 1.5, green: false, minEdge: 3, darr: 1.05, D: 5e11, mom: { vsEmaPct: 3 }, ret: null, win: null, fund: [], rows: {}, stable24: {}, algos: [] };

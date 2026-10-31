@@ -690,7 +690,7 @@ function loadOps(){
     if(r[2].ok)ops.bal=r[2].v;else ops.err.bal=r[2].e.message;
     if(r[3].ok)ops.pools=r[3].v.list||[];else ops.err.pools=r[3].e.message;
     if(r[4].ok)ops.log=r[4].v.log||[];
-    renderOps();renderHome();renderMine();renderAcct();renderRadar();renderRobo();renderWindow();renderHeat();renderAI();renderNext();renderAct();renderHashMkts();renderFronts();
+    renderOps();renderHome();renderMine();renderAcct();renderRadar();renderRobo();renderWindow();renderHeat();renderAI();renderNext();renderAct();renderHashMkts();renderFronts();renderEntry();
   });
 }
 // Dados do servidor em qualquer aba: 30 s em Operar, 60 s nas outras. Ao voltar do segundo plano (iPhone deixa o app
@@ -1011,6 +1011,27 @@ function powerHTML(P){
     '<p class="note" style="margin:6px 0 0">O lucro esperado cresce junto com a potência enquanto o livro aguenta sem subir o lance: a potência não muda a margem, muda o tamanho do ganho <b>e</b> da sorte. '+
     (P.bankrollMinUsd?'Para a sorte não quebrar o caixa antes de a média aparecer, o capital deveria ser de pelo menos ~'+usd(P.bankrollMinUsd,0)+' (critério de Kelly: bloco ÷ 2 × margem).':'Com margem negativa, mais potência só aumenta a perda esperada.')+
     (P.curve.some(function(r){return r.overCap})?' * acima do teto de segurança do servidor ('+P.capPh+' PH/s).':'')+'</p></div>';
+}
+// Cartilha de entrada: os 9 fatores em sequência, avaliados pelo servidor a cada ciclo (worker/src/entry.js).
+function renderEntry(){
+  var el=$('m_entry'),E=ops.status&&ops.status.state&&ops.status.state.entryCheck;
+  if(!el)return;if(!E){el.hidden=true;return}
+  el.hidden=false;
+  var V={entrar:['ok','✓ Entrar'],cautela:['warn','! Cautela'],esperar:['warn','… Esperar'],nao:['bad','✕ Não entrar']}[E.verdict]||['','—'];
+  el.className='card sig '+({entrar:'favoravel',cautela:'neutro',esperar:'neutro',nao:'desfavoravel'}[E.verdict]||'');
+  var S={ok:['ok','✓'],warn:['warn','!'],bad:['bad','✕'],na:['','—'],info:['','i']};
+  el.innerHTML='<div class="row between"><div class="eyebrow">Cartilha de entrada · '+E.okCount+' de '+E.scored+' a favor</div><span class="chip '+V[0]+'">'+V[1]+'</span></div>'+
+    '<div class="lead">'+esc(E.title)+'</div><p class="why" style="margin:0 0 8px">'+esc(E.text)+'</p>'+
+    '<div class="stack" style="gap:4px">'+E.steps.map(function(s){var c=S[s.status]||S.na;
+      return '<details class="trow"><summary><span class="chip '+c[0]+'">'+c[1]+'</span> <b>'+s.n+'. '+esc(s.title)+'</b><div class="note" style="margin:2px 0 0 28px">'+esc(s.value)+'</div></summary><p class="note" style="margin:4px 0 0">'+esc(s.why)+'</p></details>'}).join('')+'</div>'+
+    (E.lottery?'<p class="note" style="margin:8px 0 0">'+esc(E.lottery)+'</p>':'')+
+    '<details style="margin-top:8px"><summary>Como funciona esse ecossistema</summary><ul class="note" style="margin:6px 0 0;padding-left:18px">'+
+    '<li><b>Quem vende o hash</b> na NiceHash são donos de máquinas. Eles poderiam minerar BTC, então só vendem pelo que o BTC paga: o aluguel fica ~ no hashprice do BTC.</li>'+
+    '<li><b>Quem compra</b> paga isso + 3% e aponta para um pool solo de BCH (BlockSniper cobra 2%). Só sobra lucro quando o BCH paga mais que o BTC por hash, além desses ~5%: DARR ≥ ~1,05.</li>'+
+    '<li><b>A rede corrige sozinha</b>: se o BCH paga mais, mais máquinas migram, os blocos aceleram e a dificuldade sobe em horas (ASERT). Por isso as janelas boas são raras e curtas (mediana ~2 h).</li>'+
+    '<li><b>Mineração industrial</b> (máquina própria + pool que paga por share) busca margem estável sobre a energia, quase sem sorte. Exemplo medido hoje: um S21 XP hospedado a US$0,065/kWh recebe ~US$8,7/dia e gasta ~US$5,7 de energia (~+50% sobre a energia), sem contar a compra da máquina.</li>'+
+    '<li><b>Solo com hash alugado</b> é outro jogo: cada tentativa é tudo ou nada (achou: +200% ou mais; não achou: −100%). O ROI alto existe por tentativa, mas a média de muitas tentativas é só a margem do passo 1. Margem positiva + repetição = lucro; margem negativa + repetição = perda certa.</li>'+
+    '<li>Cartilha completa: docs/cartilha-mineracao.md.</li></ul></details>';
 }
 /* ---------- copiloto IA: análise, previsões conferíveis, XP e maturidade ---------- */
 // A IA bate o acaso? Compara o acerto COM sinal com o grupo de controle (mesma pergunta, sem sinal) e mostra a calibração.
@@ -1947,7 +1968,7 @@ function subTab(t,sub){
   if(t==='mine'&&sub==='algos'){loadMarketMap();renderAlgos()}
   if(t==='mine'&&sub==='ops')loadOps();
   if(t==='mine'&&sub==='net'){loadBlocksLog();renderHeat();renderNext()}
-  if(t==='mine'&&sub==='now')renderWindow();
+  if(t==='mine'&&sub==='now'){renderWindow();renderEntry()}
   if(t==='diary'&&sub==='robo'){renderRobo();if(settings.apiUrl&&Date.now()-(ops.at||0)>60000)loadOps()}
   cfg[1].forEach(function(x){$(t+'-'+x).hidden=x!==sub});
   document.querySelectorAll('#'+cfg[0]+' button').forEach(function(b){b.setAttribute('aria-pressed',b.dataset.sub===sub?'true':'false')});
