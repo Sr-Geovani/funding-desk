@@ -6,3 +6,5 @@
   reais quando possível. Em 2026-10-30 o `diagnostico.html` rodado num iPhone no Brasil confirmou que todos os campos usados
   existem nas respostas reais (premiumIndex, ticker/24hr, fundingInfo com `fundingIntervalHours`, fundingRate; tickers,
   instruments-info com `fundingInterval` em uma página só, funding/history) e que o CORS libera o navegador.
+- `braiins-orderbook.real.json`, `braiins-stats.real.json`: Braiins Hashpower `/v1/spot/orderbook` e `/v1/spot/stats` (31/10/2026).
+- `mrr-sha256.real.json`: MiningRigRentals `/api/v2/info/algos/sha256?currency=BTC` (31/10/2026).

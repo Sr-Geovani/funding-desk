@@ -100,6 +100,12 @@ sempre identificado; nada de prometer previsão de sorte (Poisson é sem memóri
   conta bruta. Simulação de outras moedas recomeçou (v2).
 - Mineração: cenário "sempre ligado" (sua potência, sem pausar nem stop-loss, mesmos blocos); simulação baixa o preço
   só um degrau a cada 10 min, como a NiceHash e o robô real.
+- Auditoria 100% (31/10, `docs/auditoria-ia-e-simulacoes.md`): stop-loss por tentativa com espera (`stopCooldownH`,
+  robô e simulação); IA confere com a régua do robô, reajuste só depois de acontecer, funding acompanhado pela própria
+  IA, grupo de controle (vantagem sobre o acaso; nível 3+ exige > 0), calibração (Brier) e "não conferidas"; sorteio
+  só no trecho cobrado e chance = h ÷ rede; funding mostra "se 1 perna fosse a mercado".
+- Fornecedores (`docs/fornecedores-hash.md`, `worker/src/hashmarkets.js`): Braiins Hashpower e MiningRigRentals lidos a
+  cada 15 min (`hashMkts`); `POST /api/pool/check` confere extranonce2 do pool (Braiins exige ≥ 7) via Stratum.
 - Ciclo do servidor: 3 min. Mínimo do Cloudflare é 1 min, mas o KV grátis aceita 1.000 gravações/dia e propaga em até
   60 s; abaixo de 3 min exige plano pago + Durable Objects. Atraso de 3 min custa < US$1 com 10 PH/s.
 

@@ -5,16 +5,17 @@
 //  - Pagamentos: no horário de cada exchange, com a taxa prevista na última leitura antes do horário
 //    (short recebe a taxa; long paga a taxa). Fonte: previsto da Hyperliquid (Binance, Bybit, Hyperliquid).
 //  - Saída: diferença de funding ≤ 0 em 2 leituras seguidas, ou a moeda sumir dos dados por 2 leituras.
-//  - Custos: taxa taker nas 4 execuções + 0,03% de deslize (metade na entrada, metade na saída).
+//  - Custos: taxa maker (ordem limite) nas 4 execuções + 0,03% de deslize (metade na entrada, metade na saída).
+//    O resumo mostra também o resultado se uma perna fosse a mercado (taker) na entrada e na saída.
 export const FUND_RULES = { confirm: 2, exitConfirm: 2, maxOpen: 3, capital: 1000, lev: 2, slipPct: 0.03, keepClosed: 200, exec: 'maker' };
 
-function legsFeePct(fees, s, l, exec = 'maker') {
+export function legsFeePct(fees, s, l, exec = 'maker') {
   const t = (v) => (fees[v] && isFinite(fees[v][exec]) ? fees[v][exec] : (exec === 'maker' ? 0.02 : 0.05));
   return t(s) + t(l); // % do tamanho, numa ponta (entrada ou saída)
 }
 
 // Pagamentos vencidos desde o último ciclo (short recebe a taxa; long paga), com a taxa da última leitura antes do horário.
-function creditLegs(o, cr, notional, now) {
+export function creditLegs(o, cr, notional, now) {
   for (const side of ['s', 'l']) {
     const leg = o.legs[side], cur = cr[leg.venue];
     if (leg.next && now >= leg.next && leg.next > (leg.paidAt || 0)) {
@@ -23,7 +24,7 @@ function creditLegs(o, cr, notional, now) {
     if (cur) { leg.rate = cur.rate; leg.next = cur.next; }
   }
 }
-function newLegs(rs, rl, s, l) { return { s: { venue: s, rate: rs.rate, next: rs.next }, l: { venue: l, rate: rl.rate, next: rl.next } }; }
+export function newLegs(rs, rl, s, l) { return { s: { venue: s, rate: rs.rate, next: rs.next }, l: { venue: l, rate: rl.rate, next: rl.next } }; }
 
 // pf: estado anterior; rows: rows[moeda][exchange] = { rate (% por intervalo), apr, hours, next };
 // best: oportunidades "Compensa" (key, coin, s, l, spread), já ordenadas. Devolve { pf, events }.
@@ -76,12 +77,18 @@ export function fundPaperStep(pf, { rows, best, now, fees, rules = FUND_RULES, l
 }
 
 // Resumo para a tela (todas as fechadas guardadas + abertas).
-export function fundPaperSummary(p) {
+export function fundPaperSummary(p, fees) {
   if (!p) return null;
   const c = p.closed || [], wins = c.filter((x) => x.netUsd > 0).length;
   const net = c.reduce((a, x) => a + x.netUsd, 0), hours = c.reduce((a, x) => a + (x.closedAt - x.openedAt) / 3600e3, 0);
   const openNet = (p.open || []).reduce((a, x) => a + x.fundingUsd - x.feesUsd, 0);
-  return { since: p.since, closed: c.length, wins, netUsd: net, avgHours: c.length ? hours / c.length : 0, open: (p.open || []).length, openNetUsd: openNet };
+  // Realismo: a regra validada supõe as 2 pernas em ordem limite (maker). Se uma perna precisar ir a mercado (taker) na
+  // entrada e na saída (comum para não ficar com uma perna só), o custo extra é (taker − maker) × tamanho × 2.
+  const extra = (x) => { const fe = fees || {}, d = (v) => (fe[v] && isFinite(fe[v].taker) && isFinite(fe[v].maker) ? fe[v].taker - fe[v].maker : 0.03);
+    return (x.notional || 1000) * 2 * Math.min(d(x.s), d(x.l)) / 100; };
+  const netMixed = c.reduce((a, x) => a + x.netUsd - extra(x), 0);
+  return { since: p.since, closed: c.length, wins, netUsd: net, avgHours: c.length ? hours / c.length : 0, open: (p.open || []).length, openNetUsd: openNet,
+    netMixedUsd: netMixed, winsMixed: c.filter((x) => x.netUsd - extra(x) > 0).length };
 }
 
 /* ---------- placar dos alertas de funding ----------

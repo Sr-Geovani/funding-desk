@@ -3,11 +3,16 @@
 // com os dados reais: acerto dá XP. A confiança de cada tipo de previsão aprende com o próprio histórico de acertos,
 // e a maturidade (nível) sobe com o número de previsões conferidas e a taxa de acerto. Ninguém precisa executar a dica.
 // Fácil = aposta que o que está aí continua (acerta quase sempre, vale pouco). Difícil = aposta numa mudança (vale muito).
-// Para subir de nível não basta tempo: é preciso acertar as difíceis.
+// Para subir de nível não basta tempo: é preciso acertar as difíceis E bater o acaso (grupo de controle).
+// Auditoria (31/10): docs/auditoria-ia-e-simulacoes.md.
+import { creditLegs, newLegs, legsFeePct, FUND_RULES } from './paperfund.js';
 export const LEVELS = [
   { n: 1, name: 'Aprendiz', min: 0, hard: 0, hit: 0 }, { n: 2, name: 'Analista', min: 30, hard: 5, hit: 0 },
-  { n: 3, name: 'Estrategista', min: 100, hard: 20, hit: 0.5 }, { n: 4, name: 'Mestre', min: 300, hard: 60, hit: 0.55 }
+  { n: 3, name: 'Estrategista', min: 100, hard: 20, hit: 0.5, skill: true }, { n: 4, name: 'Mestre', min: 300, hard: 60, hit: 0.55, skill: true }
 ];
+// Grupo de controle ("o acaso"): a mesma pergunta das previsões difíceis, feita SEM sinal, de tantas em tantas horas.
+// Vantagem da IA = acerto com sinal − acerto sem sinal. Se for ≤ 0, o sinal não ajuda (e o nível não passa de Analista).
+export const CTRL = { mine_wait: 6, mine_close: 6 };
 export const XP = { hard: 10, easy: 2, trusted: 5 };
 export const TYPES = {
   mine_buy: { label: 'Compra de hash (BCH) segue boa por 1 h', h: 1, cool: 3, base: 0.6, hard: false },
@@ -22,16 +27,29 @@ export const TYPES = {
 const xpOf = (type, hit, trusted) => (!hit ? 0 : TYPES[type] && TYPES[type].hard ? XP.hard + (trusted ? XP.trusted : 0) : XP.easy);
 const H = 3600e3;
 
+// Vantagem sobre o acaso por tipo (só com 5+ conferidas dos dois lados) e a média ponderada.
+export function liftOf(ai) {
+  const by = {}; let wsum = 0, w = 0;
+  for (const k of Object.keys(CTRL)) {
+    const s = (ai.stats || {})[k], c = ((ai.ctrl || {}).stats || {})[k];
+    if (!s || !c || s.n < 5 || c.n < 5) { by[k] = { sig: s || null, ctrl: c || null, pts: null }; continue; }
+    const pts = (s.hits / s.n - c.hits / c.n) * 100;
+    by[k] = { sig: s, ctrl: c, pts }; wsum += pts * s.n; w += s.n;
+  }
+  return { by, pts: w >= 10 ? wsum / w : null, n: w };
+}
 export function levelOf(ai) {
   const ent = Object.entries(ai.stats || {}), sum = (fn) => ent.reduce((a, [k, s]) => a + (fn(k) ? s.n : 0), 0);
   const n = sum(() => true), hits = ent.reduce((a, [, s]) => a + s.hits, 0), rate = n ? hits / n : 0;
   const isHard = (k) => !!(TYPES[k] && TYPES[k].hard);
   const hn = sum(isHard), hh = ent.reduce((a, [k, s]) => a + (isHard(k) ? s.hits : 0), 0), hRate = hn ? hh / hn : 0;
+  const lift = liftOf(ai), noSkill = lift.pts !== null && lift.pts <= 0;
   let cur = LEVELS[0];
-  for (const L of LEVELS) if (n >= L.min && hn >= L.hard && hRate >= L.hit) cur = L;
+  for (const L of LEVELS) if (n >= L.min && hn >= L.hard && hRate >= L.hit && !(L.skill && noSkill)) cur = L;
   const next = LEVELS.find((L) => L.n === cur.n + 1) || null;
-  const progress = next ? Math.min(1, n / next.min) * Math.min(1, hn / next.hard) * (next.hit ? Math.min(1, hRate / next.hit) : 1) : 1;
-  return { level: cur, next, resolved: n, hits, rate, hard: { n: hn, hits: hh, rate: hRate }, easy: { n: n - hn, hits: hits - hh }, progress };
+  const progress = next ? Math.min(1, n / next.min) * Math.min(1, hn / next.hard) * (next.hit ? Math.min(1, hRate / next.hit) : 1) * (next.skill && noSkill ? 0.5 : 1) : 1;
+  const unscored = Object.values(ai.unscored || {}).reduce((a, x) => a + x, 0);
+  return { level: cur, next, resolved: n, hits, rate, hard: { n: hn, hits: hh, rate: hRate }, easy: { n: n - hn, hits: hits - hh }, progress, lift, unscored };
 }
 // Versão 2 do XP (31/10): refaz o XP com o peso por dificuldade (antes: até 15 por acerto de qualquer tipo, 1 por erro).
 function migrate(ai) {
@@ -50,40 +68,90 @@ export function reliability(ai, type) {
 const spreadOf = (rows, key) => { const [c, s, l] = key.split('|'), r = rows && rows[c]; return r && r[s] && r[l] ? r[s].apr - r[l].apr : null; };
 
 // snap: { now, edge, green, minEdge, darr, D, mom, ret, win, fund:[{key,coin,netUsd}], rows, stable24, algos:[{k,label,edge,level}], scoreDone:[...] }
+// Confere uma previsão (ou amostra de controle) vencida. Devolve { hit, value } ou { wait: true } ou {} (sem dado).
+function check(o, snap, now) {
+  if (o.type === 'mine_buy') return isFinite(snap.edge) ? { hit: snap.edge >= 0, value: snap.edge } : {};
+  // janela = o robô compraria (sinal verde, lance ≤ teto), a mesma régua do robô; antes era margem ≥ mínimo (quase igual)
+  if (o.type === 'mine_wait') return o.sawGreen === undefined ? { hit: o.maxEdge >= o.minEdge, value: o.maxEdge } : { hit: o.sawGreen, value: o.maxEdge };
+  if (o.type === 'mine_avoid') return o.sawGreen === undefined ? { hit: o.maxEdge < o.minEdge, value: o.maxEdge } : { hit: !o.sawGreen, value: o.maxEdge };
+  if (o.type === 'mine_close') return snap.D ? { hit: snap.D > o.D0 * 1.005, value: (snap.D / o.D0 - 1) * 100 } : {};
+  if (o.type === 'btc_retarget') {
+    // a data do reajuste é estimativa (muda horas): só confere depois que ele aconteceu (contador de blocos recomeça)
+    const R = snap.ret, rem0 = o.rem0 === undefined ? 288 : o.rem0;
+    if (!(R && isFinite(R.remainingBlocks) && R.remainingBlocks > rem0 + 100)) return now < o.due + 48 * H ? { wait: true } : {};
+    if (!isFinite(snap.darr)) return {};
+    return { hit: Math.abs(snap.darr / o.pred - 1) <= 0.03, value: snap.darr, beat: isFinite(o.naive) ? Math.abs(snap.darr - o.pred) < Math.abs(snap.darr - o.naive) : null };
+  }
+  if (o.type === 'algo_go') { const a = (snap.algos || []).find((x) => x.k === o.key); return a && isFinite(a.edge) ? { hit: a.edge > 0, value: a.edge } : {}; }
+  if (o.type === 'fund_spike') { const sp = spreadOf(snap.rows, o.key); return sp !== null ? { hit: sp < o.s0 / 2, value: sp } : {}; }
+  if (o.type === 'fund_go') {
+    // acompanhada pela própria IA (pagamentos reais de funding − 4 execuções maker + deslize), sem depender de alerta
+    if (o.pos) { const costs = o.pos.notional * (2 * legsFeePct(snap.fees || {}, o.pos.s, o.pos.l, 'maker') + FUND_RULES.slipPct) / 100, net = o.pos.fundingUsd - costs;
+      return { hit: net > 0, value: net }; }
+    const d = (snap.scoreDone || []).find((x) => x.key === o.key && Math.abs(x.t - o.t) <= 6 * H);
+    return d ? { hit: d.hit, value: d.netUsd } : now < o.due + 12 * H ? { wait: true } : {};
+  }
+  return {};
+}
+// Atualiza o que precisa ser acompanhado a cada ciclo (antes do prazo).
+function track(o, snap, now) {
+  if (o.type === 'mine_wait' || o.type === 'mine_avoid') {
+    o.maxEdge = Math.max(o.maxEdge === undefined ? -1e9 : o.maxEdge, isFinite(snap.edge) ? snap.edge : -1e9);
+    if (o.sawGreen !== undefined && snap.green) o.sawGreen = true;
+  }
+  if (o.type === 'fund_go' && o.pos && snap.rows) creditLegs(o.pos, snap.rows[o.pos.coin] || {}, o.pos.notional, now);
+}
+
+// snap: { now, edge, green, minEdge, darr, D, mom, ret, win, fund:[{key,coin,netUsd}], rows, fees, stable24, algos:[{k,label,edge,level}], scoreDone:[...] }
 export function brainStep(prev, snap) {
   const ai = migrate(prev && prev.since ? JSON.parse(JSON.stringify(prev)) : { since: snap.now, xp: 0, open: [], done: [], stats: {}, last: {}, v: 2 });
+  ai.unscored = ai.unscored || {}; ai.ctrl = ai.ctrl || { open: [], stats: {}, last: {} };
   const events = [], now = snap.now;
   // 1) conferir previsões abertas
   const still = [];
   for (const o of ai.open) {
-    if (o.type === 'mine_wait' || o.type === 'mine_avoid') o.maxEdge = Math.max(o.maxEdge === undefined ? -1e9 : o.maxEdge, isFinite(snap.edge) ? snap.edge : -1e9);
+    track(o, snap, now);
     if (now < o.due) { still.push(o); continue; }
-    let hit = null, value = null;
-    if (o.type === 'mine_buy') { if (isFinite(snap.edge)) { hit = snap.edge >= 0; value = snap.edge; } }
-    else if (o.type === 'mine_wait') { hit = o.maxEdge >= o.minEdge; value = o.maxEdge; }
-    else if (o.type === 'mine_avoid') { hit = o.maxEdge < o.minEdge; value = o.maxEdge; }
-    else if (o.type === 'mine_close') { if (snap.D) { hit = snap.D > o.D0 * 1.005; value = (snap.D / o.D0 - 1) * 100; } }
-    else if (o.type === 'btc_retarget') { if (isFinite(snap.darr)) { hit = Math.abs(snap.darr / o.pred - 1) <= 0.03; value = snap.darr; } }
-    else if (o.type === 'algo_go') { const a = (snap.algos || []).find((x) => x.k === o.key); if (a && isFinite(a.edge)) { hit = a.edge > 0; value = a.edge; } }
-    else if (o.type === 'fund_spike') { const sp = spreadOf(snap.rows, o.key); if (sp !== null) { hit = sp < o.s0 / 2; value = sp; } }
-    else if (o.type === 'fund_go') {
-      const d = (snap.scoreDone || []).find((x) => x.key === o.key && Math.abs(x.t - o.t) <= 6 * H);
-      if (d) { hit = d.hit; value = d.netUsd; } else if (now < o.due + 12 * H) { still.push(o); continue; }
-    }
+    const c = check(o, snap, now);
+    if (c.wait) { still.push(o); continue; }
+    const hit = c.hit === undefined ? null : c.hit, value = c.value === undefined ? null : c.value;
     const r = Object.assign({}, o, { hit, value, resolvedAt: now });
-    if (hit !== null) r.check = ({ mine_buy: `margem 1 h depois: ${f(value, 1)}%`, mine_wait: `maior margem no período: ${f(value, 1)}% (precisava ${o.minEdge}%)`,
-      mine_avoid: `maior margem no período: ${f(value, 1)}% (mínimo ${o.minEdge}%)`, mine_close: `dificuldade variou ${f(value, 2)}%`, btc_retarget: `DARR depois: ${f(value, 3)} (previsto ${f(o.pred, 3)})`,
-      algo_go: `margem 6 h depois: ${f(value, 1)}%`, fund_spike: `diferença 24 h depois: ${f(value, 0)}% a.a. (era ${f(o.s0, 0)}%)`, fund_go: `resultado em 3 dias: US$${f(value, 2)}` })[o.type] || '';
+    delete r.pos;
+    if (hit !== null) r.check = ({ mine_buy: `margem 1 h depois: ${f(value, 1)}%`, mine_wait: `${hit ? 'o robô compraria' : 'o robô não compraria'} no período; maior margem ${f(value, 1)}% (precisava ${o.minEdge}%)`,
+      mine_avoid: `${hit ? 'o robô não compraria' : 'o robô compraria'} no período; maior margem ${f(value, 1)}% (mínimo ${o.minEdge}%)`, mine_close: `dificuldade variou ${f(value, 2)}%`,
+      btc_retarget: `DARR depois: ${f(value, 3)} (previsto ${f(o.pred, 3)}${isFinite(o.naive) ? '; sem a previsão, ficaria em ' + f(o.naive, 3) + (c.beat ? ': a previsão chegou mais perto' : ': a previsão não ajudou') : ''})`,
+      algo_go: `margem 6 h depois: ${f(value, 1)}%`, fund_spike: `diferença 24 h depois: ${f(value, 0)}% a.a. (era ${f(o.s0, 0)}%)`, fund_go: `resultado em 3 dias, já com as taxas: US$${f(value, 2)}` })[o.type] || '';
     if (hit !== null) {
       const s = ai.stats[o.type] || (ai.stats[o.type] = { n: 0, hits: 0, xp: 0 });
       s.n++; if (hit) s.hits++;
+      s.b = (s.b || 0) + Math.pow((isFinite(o.conf) ? o.conf : 0.5) - (hit ? 1 : 0), 2); // calibração (Brier): 0 = perfeita, 0,25 = chute
+      if (c.beat !== undefined && c.beat !== null) { s.bn = (s.bn || 0) + 1; if (c.beat) s.beat = (s.beat || 0) + 1; }
       r.xp = xpOf(o.type, hit, o.trusted); r.hard = !!TYPES[o.type].hard;
       s.xp = (s.xp || 0) + r.xp; ai.xp += r.xp;
       events.push(`IA ${hit ? 'acertou' : 'errou'}${r.hard ? '' : ' (fácil)'}: ${o.text} (+${r.xp} XP)`);
-    }
+    } else ai.unscored[o.type] = (ai.unscored[o.type] || 0) + 1; // sem dado para conferir: fica de fora (contado)
     ai.done.push(r);
   }
   ai.open = still; ai.done = ai.done.slice(-200);
+
+  // 1b) grupo de controle: mesma pergunta sem sinal, em horário fixo
+  const cs = [];
+  for (const o of ai.ctrl.open) {
+    track(o, snap, now);
+    if (now < o.due) { cs.push(o); continue; }
+    const c = check(o, snap, now);
+    if (c.hit === undefined) continue;
+    const st = ai.ctrl.stats[o.type] || (ai.ctrl.stats[o.type] = { n: 0, hits: 0 });
+    st.n++; if (c.hit) st.hits++;
+  }
+  ai.ctrl.open = cs;
+  const ctl = (type, extra) => {
+    if (ai.ctrl.last[type] && now - ai.ctrl.last[type] < CTRL[type] * H) return;
+    ai.ctrl.last[type] = now;
+    ai.ctrl.open.push(Object.assign({ type, t: now, due: now + TYPES[type].h * H }, extra));
+  };
+  if (!snap.green && isFinite(snap.edge)) ctl('mine_wait', { minEdge: snap.minEdge, maxEdge: snap.edge, sawGreen: false });
+  if (snap.D) ctl('mine_close', { D0: snap.D });
 
   // 2) novas previsões a partir dos sinais de agora
   const add = (type, key, text, extra) => {
@@ -97,16 +165,20 @@ export function brainStep(prev, snap) {
   };
   const e = snap.edge, mom = snap.mom ? snap.mom.vsEmaPct : 0;
   if (snap.green) add('mine_buy', 'bch', `comprar hash para o BCH agora (margem ${f(e, 1)}%) continua no positivo daqui a 1 h`, { why: `margem ${f(e, 1)}% ≥ seu mínimo ${snap.minEdge}%; DARR ${isFinite(snap.darr) ? f(snap.darr, 3) : '—'}. Margens assim raramente viram negativas em 1 h.` });
-  else if (isFinite(e) && (snap.darr >= 1 || mom >= 2) && e > snap.minEdge - 3) add('mine_wait', 'bch', `a margem do BCH passa de ${snap.minEdge}% em até 6 h (agora ${f(e, 1)}%, DARR ${f((snap.darr || 0), 3)})`, { minEdge: snap.minEdge, maxEdge: e,
+  else if (isFinite(e) && (snap.darr >= 1 || mom >= 2) && e > snap.minEdge - 3) add('mine_wait', 'bch', `a margem do BCH passa de ${snap.minEdge}% em até 6 h (agora ${f(e, 1)}%, DARR ${f((snap.darr || 0), 3)})`, { minEdge: snap.minEdge, maxEdge: e, sawGreen: false,
     why: `${snap.darr >= 1 ? 'DARR ' + f(snap.darr, 3) + ' ≥ 1 (BCH paga mais que o BTC)' : ''}${snap.darr >= 1 && mom >= 2 ? ' e ' : ''}${mom >= 2 ? 'BCH ' + f(mom, 1) + '% acima da média de 2 dias (preço antes da dificuldade)' : ''}; margem a menos de 3 pontos do mínimo.` });
-  if (isFinite(snap.darr) && snap.darr < 0.97 && mom <= 0 && !snap.green) add('mine_avoid', 'bch', `alugar para o BCH não compensa nas próximas 12 h (DARR ${f(snap.darr, 3)})`, { minEdge: snap.minEdge, maxEdge: e, why: `DARR ${f(snap.darr, 3)} abaixo de 0,97 e o BCH não está subindo contra o BTC: sem motor para a margem melhorar logo.` });
+  if (isFinite(snap.darr) && snap.darr < 0.97 && mom <= 0 && !snap.green) add('mine_avoid', 'bch', `alugar para o BCH não compensa nas próximas 12 h (DARR ${f(snap.darr, 3)})`, { minEdge: snap.minEdge, maxEdge: e, sawGreen: false, why: `DARR ${f(snap.darr, 3)} abaixo de 0,97 e o BCH não está subindo contra o BTC: sem motor para a margem melhorar logo.` });
   const w = snap.win;
   if (w && snap.D && (w.last6h >= 42 || (w.bigShare6h !== null && w.bigShare24h !== null && w.bigShare6h - w.bigShare24h >= 0.1 && w.last6h >= 30)))
     add('mine_close', 'bch', `a dificuldade do BCH sobe mais de 0,5% em 3 h (${w.last6h} blocos em 6 h; pools grandes chegando)`, { D0: snap.D, why: `${w.last6h} blocos em 6 h (esperado 36) e pools grandes ${w.bigShare6h !== null ? f(w.bigShare6h * 100, 0) + '%' : '—'} (24 h: ${w.bigShare24h !== null ? f(w.bigShare24h * 100, 0) + '%' : '—'}): hash chegando faz o ASERT subir a dificuldade.` });
   const R = snap.ret;
   if (R && R.at && R.remainingBlocks <= 288 && isFinite(R.darrAfter))
-    add('btc_retarget', String(Math.round(R.at / 864e5)), `depois do reajuste do BTC (${pctTxt(R.changePct)}), o DARR fica em ~${f(R.darrAfter, 3)} (±3%)`, { pred: R.darrAfter, due: R.at + 2 * H, why: `reajuste do BTC em ${R.remainingBlocks} blocos, estimativa ${pctTxt(R.changePct)}: o BTC passa a pagar ${pctTxt(-R.changePct)} por hash, então o DARR muda na mesma proporção.` });
-  for (const f of (snap.fund || []).slice(0, 3)) add('fund_go', f.key, `${f.coin} (${f.key.split('|').slice(1).join(' × ')}) paga as taxas em 3 dias`, { why: 'diferença acima do empate (ordem limite) nas últimas 24 h e a meia-vida indica que paga as taxas; regra validada em 90 dias (39% de acerto).' });
+    add('btc_retarget', String(Math.round(R.at / 864e5)), `depois do reajuste do BTC (${pctTxt(R.changePct)}), o DARR fica em ~${f(R.darrAfter, 3)} (±3%)`, { pred: R.darrAfter, naive: snap.darr, rem0: R.remainingBlocks, due: R.at + 2 * H, why: `reajuste do BTC em ${R.remainingBlocks} blocos, estimativa ${pctTxt(R.changePct)}: o BTC passa a pagar ${pctTxt(-R.changePct)} por hash, então o DARR muda na mesma proporção.` });
+  for (const fo of (snap.fund || []).slice(0, 3)) {
+    const [c, sv, lv] = fo.key.split('|'), cr = (snap.rows || {})[c] || {};
+    const pos = cr[sv] && cr[lv] ? Object.assign({ coin: c, s: sv, l: lv, notional: FUND_RULES.capital / 2 * FUND_RULES.lev, fundingUsd: 0, payments: 0 }, { legs: newLegs(cr[sv], cr[lv], sv, lv) }) : null;
+    add('fund_go', fo.key, `${fo.coin} (${fo.key.split('|').slice(1).join(' × ')}) paga as taxas em 3 dias`, { pos, why: 'diferença acima do empate (ordem limite) nas últimas 24 h e a meia-vida indica que paga as taxas; regra validada em 90 dias (39% de acerto).' });
+  }
   const spikes = [];
   for (const [c, r] of Object.entries(snap.rows || {})) {
     const v = Object.entries(r).filter(([, x]) => isFinite(x.apr)).sort((a, b) => b[1].apr - a[1].apr);
@@ -138,9 +210,9 @@ export function analysis(snap, ai) {
   const nf = (snap.fund || []).length;
   out.push(nf ? `Funding: ${nf} oportunidade${nf > 1 ? 's' : ''} passa${nf > 1 ? 'm' : ''} na regra validada (24 h estável, ordem limite).` : 'Funding: nenhuma oportunidade passa na regra validada agora (24 h estável + ordem limite + meia-vida).');
   for (const fo of (snap.fund || []).slice(0, 2)) recs.push({ area: 'funding', text: `${fo.coin}: short ${fo.key.split('|')[1]}, long ${fo.key.split('|')[2]} com ordem limite (~US$${f((fo.netUsd || 0), 2)} projetado em 3 dias).`, type: 'fund_go' });
-  const ag = (snap.algos || []).filter((x) => x.level === 'go');
+  const ag = (snap.algos || []).filter((x) => x.level === 'go' && isFinite(x.edge) && x.edge <= 100);
   if (ag.length) { out.push(`Outras moedas: ${ag.map((a) => a.label + ' ' + f(a.edge, 1) + '%').join(', ')} compensam em pool PPS (ordem manual).`); for (const a of ag.slice(0, 2)) recs.push({ area: 'outras', text: `${a.label}: ordem manual na NiceHash para pool PPS enquanto a margem ficar positiva.`, type: 'algo_go' }); }
-  for (const r of recs) { const rel = reliability(ai, r.type); r.conf = rel.conf; r.trusted = rel.trusted; r.n = rel.n; }
+  for (const r of recs) { const rel = reliability(ai, r.type); r.conf = rel.conf; r.trusted = rel.trusted; r.n = rel.n; r.hard = !!TYPES[r.type].hard; r.rate = rel.n ? (ai.stats[r.type].hits / rel.n) : null; }
   return { level: L, lines: out, recs };
 }
 
@@ -172,7 +244,7 @@ export function actionPlan(ctx) {
       action: green ? 'alugar' : 'esperar', edge: mkt.edgeAtBidPct, price: mkt.bidEH, maxPrice: mkt.capEH, ph, budgetUsd: budget, durationH: dur,
       amountBtc: +amountBtc.toFixed(4), chance, expBlocks: lam, costPerHourUsd: costH, blockUsd: mkt.blockNetUsd, alt, mine,
       chance2h: 1 - Math.exp(-ph / mkt.phDaysPerBlock * hours / 24), cost2h: costH * hours,
-      why: [`Orçamento por sessão: US$${n(budget, 0)} (o seu stop-loss). É o máximo que você aceita perder se não sair bloco.`,
+      why: [`Orçamento por tentativa: US$${n(budget, 0)} (o seu stop-loss). Soma todas as ordens até achar bloco; ao estourar, o robô cancela e espera ${cfg.stopCooldownH === undefined ? 6 : cfg.stopCooldownH} h. É o máximo que você perde numa tentativa sem bloco (o limite diário segura o dia).`,
         `As janelas boas duram ~2 h (pesquisa de 6 meses). A potência é a que gasta esse orçamento dentro de uma janela: US$${n(budget, 0)} ÷ (US$${n(perPhDay / 24, 2)} por PH/s por hora × 2 h) = ${rawPh} PH/s.`,
         capBy ? `Limitado a ${ph} PH/s pelo ${capBy}.` : `Cabe no teto de segurança (${limits.maxLimitPh} PH/s) e na liquidez do mercado.`,
         'Por dólar gasto, a média é a mesma com qualquer potência. Mais potência = mais chance enquanto a janela está aberta (e o orçamento acaba mais rápido); menos potência = a janela fecha antes de você usar o orçamento.'],

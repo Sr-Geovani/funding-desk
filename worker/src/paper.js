@@ -43,10 +43,14 @@ export function paperStep(paper, { cfg, mkt, now, units, limits, blocks }) {
   }
 
   // 1b) sorteio com os blocos reais achados pela rede enquanto o robô estaria comprando
+  // Só entram blocos do trecho que foi cobrado (dt): se o servidor ficou parado, os blocos daquele buraco não
+  // ganham sorteio de graça. Tolerância de 20 min para o relógio que o minerador grava no bloco.
+  // Chance por bloco real = seu hash ÷ hash da rede (D·2³²/600): na média dá exatamente λ (seu hash ÷ trabalho por bloco).
   if (p.on && p.ph > 0) for (const b of blocks || []) {
     const D = b.difficulty || p.D;
     if (!b.hash || !(D > 0)) continue;
-    const mine = p.ph * 1e15, prob = mine / (D * TWO32 / 600 + mine);
+    if (b.time && b.time < now - dt - 20 * 60e3) continue;
+    const mine = p.ph * 1e15, prob = Math.min(1, mine / (D * TWO32 / 600));
     const u = parseInt(String(b.hash).slice(-8), 16) / TWO32;
     p.draws = (p.draws || 0) + 1; d.draws = (d.draws || 0) + 1;
     if (p.run) p.run.draws = (p.run.draws || 0) + 1;
@@ -68,12 +72,14 @@ export function paperStep(paper, { cfg, mkt, now, units, limits, blocks }) {
   const target = Math.min(Math.max(cfg.targetPh || 0, minPh), limits.maxLimitPh || Infinity);
   if (p.sess && cfg.sessionBudgetUsd > 0 && p.sess.spendUsd >= cfg.sessionBudgetUsd) {
     p.stops++;
-    events.push(`Simulação: stop-loss da sessão (US$${p.sess.spendUsd.toFixed(2)} gastos; chance de ter achado bloco nela: ${((1 - Math.exp(-p.sess.lambda)) * 100).toFixed(0)}%)`);
+    p.stopUntil = now + (cfg.stopCooldownH === undefined ? 6 : cfg.stopCooldownH) * 3600e3;
+    events.push(`Simulação: stop-loss da tentativa (US$${p.sess.spendUsd.toFixed(2)} gastos sem bloco; chance de ter achado bloco nela: ${((1 - Math.exp(-p.sess.lambda)) * 100).toFixed(0)}%); sem compra até ${new Date(p.stopUntil).toISOString().slice(11, 16)} UTC`);
     p.sess = null;
-    closeRun('stop-loss da sessão'); p.on = false; // como cancelar a ordem: se continuar verde, abre outra
+    closeRun('stop-loss da tentativa'); p.on = false; // como o robô: cancela e espera stopCooldownH antes de comprar de novo
   }
   const dailyHit = cfg.dailyBudgetUsd > 0 && d.spendUsd >= cfg.dailyBudgetUsd;
-  const want = !!(mkt && mkt.ok && mkt.green && !dailyHit);
+  const cooling = !!(p.stopUntil && now < p.stopUntil);
+  const want = !!(mkt && mkt.ok && mkt.green && !dailyHit && !cooling);
   if (want) {
     if (!p.sess) { p.sess = { start: now, spendUsd: 0, lambda: 0 }; p.sessions++; }
     if (!p.on) events.push(`Simulação: compraria ${target} PH/s a ${mkt.bidEH.toFixed(4)} BTC/EH/dia (margem ${mkt.edgeAtBidPct.toFixed(1)}%). Por quê: lance ≤ teto ${mkt.capEH.toFixed(4)} (empate ${mkt.breakEvenEH ? mkt.breakEvenEH.toFixed(4) : '—'} − margem mínima ${cfg.minEdgePct}%); potência = sua potência alvo`);
@@ -89,9 +95,9 @@ export function paperStep(paper, { cfg, mkt, now, units, limits, blocks }) {
     Object.assign(p, { on: true, ph: target, priceEH: price, D: mkt.D, btcUsd: mkt.btcUsd, blockNetUsd: mkt.blockNetUsd });
   } else {
     if (p.on) {
-      const why = dailyHit ? `limite diário de US$${cfg.dailyBudgetUsd} atingido`
+      const why = dailyHit ? `limite diário de US$${cfg.dailyBudgetUsd} atingido` : cooling ? 'espera depois do stop-loss'
         : mkt && mkt.ok ? `aluguel ${mkt.bidEH.toFixed(4)} acima do teto ${mkt.capEH.toFixed(4)}` : 'sem dados de mercado';
-      events.push(`Simulação: pausaria (${why}). Por quê: ${dailyHit ? 'o gasto do dia chegou ao seu limite' : mkt && mkt.ok ? 'cada hash comprado acima do teto custa mais do que rende em média' : 'sem preço não dá para saber se compensa'}`);
+      events.push(`Simulação: pausaria (${why}). Por quê: ${dailyHit ? 'o gasto do dia chegou ao seu limite' : cooling ? 'o stop-loss limita a perda por tentativa' : mkt && mkt.ok ? 'cada hash comprado acima do teto custa mais do que rende em média' : 'sem preço não dá para saber se compensa'}`);
       closeRun(why);
     }
     p.on = false;

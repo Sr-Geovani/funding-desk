@@ -13,7 +13,8 @@ export const DEFAULT_CONFIG = {
   targetPh: 10,             // potência com sinal verde
   minPh: 0,                 // potência de pausa (0 = mínimo da NiceHash)
   onBlock: 'cancel',        // 'cancel' | 'min' | 'continue'
-  sessionBudgetUsd: 300,    // stop-loss: gasto máximo por sessão sem bloco (0 = desligado)
+  sessionBudgetUsd: 300,    // stop-loss: gasto máximo por tentativa (até achar bloco), somando todas as ordens (0 = desligado)
+  stopCooldownH: 6,         // depois do stop-loss, horas sem criar ordem nova (a janela que comeu o orçamento passa)
   dailyBudgetUsd: 500,      // gasto máximo por dia (UTC); ao atingir, reduz para a potência de pausa
   autoCreate: false,        // criar ordem quando o sinal ficar verde e não houver ordem gerenciada
   orderAmountBtc: 0.002,
@@ -55,7 +56,7 @@ export function sanitizeConfig(input = {}, prev = DEFAULT_CONFIG, limits = limit
   if (input.poolId !== undefined) c.poolId = String(input.poolId).slice(0, 64);
   num('poolFeePct', 0, 20); num('rentFeePct', 0, 20); num('minEdgePct', -50, 100); num('bidPremiumPct', 0, 50);
   num('targetPh', 0, limits.maxLimitPh); num('minPh', 0, limits.maxLimitPh);
-  num('sessionBudgetUsd', 0, limits.maxDailyUsd); num('dailyBudgetUsd', 0, limits.maxDailyUsd);
+  num('sessionBudgetUsd', 0, limits.maxDailyUsd); num('dailyBudgetUsd', 0, limits.maxDailyUsd); num('stopCooldownH', 0, 72);
   num('orderAmountBtc', 0, limits.maxOrderBtc);
   if (input.autoCreate !== undefined) c.autoCreate = !!input.autoCreate;
   if (input.alerts !== undefined) c.alerts = !!input.alerts;
@@ -112,7 +113,7 @@ function utcDay(ms) { return new Date(ms).toISOString().slice(0, 10); }
 // blockEvent: { height, bch } quando a recompensa de um bloco caiu no endereço desde o último ciclo.
 export function decide({ cfg, mkt, orders, state = {}, now, units, limits = limitsFromEnv(), blockEvent = null }) {
   const st = JSON.parse(JSON.stringify(state || {}));
-  st.sessions = st.sessions || {}; st.lastDecrease = st.lastDecrease || {}; st.dayStart = st.dayStart || {};
+  st.lastDecrease = st.lastDecrease || {}; st.dayStart = st.dayStart || {};
   const actions = [], notes = [];
   const today = utcDay(now);
   if (st.day !== today) { st.day = today; st.dayStart = {}; }
@@ -133,21 +134,43 @@ export function decide({ cfg, mkt, orders, state = {}, now, units, limits = limi
 
   if (cfg.mode === 'off') return { actions, notes: notes.concat('robô desligado'), state: st };
 
+  // Sessão = uma tentativa de achar bloco. Soma o gasto de TODAS as ordens gerenciadas, inclusive as que já acabaram
+  // (orçamento da ordem esgotado ou cancelada), em BTC. Zera no bloco. No stop-loss cancela tudo e fica stopCooldownH
+  // sem criar ordem: sem isso, a ordem seguinte recomeçaria a conta e o stop-loss não limitaria nada.
+  delete st.sessions;
+  const px = mkt.btcUsd || st.lastBtcUsd || 0; if (mkt.btcUsd) st.lastBtcUsd = mkt.btcUsd;
+  const newSess = () => ({ startTs: now, carryBtc: 0, paid: Object.fromEntries(managed.map((o) => [o.id, { start: o.paidBtc, last: o.paidBtc }])) });
+  if (blockEvent || !st.sess) st.sess = newSess();
+  const S = st.sess;
   for (const o of managed) {
-    const sess = st.sessions[o.id] || (st.sessions[o.id] = { startPaid: o.paidBtc, startTs: now });
+    if (!S.paid[o.id]) S.paid[o.id] = { start: o.createdTs && o.createdTs >= S.startTs ? 0 : o.paidBtc, last: o.paidBtc };
+    S.paid[o.id].last = o.paidBtc;
+  }
+  for (const id of Object.keys(S.paid)) if (!managed.some((o) => o.id === id)) { S.carryBtc += Math.max(0, S.paid[id].last - S.paid[id].start); delete S.paid[id]; }
+  const sessBtc = S.carryBtc + Object.values(S.paid).reduce((a, x) => a + Math.max(0, x.last - x.start), 0);
+  const sessionUsd = sessBtc * px;
+  st.sessionUsd = sessionUsd;
+  const cooling = st.stopUntil && now < st.stopUntil;
+  if (cfg.sessionBudgetUsd > 0 && sessionUsd >= cfg.sessionBudgetUsd && !cooling) {
+    st.stopUntil = now + (cfg.stopCooldownH === undefined ? 6 : cfg.stopCooldownH) * 3600e3;
+    st.sess = null;
+    for (const o of managed) actions.push({ type: 'cancel', id: o.id, reason: `stop-loss: a tentativa gastou US$${sessionUsd.toFixed(2)} sem bloco (limite US$${cfg.sessionBudgetUsd}); sem ordem nova até ${new Date(st.stopUntil).toISOString().slice(11, 16)} UTC` });
+    return { actions, notes: notes.concat('stop-loss da tentativa'), state: st };
+  }
+  if (cooling) {
+    for (const o of managed) actions.push({ type: 'cancel', id: o.id, reason: `stop-loss em espera até ${new Date(st.stopUntil).toISOString().slice(11, 16)} UTC: encerrando ordem` });
+    notes.push(`stop-loss: sem ordem nova até ${new Date(st.stopUntil).toISOString().slice(11, 16)} UTC`);
+    return { actions, notes, state: st };
+  }
+
+  for (const o of managed) {
     if (blockEvent) {
       const why = `bloco ${blockEvent.height} pago no seu endereço`;
       if (cfg.onBlock === 'cancel') { actions.push({ type: 'cancel', id: o.id, reason: why + ': encerrando a ordem' }); continue; }
-      st.sessions[o.id] = { startPaid: o.paidBtc, startTs: now };
       if (cfg.onBlock === 'min') {
         if (o.limitPH > minPh + 1e-9) actions.push({ type: 'update', id: o.id, priceEH: o.priceEH, limitPH: minPh, reason: why + ': reduzindo à potência de pausa' });
         continue;
       }
-    }
-    const sessionUsd = mkt.btcUsd ? (o.paidBtc - st.sessions[o.id].startPaid) * mkt.btcUsd : 0;
-    if (cfg.sessionBudgetUsd > 0 && sessionUsd >= cfg.sessionBudgetUsd) {
-      actions.push({ type: 'cancel', id: o.id, reason: `stop-loss: sessão gastou US$${sessionUsd.toFixed(2)} sem bloco` });
-      continue;
     }
     if (!mkt.ok) { notes.push(`ordem ${o.id}: sem dados de mercado (${mkt.reason}), nada alterado`); continue; }
 
@@ -168,11 +191,10 @@ export function decide({ cfg, mkt, orders, state = {}, now, units, limits = limi
     }
   }
 
-  if (cfg.autoCreate && !managed.length && mkt.ok && mkt.green && !dailyHit && cfg.poolId) {
+  if (cfg.autoCreate && !managed.length && mkt.ok && mkt.green && !dailyHit && cfg.poolId && !blockEvent) {
     const amount = Math.max(units.minOrderBtc, Math.min(cfg.orderAmountBtc, limits.maxOrderBtc));
     actions.push({ type: 'create', priceEH: mkt.bidEH, limitPH: target, amountBtc: amount, poolId: cfg.poolId,
       market: mkt.market, reason: `sinal verde sem ordem ativa: criando (margem ${mkt.edgeAtBidPct.toFixed(1)}%)` });
   }
-  for (const id of Object.keys(st.sessions)) if (!managed.some((o) => o.id === id)) delete st.sessions[id];
   return { actions, notes, state: st };
 }

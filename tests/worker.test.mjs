@@ -2,6 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { authMessage, hmacHex, algoUnits, createClient } from '../worker/src/nicehash.js';
 import { paidTo, normAddr, createChain } from '../worker/src/chain.js';
@@ -102,14 +103,27 @@ test('robô: bloco no endereço encerra a ordem (ou reduz, ou continua)', () => 
   assert.equal(decide({ cfg: cfgOf(), mkt: mk(), orders: [order()], now: NOW, units, limits: lim, blockEvent: ev }).actions[0].type, 'cancel');
   const m = decide({ cfg: cfgOf({ onBlock: 'min' }), mkt: mk(), orders: [order({ limitPH: 20 })], now: NOW, units, limits: lim, blockEvent: ev });
   assert.deepEqual([m.actions[0].type, m.actions[0].limitPH], ['update', 0.1]);
-  const c = decide({ cfg: cfgOf({ onBlock: 'continue' }), mkt: mk(), orders: [order({ limitPH: 20, paidBtc: 0.003 })], state: { sessions: { A: { startPaid: 0 } } }, now: NOW, units, limits: lim, blockEvent: ev });
-  assert.equal(c.state.sessions.A.startPaid, 0.003, 'sessão recomeça após o bloco');
+  const c = decide({ cfg: cfgOf({ onBlock: 'continue' }), mkt: mk(), orders: [order({ limitPH: 20, paidBtc: 0.003 })], state: { sess: { startTs: NOW - 7200e3, carryBtc: 0.001, paid: { A: { start: 0, last: 0.002 } } } }, now: NOW, units, limits: lim, blockEvent: ev });
+  assert.deepEqual([c.state.sess.paid.A.start, c.state.sess.carryBtc], [0.003, 0], 'tentativa recomeça após o bloco');
 });
 
 test('robô: stop-loss da sessão e limite diário', () => {
-  const sl = decide({ cfg: cfgOf(), mkt: mk(), orders: [order({ paidBtc: 0.004 })], state: { sessions: { A: { startPaid: 0 } } }, now: NOW, units, limits: lim });
+  const S0 = { sess: { startTs: NOW - 7200e3, carryBtc: 0, paid: { A: { start: 0, last: 0 } } } };
+  const sl = decide({ cfg: cfgOf(), mkt: mk(), orders: [order({ paidBtc: 0.004 })], state: S0, now: NOW, units, limits: lim });
   assert.equal(sl.actions[0].type, 'cancel');
   assert.match(sl.actions[0].reason, /stop-loss/);
+  assert.equal(sl.state.stopUntil, NOW + 6 * 3600e3);
+  // a ordem acabou (orçamento da ordem esgotado): o gasto dela continua contando na tentativa
+  const o1 = decide({ cfg: cfgOf({ autoCreate: true, poolId: 'p', managed: ['A', 'B'] }), mkt: mk(), orders: [order({ paidBtc: 0.002 })], state: S0, now: NOW, units, limits: lim });
+  const o2 = decide({ cfg: cfgOf({ autoCreate: true, poolId: 'p', managed: ['A', 'B'] }), mkt: mk(), orders: [], state: o1.state, now: NOW + 180e3, units, limits: lim });
+  assert.equal(o2.state.sess.carryBtc, 0.002); assert.equal(o2.actions[0].type, 'create', 'ainda dentro do orçamento: cria');
+  const o3 = decide({ cfg: cfgOf({ autoCreate: true, poolId: 'p', managed: ['A', 'B'] }), mkt: mk(), orders: [order({ id: 'B', paidBtc: 0.0021, createdTs: NOW + 200e3 })], state: o2.state, now: NOW + 360e3, units, limits: lim });
+  assert.equal(o3.actions[0].type, 'cancel', 'A + B passaram de US$300: stop-loss vale para a tentativa toda');
+  // durante a espera não cria ordem nova, mesmo com sinal verde
+  const w = decide({ cfg: cfgOf({ autoCreate: true, poolId: 'p' }), mkt: mk(), orders: [], state: o3.state, now: NOW + 3600e3, units, limits: lim });
+  assert.equal(w.actions.length, 0); assert.ok(w.notes.some((n) => /sem ordem nova/.test(n)));
+  const w2 = decide({ cfg: cfgOf({ autoCreate: true, poolId: 'p' }), mkt: mk(), orders: [], state: o3.state, now: NOW + 7 * 3600e3, units, limits: lim });
+  assert.equal(w2.actions[0].type, 'create', 'depois da espera volta a operar');
   const dl = decide({ cfg: cfgOf({ sessionBudgetUsd: 0 }), mkt: mk(), orders: [order({ paidBtc: 0.007, limitPH: 20 })], state: { day: '2026-10-30', dayStart: { A: 0 } }, now: NOW, units, limits: lim });
   assert.deepEqual([dl.actions[0].type, dl.actions[0].limitPH], ['update', 0.1]);
   assert.ok(dl.notes.some((n) => /limite diário/.test(n)));
@@ -129,7 +143,7 @@ async function setup() {
   await new Promise((r) => server.listen(0, r));
   const base = 'http://127.0.0.1:' + server.address().port;
   const env = { FD_KV: memoryKV(), PANEL_TOKEN: 'token-de-teste-com-mais-de-24-chars', ALLOWED_ORIGIN: 'https://sr-geovani.github.io',
-    NH_BASE: base + '/nh', BCH_REST: base + '/bch', PRICE_URL: base + '/cg/x', HL_URL: base + '/hl/info', WTM_URL: base + '/wtm/asic.json', MEMPOOL_URL: base + '/mempool', KRAKEN_URL: base + '/kraken', NH_API_KEY: MOCK_KEYS.key, NH_API_SECRET: MOCK_KEYS.secret, NH_ORG_ID: MOCK_KEYS.org,
+    NH_BASE: base + '/nh', BCH_REST: base + '/bch', PRICE_URL: base + '/cg/x', HL_URL: base + '/hl/info', WTM_URL: base + '/wtm/asic.json', HP_URL: base + '/hp', MRR_URL: base + '/mrr', MEMPOOL_URL: base + '/mempool', KRAKEN_URL: base + '/kraken', NH_API_KEY: MOCK_KEYS.key, NH_API_SECRET: MOCK_KEYS.secret, NH_ORG_ID: MOCK_KEYS.org,
     MAX_ORDER_BTC: '0.01', MAX_LIMIT_PH: '100', MAX_DAILY_USD: '1000' };
   const call = async (method, path, body, token = env.PANEL_TOKEN) => {
     const r = await worker.fetch(new Request('https://api.example' + path, { method, headers: { Authorization: 'Bearer ' + token, Origin: 'https://sr-geovani.github.io', 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined }), env, {});
@@ -204,10 +218,9 @@ test('integração: stop-loss e emergência', async () => {
     const r = await t.call('POST', '/api/tick');
     assert.ok(r.body.actions.some((x) => x.type === 'cancel' && x.id === a && /stop-loss/.test(x.reason)));
     assert.equal(t.state.orders[a].alive, false);
-    assert.equal(t.state.orders[b].alive, true);
+    assert.equal(t.state.orders[b].alive, false, 'stop-loss vale para a tentativa toda (todas as ordens do robô)');
     const k = await t.call('POST', '/api/kill');
-    assert.ok(k.body.cancelled.includes(b));
-    assert.equal(t.state.orders[b].alive, false);
+    assert.ok(Array.isArray(k.body.cancelled));
     assert.equal((await t.call('GET', '/api/status')).body.config.mode, 'off');
   } finally { t.server.close(); }
 });
@@ -470,10 +483,10 @@ test('simulação: acumula gasto, receita média e blocos esperados só enquanto
 
 test('simulação: stop-loss e limite diário virtuais', () => {
   const T0 = Date.UTC(2026, 9, 31, 0);
-  const cfg = Object.assign({}, PCFG, { targetPh: 100, sessionBudgetUsd: 50, dailyBudgetUsd: 120 });
+  const cfg = Object.assign({}, PCFG, { targetPh: 100, sessionBudgetUsd: 50, dailyBudgetUsd: 120, stopCooldownH: 0 }); // sem espera: testa o limite do dia
   let r = paperStep(null, { cfg, mkt: pm(), now: T0, units: PU, limits: PL }), all = [];
   for (let i = 1; i <= 20; i++) { r = paperStep(r.paper, { cfg, mkt: pm(), now: T0 + i * 180e3, units: PU, limits: PL }); all.push(...r.events); }
-  assert.ok(all.some((e) => /stop-loss da sessão/.test(e)), all.join(' | '));
+  assert.ok(all.some((e) => /stop-loss da tentativa/.test(e)), all.join(' | '));
   assert.ok(all.some((e) => /limite diário de US\$120/.test(e)), all.join(' | '));
   assert.ok(r.paper.days['2026-10-31'].spendUsd < 120 + 40, 'para perto do limite do dia');
   assert.equal(r.paper.on, false);
@@ -556,12 +569,14 @@ test('mineração simulada: cada "compraria → pausaria" vira uma operação co
   const run = r.paper.runs[0];
   close(run.spendUsd, 10 * 0.40 / 1000 * 77000 * 1.03 * 1200 / 86400, 1e-9); assert.match(run.reason, /acima do teto/);
   close(run.hours, 1200 / 3600, 1e-9);
-  // stop-loss fecha a operação e, se continuar verde, abre outra
+  // stop-loss fecha a operação e espera stopCooldownH (igual ao robô); depois, se continuar verde, abre outra
   const cfg = Object.assign({}, PCFG, { targetPh: 100, sessionBudgetUsd: 30 });
   r = paperStep(null, { cfg, mkt: pm(), now: T0, units: PU, limits: PL });
   for (let i = 1; i <= 8; i++) r = paperStep(r.paper, { cfg, mkt: pm(), now: T0 + i * 180e3, units: PU, limits: PL });
   assert.ok(r.paper.runs.some((x) => /stop-loss/.test(x.reason)));
-  assert.ok(r.paper.run && r.paper.on, 'nova operação aberta');
+  assert.ok(!r.paper.on, 'em espera depois do stop-loss');
+  r = paperStep(r.paper, { cfg, mkt: pm(), now: T0 + 7 * 3600e3, units: PU, limits: PL });
+  assert.ok(r.paper.run && r.paper.on, 'nova operação depois da espera');
 });
 
 test('mineração simulada: simulação antiga (sem diário) abre a operação no próximo ciclo', () => {
@@ -890,6 +905,62 @@ test('IA: cria previsões dos sinais, confere no prazo e ganha XP', () => {
   // confiança aprende com o histórico do tipo
   const ai = { stats: { mine_avoid: { n: 30, hits: 27 } } };
   assert.ok(reliability(ai, 'mine_avoid').trusted && reliability(ai, 'mine_avoid').conf > 0.75);
+});
+
+test('outros fornecedores: Braiins (preço para receber hash) e MiningRigRentals', async () => {
+  const { braiinsOf, mrrOf, stratumCheck } = await import('../worker/src/hashmarkets.js');
+  const rd = (f) => JSON.parse(readFileSync(new URL('./fixtures/' + f, import.meta.url)));
+  const b = braiinsOf(rd('braiins-orderbook.real.json'), rd('braiins-stats.real.json'));
+  assert.equal(b.matchEH, 0.4348); assert.equal(b.bestAskEH, 0.42193); assert.ok(b.availPH > 5000 && b.matchedPH > 1000); assert.equal(b.feePct, 0);
+  const m = mrrOf(rd('mrr-sha256.real.json'));
+  close(m.suggestedEH, 0.6267, 1e-9); close(m.availPH, 3009.665, 1e-3); close(m.rentedPH, 29.0548, 1e-3);
+  // Stratum: lê o extranonce2_size do mining.subscribe (Braiins exige ≥ 7)
+  const fake = (reply) => () => ({ writable: new WritableStream(), readable: new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode(reply)); c.close(); } }), close() {} });
+  const ok = await stratumCheck('pool.example', 3333, fake('{"id":1,"result":[[["mining.notify","a"]],"0800abcd",8],"error":null}\n'));
+  assert.deepEqual([ok.extranonce2Size, ok.extranonce1Bytes, ok.braiins], [8, 4, true]);
+  const bch = await stratumCheck('pool.example', 3333, fake('{"id":null,"method":"x"}\n{"id":1,"result":[[],"0800abcd",4],"error":null}\n'));
+  assert.equal(bch.braiins, false);
+  await assert.rejects(stratumCheck('pool.example', 3333, fake('')), /fechou/);
+  const t = await setup();
+  try {
+    t.env.CONNECT = fake('{"id":1,"result":[[],"00",4],"error":null}\n');
+    const r = await t.call('POST', '/api/pool/check', { host: 'stratum+tcp://Solo.BlockSniper.ai', port: 3333 });
+    assert.deepEqual([r.body.host, r.body.extranonce2Size, r.body.braiins], ['solo.blocksniper.ai', 4, false]);
+    assert.equal((await t.call('POST', '/api/pool/check', { host: 'x', port: 3333 })).status, 400);
+  } finally { t.server.close(); }
+});
+
+test('auditoria IA: mesma régua do robô, reajuste real, funding acompanhado e grupo de controle', () => {
+  const T0 = Date.UTC(2026, 9, 31, 12), H = 36e5;
+  const base = { now: T0, edge: 1.5, green: false, minEdge: 3, darr: 1.05, D: 5e11, mom: { vsEmaPct: 3 }, ret: null, win: null, fund: [], rows: {}, stable24: {}, algos: [] };
+  // margem passa de 3% mas o robô não compraria (lance acima do teto): "janela abriu" é ERRO, como o robô veria
+  let r = brainStep(null, base);
+  r = brainStep(r.ai, Object.assign({}, base, { now: T0 + H, edge: 3.05, green: false }));
+  r = brainStep(r.ai, Object.assign({}, base, { now: T0 + 6 * H + 1 }));
+  assert.equal(r.ai.done.find((d) => d.type === 'mine_wait').hit, false);
+  // controle: a mesma pergunta sem sinal, a cada 6 h
+  assert.ok(r.ai.ctrl.stats.mine_wait.n >= 1 && r.ai.ctrl.stats.mine_close.n >= 1);
+  // reajuste do BTC: não confere antes de acontecer, mesmo com o prazo vencido
+  const ret = { at: T0 + 10 * H, remainingBlocks: 60, darrAfter: 1.10, changePct: 5 };
+  let q = brainStep(null, Object.assign({}, base, { ret }));
+  const p0 = q.ai.open.find((o) => o.type === 'btc_retarget'); assert.equal(p0.naive, 1.05); assert.equal(p0.rem0, 60);
+  q = brainStep(q.ai, Object.assign({}, base, { now: T0 + 13 * H, ret: Object.assign({}, ret, { remainingBlocks: 5 }) }));
+  assert.ok(q.ai.open.some((o) => o.type === 'btc_retarget'), 'atrasou: espera');
+  q = brainStep(q.ai, Object.assign({}, base, { now: T0 + 15 * H, darr: 1.09, ret: Object.assign({}, ret, { remainingBlocks: 2010 }) }));
+  const dr = q.ai.done.find((d) => d.type === 'btc_retarget');
+  assert.equal(dr.hit, true); assert.equal(q.ai.stats.btc_retarget.beat, 1, 'previsão chegou mais perto que "fica igual"');
+  // funding: a IA acompanha a própria posição (pagamentos − taxas), sem depender de alerta
+  const rows = (rs, next) => ({ X: { Bybit: { rate: rs, apr: rs * 3 * 365, hours: 8, next }, Binance: { rate: 0, apr: 0, hours: 8, next } } });
+  const fb = Object.assign({}, base, { fund: [{ key: 'X|Bybit|Binance', coin: 'X', netUsd: 1 }], rows: rows(0.05, T0 + H), fees: { Bybit: { maker: 0.02 }, Binance: { maker: 0.02 } } });
+  let g = brainStep(null, fb);
+  assert.ok(g.ai.open.find((o) => o.type === 'fund_go').pos);
+  for (let i = 1; i <= 9; i++) g = brainStep(g.ai, Object.assign({}, fb, { fund: [], now: T0 + i * 8 * H + 60e3, rows: rows(0.05, T0 + (i * 8 + 1) * H) }));
+  const fd = g.ai.done.find((d) => d.type === 'fund_go');
+  assert.ok(fd && fd.hit === true && fd.value > 0, JSON.stringify(fd)); // 9 pagamentos de 0,05% de US$1.000 = US$4,50 − US$1,10 de custos
+  // nível: vantagem sobre o acaso ≤ 0 segura em Analista, mesmo com acerto alto nas difíceis
+  const ai = { stats: { mine_buy: { n: 90, hits: 88 }, mine_wait: { n: 30, hits: 18 } }, ctrl: { stats: { mine_wait: { n: 30, hits: 20 } } } };
+  const L = levelOf(ai); assert.equal(L.level.name, 'Analista'); assert.ok(L.lift.pts < 0);
+  ai.ctrl.stats.mine_wait.hits = 6; assert.equal(levelOf(ai).level.name, 'Estrategista'); assert.ok(levelOf(ai).lift.pts > 30);
 });
 
 test('IA: nível sobe com previsões conferidas e acerto', () => {

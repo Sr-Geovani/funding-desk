@@ -12,6 +12,7 @@ import { fundPaperStep, fundPaperSummary, alertScoreStep, alertScoreSummary } fr
 import FD from '../../core.js';
 import FDR from '../../radar.js';
 import { algoPaperStep } from './paperalgo.js';
+import { braiinsOf, mrrOf, stratumCheck } from './hashmarkets.js';
 import { FUND_MODEL } from './fundmodel.js';
 import { updateHistory, pickCoins, scorePairs, stablePairs, pairStatsOf } from './fundai.js';
 import { blockRecord, blockSummary, poolOf } from './blocks.js';
@@ -164,7 +165,7 @@ export async function tick(env, opts = {}) {
     const won = new Set(((paper && paper.wins) || []).map((w) => w.height)), sp = state.paper;
     for (const b of newBlocks) {
       const on = cfg.mode === 'observe' && !!(sp && sp.on && sp.ph > 0);
-      const prob = on && b.difficulty ? sp.ph * 1e15 / (b.difficulty * 4294967296 / 600 + sp.ph * 1e15) : 0;
+      const prob = on && b.difficulty ? Math.min(1, sp.ph * 1e15 / (b.difficulty * 4294967296 / 600)) : 0; // mesma conta da simulação
       const realPH = orders.filter((o) => o.alive && (cfg.managed || []).includes(o.id)).reduce((x, o) => x + (o.speedPH || 0), 0);
       blockBuf.push(blockRecord(b, { prevT: lastBlockT, mkt, book, sim: { ph: on ? sp.ph : 0, prob, won: won.has(b.height) }, mineBch: b.mine, realPH }));
       lastBlockT = b.time;
@@ -209,7 +210,7 @@ export async function tick(env, opts = {}) {
   // Cenário "sempre ligado": sua potência sem pausar pelo preço e sem stop-loss, mesmos blocos e sorteio. Responde
   // "se ficasse ligado direto teria mais bloco?": mais chance, mas paga também as horas com aluguel acima do teto.
   let paperAlways = state.paperAlways || null;
-  if (cfg.mode === 'observe') paperAlways = paperStep(paperAlways, { cfg: Object.assign({}, cfg, { sessionBudgetUsd: 0, dailyBudgetUsd: 0, onBlock: 'keep' }),
+  if (cfg.mode === 'observe') paperAlways = paperStep(paperAlways, { cfg: Object.assign({}, cfg, { sessionBudgetUsd: 0, dailyBudgetUsd: 0, onBlock: 'continue' }),
     mkt: mkt.ok ? Object.assign({}, mkt, { green: true }) : mkt, now, units, limits, blocks: newBlocks }).paper;
   else if (paperAlways) paperAlways.lastTs = now;
   const real = realStep(state.real, { orders, managedIds: cfg.managed, blockEvent, now,
@@ -315,6 +316,16 @@ export async function tick(env, opts = {}) {
     } else errors.push('WhatToMine: ' + res[0].e);
   }
 
+  // Outros fornecedores de hash (Braiins Hashpower, MiningRigRentals): preço para receber hash, a cada 15 min, só leitura.
+  let hashMkts = state.hashMkts || null;
+  if (cfg.hashMarkets !== false && (!hashMkts || now - (hashMkts.at || 0) >= 15 * 60e3)) {
+    const hp = (env.HP_URL || 'https://hashpower.braiins.com').replace(/\/$/, ''), mr = (env.MRR_URL || 'https://www.miningrigrentals.com').replace(/\/$/, '');
+    const getJ = (u) => fetchFn(u, { headers: { accept: 'application/json', 'user-agent': 'funding-desk/1.0' } }).then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
+    const [hb, hs, mi] = await Promise.all([getJ(hp + '/v1/spot/orderbook'), getJ(hp + '/v1/spot/stats'), getJ(mr + '/api/v2/info/algos/sha256?currency=BTC')].map(settle));
+    hashMkts = { at: now, braiins: hb.ok ? braiinsOf(hb.v, hs.ok ? hs.v : null) : (hashMkts && hashMkts.braiins) || null,
+      mrr: mi.ok ? mrrOf(mi.v) : (hashMkts && hashMkts.mrr) || null, err: [hb.ok ? null : 'Braiins: ' + hb.e, mi.ok ? null : 'MRR: ' + mi.e].filter(Boolean) };
+  }
+
   // Placar: cada alerta de entrada de funding vira uma posição hipotética acompanhada pelo prazo projetado.
   const byKey = {}; for (const b of (funding && funding.best) || []) byKey[b.key] = b;
   const entries = newAlerts.filter((a) => a.area === 'funding' && a.kind === 'entrada' && /^fe:/.test(a.key || '')).map((a) => {
@@ -325,7 +336,7 @@ export async function tick(env, opts = {}) {
   // Copiloto IA: analisa tudo e registra previsões conferíveis (XP e maturidade).
   const snap = { now, edge: mkt.ok ? mkt.edgeAtBidPct : NaN, green: !!(mkt.ok && mkt.green), minEdge: cfg.minEdgePct, darr: darr ? darr.v : NaN,
     D: info.ok ? info.v.difficulty : null, mom: msig.mom, ret: retargetOf(msig.adj, darr ? darr.v : NaN), win: windowMeter(recentBlocks, now),
-    fund: ((funding && funding.best) || []).map((b) => ({ key: b.key, coin: b.coin, netUsd: b.netUsd })), rows: funding ? funding.rows : null, stable24,
+    fund: ((funding && funding.best) || []).map((b) => ({ key: b.key, coin: b.coin, netUsd: b.netUsd })), rows: funding ? funding.rows : null, fees: FD.DEFAULT_FEES, stable24,
     algos: algoPaper ? Object.entries(algoPaper.algos).map(([k, a]) => ({ k, label: a.label, edge: a.edgeNow, level: a.level })) : [],
     scoreDone: (alertScore && alertScore.done) || [] };
   const br = brainStep(state.ai, snap);
@@ -343,7 +354,7 @@ export async function tick(env, opts = {}) {
   const mempool = mpR.ok ? Object.assign({ at: now }, mpR.v) : state.mempool || null;
 
   const next = Object.assign({}, dec.state, alertState, {
-    lastTick: now, verified: Object.fromEntries(Object.entries(verified).filter(([, x]) => now - x.at <= 6 * 3600e3)), ai: br.ai, aiAnalysis, plan, acct, algoMap, mempool, stable24, pairStats, msig, darr, recentBlocks, nhWeek, paper, paperBurst, paperPlan, paperAlways, blockBuf, blockFlush, lastBlockT, real, fundPaper, alertScore, algoPaper, algoTs, aiScores, fundPaperAI, fhistHour, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig,
+    lastTick: now, verified: Object.fromEntries(Object.entries(verified).filter(([, x]) => now - x.at <= 6 * 3600e3)), ai: br.ai, aiAnalysis, plan, acct, algoMap, mempool, stable24, pairStats, msig, darr, recentBlocks, nhWeek, paper, paperBurst, paperPlan, paperAlways, hashMkts, blockBuf, blockFlush, lastBlockT, real, fundPaper, alertScore, algoPaper, algoTs, aiScores, fundPaperAI, fhistHour, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig,
     market: mkt.ok ? { breakEvenEH: mkt.breakEvenEH, capEH: mkt.capEH, fillEH: mkt.fillEH, medianEH: mkt.medianEH, bidEH: mkt.bidEH,
       edgeAtBidPct: mkt.edgeAtBidPct, green: mkt.green, D: mkt.D, bookTotalPH: book ? book.totalPH : 0, bchUsd: mkt.bchUsd, btcUsd: mkt.btcUsd, costPerBlockUsd: mkt.costPerBlockUsd,
       hashpriceNet: mkt.hashpriceNet, blockNetUsd: mkt.blockNetUsd, phDaysPerBlock: mkt.phDaysPerBlock, market: mkt.market } : { ok: false, reason: mkt.reason },
@@ -453,12 +464,12 @@ async function api(req, env, url, fetchFn) {
       telegram: !!(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID), creds: credStatus(env), limits, config: cfg,
       state: { lastTick: state.lastTick, lastHeight: state.lastHeight, market: state.market, myBlocks: state.myBlocks || [], dailyUsd: state.dailyUsd || 0,
         errors: state.errors || [], edgeHist: state.edgeHist || [], alerts: (state.alerts || []).slice(-30).reverse(),
-        paper: state.paper || null, paperBurst: state.paperBurst || null, paperPlan: state.paperPlan || null, paperAlways: state.paperAlways || null, opLog: (state.opLog || []).slice(-20).reverse(), real: state.real ? Object.assign({}, state.real, { paid: undefined }) : null,
-        fundPaper: state.fundPaper ? { summary: fundPaperSummary(state.fundPaper), open: state.fundPaper.open, closed: state.fundPaper.closed.slice(-100).reverse() } : null,
+        paper: state.paper || null, paperBurst: state.paperBurst || null, paperPlan: state.paperPlan || null, paperAlways: state.paperAlways || null, hashMkts: state.hashMkts || null, opLog: (state.opLog || []).slice(-20).reverse(), real: state.real ? Object.assign({}, state.real, { paid: undefined }) : null,
+        fundPaper: state.fundPaper ? { summary: fundPaperSummary(state.fundPaper, FD.DEFAULT_FEES), open: state.fundPaper.open, closed: state.fundPaper.closed.slice(-100).reverse() } : null,
         algoPaper: state.algoPaper || null,
-        fundPaperAI: state.fundPaperAI ? { summary: fundPaperSummary(state.fundPaperAI), open: state.fundPaperAI.open, closed: state.fundPaperAI.closed.slice(-100).reverse() } : null,
+        fundPaperAI: state.fundPaperAI ? { summary: fundPaperSummary(state.fundPaperAI, FD.DEFAULT_FEES), open: state.fundPaperAI.open, closed: state.fundPaperAI.closed.slice(-100).reverse() } : null,
         aiScores: state.aiScores || {}, stable24: Object.keys(state.stable24 || {}), pairStats: state.pairStats || {},
-        ai: state.ai ? Object.assign({ xp: state.ai.xp, since: state.ai.since, stats: state.ai.stats, open: state.ai.open.slice(-30).reverse(), done: state.ai.done.slice(-60).reverse() }, levelOf(state.ai)) : null,
+        ai: state.ai ? Object.assign({ xp: state.ai.xp, since: state.ai.since, stats: state.ai.stats, ctrl: (state.ai.ctrl || {}).stats || {}, unscoredBy: state.ai.unscored || {}, open: state.ai.open.slice(-30).reverse(), done: state.ai.done.slice(-60).reverse() }, levelOf(state.ai)) : null,
         aiTypes: TYPES, aiAnalysis: state.aiAnalysis || null, plan: state.plan || null, mempool: state.mempool || null, lastBlockT: state.lastBlockT || null,
         darr: state.darr || null, retarget: state.msig && state.darr ? retargetOf(state.msig.adj, state.darr.v) : null, momentum: state.msig ? state.msig.mom : null,
         window: windowMeter(state.recentBlocks || [], Date.now()), nhWeek: state.nhWeek || null,
@@ -472,7 +483,7 @@ async function api(req, env, url, fetchFn) {
     const before = await getConfig(env);
     await kvPut(env, 'config', config);
     const st = await kvGet(env, 'state', {}), now = Date.now();
-    const keys = { targetPh: 'potência alvo', sessionBudgetUsd: 'stop-loss por sessão', dailyBudgetUsd: 'limite diário', minEdgePct: 'margem mínima', mode: 'modo', poolId: 'pool', autoCreate: 'criar ordem sozinho', onBlock: 'ao achar bloco' };
+    const keys = { targetPh: 'potência alvo', sessionBudgetUsd: 'stop-loss por tentativa', stopCooldownH: 'espera após stop-loss', dailyBudgetUsd: 'limite diário', minEdgePct: 'margem mínima', mode: 'modo', poolId: 'pool', autoCreate: 'criar ordem sozinho', onBlock: 'ao achar bloco' };
     const changes = Object.keys(keys).filter((k) => JSON.stringify(before[k]) !== JSON.stringify(config[k])).map((k) => ({ k, label: keys[k], from: before[k], to: config[k] }));
     const logs = [{ t: now, kind: 'config', text: `configuração salva (modo ${config.mode})` }];
     if (changes.length) {
@@ -511,6 +522,12 @@ async function api(req, env, url, fetchFn) {
     const st = await kvGet(env, 'state', {});
     const list = (await kvGet(env, 'blocks', [])).concat(st.blockBuf || []).map((b) => Object.assign(b, poolOf(b.tag))); // nomes sempre com a regra atual
     return json({ blocks: list.slice(-300).reverse(), summary: blockSummary(list) });
+  }
+  if (p === '/pool/check' && m === 'POST') {
+    // Compatibilidade do pool com a Braiins Hashpower (extranonce2_size ≥ 7). Só abre o Stratum e lê a resposta.
+    const host = String(body.host || '').trim().toLowerCase().replace(/^stratum\+(tcp|ssl):\/\//, ''), port = +body.port || 3333;
+    if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(host) || !(port >= 1 && port <= 65535)) return json({ error: 'host ou porta inválidos' }, 400);
+    try { return json(await stratumCheck(host, port, env.CONNECT)); } catch (e) { return json({ ok: false, host, port, error: String(e.message || e) }); }
   }
   if (p === '/funding/verified' && m === 'POST') {
     // Pares conferidos pelo painel no histórico pago de 72 h das corretoras (valem 6 h). Ajuda o robô a decidir igual ao painel
