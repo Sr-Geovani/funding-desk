@@ -153,7 +153,9 @@ export function decide({ cfg, mkt, orders, state = {}, now, units, limits = limi
 
     let limit = mkt.green && !dailyHit ? target : minPh;
     const want = mkt.green ? mkt.bidEH : Math.min(o.priceEH, r4(mkt.capEH));
-    let price = want, reason = mkt.green ? `sinal verde: margem ${mkt.edgeAtBidPct.toFixed(1)}% no lance` : `acima do teto (${mkt.capEH.toFixed(4)}): pausa`;
+    const rule = `empate ${isFinite(mkt.breakEvenEH) ? mkt.breakEvenEH.toFixed(4) : '—'} − sua margem ${cfg.minEdgePct}% = teto ${isFinite(mkt.capEH) ? mkt.capEH.toFixed(4) : '—'}`;
+    let price = want, reason = mkt.green ? `sinal verde: margem ${mkt.edgeAtBidPct.toFixed(1)}% no lance. Por quê: lance ${mkt.bidEH.toFixed(4)} ≤ teto (${rule})`
+      : `acima do teto (${mkt.capEH.toFixed(4)}): pausa. Por quê: lance ${mkt.bidEH.toFixed(4)} > teto (${rule}); comprar acima disso dá prejuízo médio`;
     if (dailyHit && mkt.green) reason = 'limite diário: pausa';
     if (want < o.priceEH - 1e-9) {
       const last = st.lastDecrease[o.id] || 0;

@@ -75,7 +75,7 @@ export function paperStep(paper, { cfg, mkt, now, units, limits, blocks }) {
   const want = !!(mkt && mkt.ok && mkt.green && !dailyHit);
   if (want) {
     if (!p.sess) { p.sess = { start: now, spendUsd: 0, lambda: 0 }; p.sessions++; }
-    if (!p.on) events.push(`Simulação: compraria ${target} PH/s a ${mkt.bidEH.toFixed(4)} BTC/EH/dia (margem ${mkt.edgeAtBidPct.toFixed(1)}%)`);
+    if (!p.on) events.push(`Simulação: compraria ${target} PH/s a ${mkt.bidEH.toFixed(4)} BTC/EH/dia (margem ${mkt.edgeAtBidPct.toFixed(1)}%). Por quê: lance ≤ teto ${mkt.capEH.toFixed(4)} (empate ${mkt.breakEvenEH ? mkt.breakEvenEH.toFixed(4) : '—'} − margem mínima ${cfg.minEdgePct}%); potência = sua potência alvo`);
     // !p.run com p.on: simulação criada antes do diário de operações; a operação passa a contar daqui
     if (!p.on || !p.run) p.run = { start: now, ph: target, priceEH: mkt.bidEH, edgePct: mkt.edgeAtBidPct, spendUsd: 0, evUsd: 0, lambda: 0, hours: 0 };
     Object.assign(p, { on: true, ph: target, priceEH: mkt.bidEH, D: mkt.D, btcUsd: mkt.btcUsd, blockNetUsd: mkt.blockNetUsd });
@@ -83,7 +83,7 @@ export function paperStep(paper, { cfg, mkt, now, units, limits, blocks }) {
     if (p.on) {
       const why = dailyHit ? `limite diário de US$${cfg.dailyBudgetUsd} atingido`
         : mkt && mkt.ok ? `aluguel ${mkt.bidEH.toFixed(4)} acima do teto ${mkt.capEH.toFixed(4)}` : 'sem dados de mercado';
-      events.push(`Simulação: pausaria (${why})`);
+      events.push(`Simulação: pausaria (${why}). Por quê: ${dailyHit ? 'o gasto do dia chegou ao seu limite' : mkt && mkt.ok ? 'cada hash comprado acima do teto custa mais do que rende em média' : 'sem preço não dá para saber se compensa'}`);
       closeRun(why);
     }
     p.on = false;
