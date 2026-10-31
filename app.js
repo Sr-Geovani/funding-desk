@@ -643,7 +643,7 @@ function apiCall(method,path,body){
   var c=apiCfg();
   if(!c.url)return Promise.reject(new Error('backend não configurado (Ajustes)'));
   return fetch(c.url+'/api'+path,{method:method,headers:{Authorization:'Bearer '+c.token,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined})
-    .then(function(r){return r.json().catch(function(){return {}}).then(function(j){if(!r.ok)throw new Error(j.error||('HTTP '+r.status));return j})});
+    .then(function(r){return r.json().catch(function(){return {}}).then(function(j){if(!r.ok){var er=new Error(j.error||('HTTP '+r.status));er.data=j;throw er}return j})});
 }
 var opsLoading=false;
 function loadOps(){
@@ -1333,13 +1333,13 @@ $('ac_env').addEventListener('change',function(){$('ac_env').dataset.touched='1'
 $('ac_nh_save').addEventListener('click',function(){
   var env=$('ac_env').value,body={nicehash:{env:env,key:$('ac_key').value.trim(),secret:$('ac_secret').value.trim(),org:$('ac_org').value.trim()}};
   if(!body.nicehash.key||!body.nicehash.secret||!body.nicehash.org){opsMsg('ac_nh_msg','Preencha API Key, API Secret e Organization ID.',true);return}
-  if(env==='prod'&&!confirm('Produção usa dinheiro real. O robô volta para Observar e você ativa depois de conferir. Continuar?'))return;
+  if(env==='prod'&&!confirm('Conta real (nicehash.com). O robô fica em Observar, sem comprar nada, até você ativar. Continuar?'))return;
   acctBusy('ac_nh_save',true);opsMsg('ac_nh_msg','Conferindo com a NiceHash…');
   apiCall('PUT','/credentials',body).then(function(r){
     $('ac_key').value='';$('ac_secret').value='';$('ac_org').value='';
     opsMsg('ac_nh_msg','Conectada ('+(r.nicehash.env==='prod'?'produção':'teste')+', chave '+r.nicehash.key+'). Saldo: '+(r.balanceBtc!=null?r.balanceBtc+' BTC':'—')+'. Próximo passo: Mineração → Operar, com o robô em Observar.');
     loadOps();
-  },function(e){opsMsg('ac_nh_msg',e.message,true)}).then(function(){acctBusy('ac_nh_save',false)});
+  },function(e){if(e.data&&e.data.suggestEnv){$('ac_env').value=e.data.suggestEnv;$('ac_env').dataset.touched='1'}opsMsg('ac_nh_msg',e.message,true)}).then(function(){acctBusy('ac_nh_save',false)});
 });
 $('ac_nh_del').addEventListener('click',function(){
   if(!confirm('Desconectar a NiceHash? As chaves salvas pelo painel são apagadas do backend e o robô volta para Observar.'))return;

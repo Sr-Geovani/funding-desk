@@ -227,8 +227,17 @@ async function putCredentials(env, body, fetchFn) {
   try { bal = await probe.balance(); } catch (e) {
     const where = patch.NH_ENV === 'prod' ? 'nicehash.com (produção)' : 'test.nicehash.com (teste)';
     const auth = /\b(401|403)\b/.test(String(e.message));
+    // Chave do outro ambiente (ex.: conta real com "Teste" escolhido)? Testa lá e sugere a troca, sem salvar nada.
+    if (auth && !env.NH_BASE) {
+      const other = patch.NH_ENV === 'prod' ? 'test' : 'prod';
+      const alt = createClient({ base: NH_HOSTS[other], key: patch.NH_API_KEY, secret: patch.NH_API_SECRET, org: patch.NH_ORG_ID, fetchFn: fetchFn || fetch });
+      const ok = await alt.balance().then(() => true, () => false);
+      if (ok) return json({ suggestEnv: other, error: other === 'prod'
+        ? 'Essa chave é da sua conta real (nicehash.com). Troque o Ambiente para Produção e toque em Salvar de novo.'
+        : 'Essa chave é do ambiente de teste (test.nicehash.com). Troque o Ambiente para Teste e toque em Salvar de novo.' }, 400);
+    }
     return json({ error: auth
-      ? `A NiceHash não aceitou as chaves. Confira: criadas em ${where}; API Key, API Secret e Organization ID cada um no seu campo; permissão para ver saldo.`
+      ? `A NiceHash não aceitou as chaves (ambiente ${where}). Confira: chave confirmada pelo e-mail da NiceHash; API Key, API Secret e Organization ID cada um no seu campo; permissão para ver saldo.`
       : `Não consegui falar com a NiceHash agora (${String(e.message).slice(0, 120)}). Tente de novo em instantes.` }, 400);
   }
   const prevEnv = env.NH_ENV === 'prod' ? 'prod' : 'test';

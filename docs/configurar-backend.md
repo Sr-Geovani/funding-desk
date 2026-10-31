@@ -19,17 +19,22 @@ O painel nunca guarda essas chaves.
    No fim imprime um **link** que abre o painel já conectado.
 4. **Abrir o link no celular**: o painel pede confirmação e guarda o endereço e o token neste aparelho.
 5. **Ajustes → Conectar contas**:
-   - **NiceHash**: comece por <https://test.nicehash.com> (dinheiro de teste). Configurações → Chaves de API → criar chave
+   - **NiceHash**: use a sua conta normal (nicehash.com) com Ambiente **Produção**. É seguro: o robô começa em
+     **Observar** (só registra, não compra nada) e o servidor impõe tetos de gasto. A conta de teste
+     (<https://test.nicehash.com>) é opcional: é um site separado, sem login pelo Google, com e-mail e senha próprios, e
+     nele a criação de ordens SHA-256 costuma estar desligada.
+     Ligue a verificação em duas etapas (Configurações → Segurança), depois Configurações → Chaves de API → criar chave
      com permissão só para **ver saldos** e, no marketplace de hashpower, **ver e gerenciar pedidos** e **pools**.
-     **Nunca** marque saque (withdraw) nem endereços de saque. Cole API Key, API Secret e Organization ID →
-     **Salvar e conferir**. O backend testa a chave lendo o saldo antes de salvar.
+     **Nunca** marque saque (withdraw) nem endereços de saque. Confirme a chave no e-mail da NiceHash. Cole API Key,
+     API Secret e Organization ID → **Salvar e conferir**. O backend testa a chave lendo o saldo antes de salvar e, se
+     ela for do outro ambiente, avisa e troca a escolha.
    - **Telegram**: no Telegram, **@BotFather** → `/newbot` → copie o token → cole → **Conectar**. Ele pede para você
      mandar "oi" para o seu bot; mande e toque em **Conectar** de novo. O backend acha o seu chat e manda uma
      mensagem de teste.
 6. **Mineração → Operar**: endereço BCH (sua carteira), pool (ex.: `solo.blocksniper.ai:3333`, usuário = endereço) e
    robô em **Observar** por alguns dias, lendo o log.
-7. **Produção**: em Conectar contas, ambiente **Produção** e a chave da conta real (mesmas permissões, sem saque).
-   Ao trocar de ambiente o robô volta para Observar e esquece ordens e pool do ambiente anterior. Ajuste os tetos
+7. **Operar de verdade**: depois de alguns dias em Observar, mude o robô para **Ativo**. Se usou a conta de teste antes,
+   troque para Produção em Conectar contas: o robô volta para Observar e esquece ordens e pool do teste. Ajuste os tetos
    (`MAX_ORDER_BTC`, `MAX_LIMIT_PH`, `MAX_DAILY_USD` em `worker/wrangler.toml`) ao seu risco antes do modo **Ativo**.
 
 Depois de instalado, o token do Cloudflare pode ser revogado (o backend continua rodando). Para atualizar o backend
@@ -67,6 +72,7 @@ servem para validar a conexão; a criação de ordens fica validada pelos testes
 | Saúde "sem resposta" logo após instalar | Subdomínio `workers.dev` novo leva alguns minutos para responder |
 | Painel diz "token inválido" | Token do aparelho diferente do `PANEL_TOKEN` do backend: abra o link de novo |
 | Painel diz "origem não permitida" | Painel aberto fora de `https://sr-geovani.github.io` (ajuste `ALLOWED_ORIGIN`) |
-| "A NiceHash não aceitou as chaves" | Chave de teste no ambiente Produção (ou o contrário), campos trocados, ou sem permissão de ver saldo |
+| "A NiceHash não aceitou as chaves" | Chave não confirmada pelo e-mail, campos trocados, ou sem permissão de ver saldo |
+| test.nicehash.com pede senha | É outro site, sem login pelo Google: use a conta real em Observar (recomendado) ou crie conta de teste com e-mail e senha |
 | Telegram: "falta mandar oi" | Mande qualquer mensagem para o seu bot e toque em Conectar de novo |
 | "Falta a chave de cifra (ENC_KEY)" | Backend publicado antes desta versão: rode o script ou o workflow de novo |

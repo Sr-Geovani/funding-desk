@@ -377,3 +377,31 @@ test('credenciais: Telegram acha o chat pela mensagem e manda teste', async () =
     assert.ok(sent.some((x) => /bloco .* encontrado/.test(x.text) && x.chat_id === '4242'), JSON.stringify(sent.map((x) => x.text)));
   } finally { t.server.close(); }
 });
+
+test('credenciais: chave da conta real com "Teste" escolhido sugere Produção', async () => {
+  const t = await setup();
+  try {
+    const env = Object.assign({}, t.env, { NH_BASE: '', NH_API_KEY: '', NH_API_SECRET: '', NH_ORG_ID: '', ENC_KEY: ENC });
+    // produção = NiceHash falsa (aceita as chaves); teste = recusa tudo
+    const fetchFn = (u, o) => {
+      const s = String(u);
+      if (s.startsWith('https://api2.nicehash.com')) return fetch(s.replace('https://api2.nicehash.com', t.base + '/nh'), o);
+      if (s.startsWith('https://api-test.nicehash.com')) return Promise.resolve(new Response('{"error_id":"x"}', { status: 401 }));
+      return fetch(u, o);
+    };
+    const put = async (envName) => {
+      const r = await worker.fetch(new Request('https://api.example/api/credentials', { method: 'PUT', headers: { Authorization: 'Bearer ' + env.PANEL_TOKEN },
+        body: JSON.stringify({ nicehash: { key: MOCK_KEYS.key, secret: MOCK_KEYS.secret, org: MOCK_KEYS.org, env: envName } }) }), env, {}, fetchFn);
+      return { status: r.status, body: await r.json() };
+    };
+    let r = await put('test');
+    assert.deepEqual([r.status, r.body.suggestEnv], [400, 'prod']);
+    assert.match(r.body.error, /conta real/);
+    assert.equal(await env.FD_KV.get('creds'), null, 'nada salvo na sugestão');
+    r = await put('prod');
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    assert.equal(r.body.nicehash.env, 'prod');
+    const cfg = JSON.parse(await env.FD_KV.get('config'));
+    assert.equal(cfg.mode, 'observe', 'conta real começa em Observar');
+  } finally { t.server.close(); }
+});

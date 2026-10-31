@@ -56,7 +56,7 @@ Estado do projeto e pendências (para continuar em outra conversa): [`docs/estad
 ## Para colocar em produção
 
 1. Publicar o backend no Cloudflare (um token; seção "Backend") e abrir o link de conexão no celular.
-2. Ajustes → Conectar contas: NiceHash **sem saque** (primeiro test.nicehash.com, depois a conta real).
+2. Ajustes → Conectar contas: NiceHash **sem saque** (conta real, robô em Observar).
 3. Ajustes → Conectar contas: Telegram, para alertas 24 h.
 4. Endereço BCH e pool cadastrados (Operar); robô em **Observar** por alguns dias, lendo o log.
 5. Ambiente Produção (Conectar contas), tetos (`MAX_ORDER_BTC`, `MAX_DAILY_USD`) do tamanho do seu risco, e robô em **Ativo**.
@@ -177,12 +177,12 @@ O mesmo resumo está no painel, em Ajustes → Conectar o backend.
 2. **Instalar**: `CLOUDFLARE_API_TOKEN=... bash scripts/deploy-backend.sh` (ou mande o token para o Claude rodar).
    O script acha a conta, cria o subdomínio `workers.dev` e o KV se faltarem, publica o Worker, cria `PANEL_TOKEN` e
    `ENC_KEY` e imprime um **link** que abre o painel já conectado.
-3. **Ajustes → Conectar contas**: NiceHash (comece por test.nicehash.com; chave **sem saque**) e Telegram (token do
+3. **Ajustes → Conectar contas**: NiceHash (sua conta real, ambiente Produção, robô em Observar; chave **sem saque**) e Telegram (token do
    @BotFather; o backend acha o seu chat sozinho). As chaves vão direto para o backend e ficam **cifradas** (AES-GCM com
    `ENC_KEY`) no KV; nenhuma rota as devolve.
 4. **Mineração → Operar**: cadastre o pool (ex.: `solo.blocksniper.ai:3333`, usuário = seu endereço BCH), informe o
    endereço da recompensa, deixe o robô em **Observar** por alguns dias e leia o log. Só depois mude para **Ativo**.
-5. **Produção**: em Conectar contas, ambiente **Produção** e a chave da conta real. Trocar de ambiente volta o robô para Observar.
+5. **Ativo** só depois de alguns dias em Observar. A conta de teste (test.nicehash.com) é opcional; trocar de ambiente volta o robô para Observar.
 
 ### Testar localmente (sem dinheiro e sem chaves)
 

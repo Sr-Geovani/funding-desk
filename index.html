@@ -536,13 +536,14 @@ details.card>summary{color:var(--fg);font-size:15px}
       <p class="note" id="ac_state" style="margin:4px 0 8px">Conecte o backend primeiro.</p>
       <details id="ac_nh"><summary>NiceHash <span id="ac_nh_st" class="chip"></span></summary>
         <ol class="note" style="margin:8px 0;padding-left:18px">
-          <li>Entre em <a href="https://test.nicehash.com" target="_blank" rel="noopener">test.nicehash.com</a> (teste, dinheiro de mentira; comece por aqui) ou em nicehash.com (dinheiro real).</li>
-          <li>Configurações → Chaves de API → criar chave.</li>
-          <li>Marque só: <b>ver saldos</b> e, no marketplace de hashpower, <b>ver e gerenciar pedidos</b> e <b>pools</b>. <b class="bad">Nunca marque saque (withdraw) nem endereços de saque.</b></li>
+          <li>Use a sua conta normal em <a href="https://www.nicehash.com" target="_blank" rel="noopener">nicehash.com</a> e escolha Ambiente <b>Produção</b>. É seguro: o robô começa em <b>Observar</b> (só registra, não compra nada) e o servidor tem teto de gasto. A conta de teste (test.nicehash.com) é opcional, separada, com e-mail e senha próprios.</li>
+          <li>Ligue a verificação em duas etapas (Configurações → Segurança), se ainda não ligou: a NiceHash pede o código para criar a chave.</li>
+          <li>Configurações → Chaves de API → criar chave. Marque só: <b>ver saldos</b> e, no marketplace de hashpower, <b>ver e gerenciar pedidos</b> e <b>pools</b>. <b class="bad">Nunca marque saque (withdraw) nem endereços de saque.</b></li>
+          <li>Confirme a chave no e-mail que a NiceHash manda (sem isso ela não funciona).</li>
           <li>Copie API Key, API Secret e Organization ID (aparece na mesma página) e cole aqui.</li>
         </ol>
         <div class="grid2">
-          <label style="grid-column:1/-1">Ambiente<select id="ac_env"><option value="test">Teste (test.nicehash.com)</option><option value="prod">Produção (dinheiro real)</option></select></label>
+          <label style="grid-column:1/-1">Ambiente<select id="ac_env"><option value="prod">Produção (nicehash.com, sua conta)</option><option value="test">Teste (test.nicehash.com)</option></select></label>
           <label style="grid-column:1/-1">API Key<input id="ac_key" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"></label>
           <label style="grid-column:1/-1">API Secret<input id="ac_secret" type="password" autocomplete="new-password"></label>
           <label style="grid-column:1/-1">Organization ID<input id="ac_org" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"></label>
