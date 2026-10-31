@@ -896,3 +896,23 @@ test('plano de ação: potência, preço, orçamento, duração e travas', () =>
   assert.equal(p.mining.apply.autoCreate, true);
   assert.equal(p.funding.action, 'esperar'); assert.match(p.others[0].text, /LiteSolo/);
 });
+
+test('integração: ajuste do operador recalcula o plano na hora e fica registrado', async () => {
+  const t = await setup();
+  try {
+    await t.call('PUT', '/api/config', { mode: 'observe', targetPh: 10, sessionBudgetUsd: 300 });
+    await t.call('POST', '/api/tick');
+    let st = (await t.call('GET', '/api/status')).body.state;
+    assert.equal(st.plan.mining.budgetUsd, 300); assert.equal(st.plan.mining.mine.ph, 10);
+    await t.call('PUT', '/api/config', { targetPh: 30, sessionBudgetUsd: 100 });
+    st = (await t.call('GET', '/api/status')).body.state;
+    assert.equal(st.plan.mining.budgetUsd, 100, 'plano usa o novo stop-loss sem esperar o ciclo');
+    assert.equal(st.plan.mining.mine.ph, 30, 'sua potência aparece no plano');
+    assert.equal(st.opLog[0].changes.length, 2);
+    const log = await t.call('GET', '/api/log');
+    assert.ok(log.body.log.some((l) => l.kind === 'operador' && /potência alvo 10 → 30/.test(l.text)));
+    await t.call('POST', '/api/tick');
+    st = (await t.call('GET', '/api/status')).body.state;
+    assert.ok(st.paperPlan, 'cenário do copiloto roda na simulação');
+  } finally { t.server.close(); }
+});

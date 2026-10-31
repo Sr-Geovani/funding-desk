@@ -716,13 +716,13 @@ function simResultHTML(p){
     '<details style="margin-top:8px"><summary>Chance e média de longo prazo</summary>'+outcomesHTML(p.spendUsd,p.evUsd,p.lambda,p.blockNetUsd)+'</details>';
 }
 // Contínuo (sua configuração) × rajada de 50 PH/s parando no bloco (método do vídeo): mesmos blocos e sorteio.
-function burstHTML(p,b){
-  if(!b)return '';
-  var row=function(x){var res=(x.wonUsd||0)-x.spendUsd;return [usd(x.spendUsd),(x.blocks||0)+' de '+(x.draws||0),signUsd(res),pctp((1-Math.exp(-x.lambda))*100,1)]};
-  var A=row(p),B=row(b),lab=['Gasto','Blocos seus (de cobertos)','Resultado','Chance de ≥1 bloco'];
-  return '<div class="eyebrow" style="margin:14px 0 6px">Contínuo × rajada (método do vídeo)</div><div class="scroll"><table><tr><th></th><th>Contínuo '+nf(p.ph||+((ops.status||{}).config||{}).targetPh||0,0)+' PH/s</th><th>Rajada 50 PH/s</th></tr>'+
-    lab.map(function(l,i){return '<tr><td>'+l+'</td><td>'+A[i]+'</td><td>'+B[i]+'</td></tr>'}).join('')+'</table></div>'+
-    '<p class="note" style="margin:6px 0 0">Mesmas regras de preço (compra abaixo do teto, pausa acima), mesmos blocos reais e mesmo sorteio. A rajada gasta mais rápido e tem mais chance por hora; por dólar, a média é a mesma. A diferença está no risco de cada sessão.</p>';
+function burstHTML(p,b,c){
+  if(!b&&!c)return '';
+  var row=function(x){if(!x)return ['—','—','—','—'];var res=(x.wonUsd||0)-x.spendUsd;return [usd(x.spendUsd),(x.blocks||0)+' de '+(x.draws||0),signUsd(res),pctp((1-Math.exp(-x.lambda))*100,1)]};
+  var A=row(p),C=row(c),B=row(b),lab=['Gasto','Blocos seus (de cobertos)','Resultado','Chance de ≥1 bloco'];
+  return '<div class="eyebrow" style="margin:14px 0 6px">Cenários lado a lado (mesmos blocos, mesmo sorteio)</div><div class="scroll"><table><tr><th></th><th>Sua: '+nf(p.ph||+((ops.status||{}).config||{}).targetPh||0,0)+' PH/s</th><th>Copiloto'+(c&&c.ph?': '+nf(c.ph,0)+' PH/s':'')+'</th><th>Rajada 50</th></tr>'+
+    lab.map(function(l,i){return '<tr><td>'+l+'</td><td>'+A[i]+'</td><td>'+C[i]+'</td><td>'+B[i]+'</td></tr>'}).join('')+'</table></div>'+
+    '<p class="note" style="margin:6px 0 0">Mesmas regras de preço (compra abaixo do teto, pausa acima). "Sua" usa a potência e o stop-loss que você configurou; "Copiloto" usa os do plano; "Rajada" usa 50 PH/s e para no bloco. Por dólar a média é igual: muda quanto cada um gasta enquanto a janela está aberta e o risco por sessão.</p>';
 }
 // Desfechos honestos de um período de aluguel: sem bloco (o mais comum) perde o gasto; com bloco ganha o bloco menos o gasto.
 // A média de longo prazo (receita esperada − gasto) só aparece repetindo muitas vezes.
@@ -806,7 +806,7 @@ function renderRobo(){
       return '<div class="trow"><div><b>'+nf(r.ph,0)+' PH/s</b> <span class="note">a '+r.priceEH.toFixed(4)+' (margem '+pct(r.edgePct,1)+')</span></div><div class="note">'+dt2(r.start)+' → '+dt2(r.end)+' · '+FDI.dur(r.end-r.start)+' · gasto '+usd(r.spendUsd)+' · blocos da rede '+(r.draws||0)+', seus '+(r.blocks||0)+' → <strong class="'+(((r.wonUsd||0)-r.spendUsd)>=0?'good':'bad')+'">'+signUsd((r.wonUsd||0)-r.spendUsd)+'</strong></div><div class="note">Saída: '+esc(r.reason)+'</div></div>'}).join('')+'</div>'+
       (rs.length>15?'<div style="margin-top:6px"><button class="sm" data-roboall="m">'+(roboAll.m?'Mostrar menos':'Ver todas ('+rs.length+')')+'</button></div>':'')
       :'<p class="note" style="margin:0">Nenhuma encerrada ainda.</p>');
-    mh+=simResultHTML(mp)+burstHTML(mp,s.paperBurst);
+    mh+=simResultHTML(mp)+burstHTML(mp,s.paperBurst,s.paperPlan);
   }
   mh+='<div class="row" style="margin-top:8px"><button class="sm" data-roboreset="funding">Reiniciar funding</button><button class="sm" data-roboreset="mining">Reiniciar mineração</button></div>';
   $('rb_mine').innerHTML=mh;
@@ -890,7 +890,7 @@ function renderAct(){
         kvJ('Bloco vale',usd(M.blockUsd||0,0),'',null,'recompensa já sem a taxa do pool')+'</div>'+
         (M.why?'<details style="margin-top:8px"><summary>Por que '+M.ph+' PH/s?</summary><ol class="note" style="margin:6px 0 0;padding-left:18px">'+M.why.map(function(w){return '<li>'+esc(w)+'</li>'}).join('')+'</ol>'+
           (M.alt?'<div class="scroll"><table style="margin-top:6px"><tr><th>Potência</th><th>Gasto em 2 h</th><th>Chance de bloco</th></tr>'+M.alt.map(function(a){return '<tr><td>'+a.ph+' PH/s</td><td>'+usd(a.costUsd,0)+'</td><td>'+pctp(a.chance*100,0)+'</td></tr>'}).join('')+'</table></div><p class="note" style="margin:4px 0 0">Chance e gasto crescem juntos: a média por dólar é igual. Se quiser arriscar menos por sessão, baixe o orçamento (Operar → Stop-loss por sessão) que a potência sugerida cai junto.</p>':'')+'</details>':'')+
-        chanceCalc(M)+norteHTML()+
+        mineVsPlan(M)+chanceCalc(M)+norteHTML()+
         '<div class="row" style="margin-top:10px"><button class="sm pri" data-plan="apply">Aplicar plano no robô</button></div>';
     }
     if(P.blockers&&P.blockers.length)h+='<div class="eyebrow" style="margin:12px 0 6px">O que trava para operar ('+P.blockers.length+')</div><div class="stack" style="gap:6px">'+P.blockers.map(function(b,i){
@@ -906,6 +906,16 @@ function renderAct(){
     h+='<details style="margin-top:8px"><summary>Solo × PPS: qual depende de sorte?</summary><p class="note" style="margin:6px 0 0"><b>Solo</b> (BCH no BlockSniper): você só recebe se o SEU hash achar um bloco. Ou ganha o bloco inteiro (~US$900), ou não ganha nada: é sorte, com chance proporcional à sua potência. <b>PPS</b> (pay per share): o pool paga cada "share" (prova de trabalho) que você entrega, pelo valor médio, ache o pool bloco ou não. O pool fica com o risco da sorte e cobra uma taxa por isso. Por isso, em PPS o resultado já é o esperado: receita por hash − aluguel − taxas, todo dia, sem loteria. As outras moedas são simuladas assim.</p></details>';
     el.innerHTML=h;
   });
+}
+// Sua configuração (o que o robô executa) × sugestão do copiloto, com os mesmos números de mercado.
+function mineVsPlan(M){
+  var Y=M.mine;if(!Y)return '';
+  var r=[['Potência',Y.ph+' PH/s',M.ph+' PH/s'],['Orçamento por sessão',usd(Y.budgetUsd,0),usd(M.budgetUsd,0)],['Custo por hora',usd(Y.costPerHourUsd,0),usd(M.costPerHourUsd,0)],
+    ['Orçamento dura',Y.durationH>=999?'muito tempo':nf(Y.durationH,1)+' h',nf(M.durationH,1)+' h'],['Gasto numa janela de 2 h',usd(Y.cost2h,0),usd(M.cost2h,0)],['Chance nessa janela',pctp(Y.chance2h*100,0),pctp(M.chance2h*100,0)]];
+  var diff=Y.ph!==M.ph;
+  return '<div class="eyebrow" style="margin:12px 0 6px">Sua configuração × sugestão do copiloto</div><div class="scroll"><table><tr><th></th><th>Sua (o robô executa)</th><th>Copiloto</th></tr>'+
+    r.map(function(x){return '<tr><td>'+x[0]+'</td><td>'+x[1]+'</td><td>'+x[2]+'</td></tr>'}).join('')+'</table></div>'+
+    '<p class="note" style="margin:4px 0 0">'+(diff?'Os dois rodam na simulação com os mesmos blocos reais (Diário → Robô): em semanas, dá para ver qual escolha funcionou melhor. Para usar a sugestão, toque em "Aplicar plano no robô".':'Sua configuração já é igual à sugestão.')+'</p>';
 }
 // Calculadora: chance desejada → potência e custo, com a dificuldade e o preço de agora (janela de ~2 h).
 function chanceCalc(M){
@@ -954,6 +964,8 @@ function renderAI(){
   h+='<div class="eyebrow" style="margin:12px 0 6px">Previsões em aberto ('+A.open.length+')</div>'+(A.open.length?'<div class="stack" style="gap:4px">'+A.open.slice(0,8).map(function(o){return '<div class="trow"><div class="note">'+esc(o.text)+'</div>'+(o.why?'<div class="note"><b>Por quê:</b> '+esc(o.why)+'</div>':'')+'<div class="note">'+dueTxt(o)+' · confiança '+pctp(o.conf*100,0)+(o.trusted?' · confiável':'')+'</div></div>'}).join('')+'</div>':'<p class="note" style="margin:0">Nenhuma agora: ela prevê quando algum sinal aparece.</p>');
   var dn=A.done.filter(function(d){return d.hit!==null&&d.hit!==undefined});
   h+='<div class="eyebrow" style="margin:12px 0 6px">Conferidas</div>'+(dn.length?'<div class="stack" style="gap:4px">'+dn.slice(0,8).map(function(d){return '<div class="trow"><div class="note">'+(d.hit?'<span class="chip ok">acertou +'+d.xp+' XP</span>':'<span class="chip bad">errou +1 XP</span>')+' '+esc(d.text)+'</div>'+(d.why?'<div class="note"><b>Por quê previu:</b> '+esc(d.why)+'</div>':'')+(d.check?'<div class="note"><b>Como foi conferida:</b> '+esc(d.check)+'</div>':'')+'<div class="note">'+dt2(d.resolvedAt)+'</div></div>'}).join('')+'</div>':'<p class="note" style="margin:0">As primeiras são conferidas em 1 a 6 h; as de funding, em 3 dias.</p>');
+  var OL=(st&&st.opLog)||[];
+  if(OL.length)h+='<div class="eyebrow" style="margin:12px 0 6px">Seus ajustes (correções do operador)</div><div class="stack" style="gap:4px">'+OL.slice(0,5).map(function(o){return '<div class="trow"><div class="note">'+esc(o.changes.map(function(c){return c.label+' '+c.from+' → '+c.to}).join('; '))+'</div>'+(o.plan?'<div class="note">copiloto sugeria '+o.plan.ph+' PH/s e '+usd(o.plan.budgetUsd,0)+' por sessão</div>':'')+'<div class="note">'+dt2(o.t)+'</div></div>'}).join('')+'</div><p class="note" style="margin:4px 0 0">Seus ajustes rodam como cenário na simulação, ao lado da sugestão: os resultados mostram quem acertou mais.</p>';
   var ks=Object.keys(T);
   h+='<details style="margin-top:10px"><summary>O que ela aprendeu por tipo de previsão</summary><div class="scroll"><table><tr><th>Previsão</th><th>Conferidas</th><th>Acerto</th></tr>'+ks.map(function(k){var s=(A.stats||{})[k]||{n:0,hits:0};return '<tr><td>'+esc(T[k].label)+'</td><td>'+s.n+'</td><td>'+(s.n?pctp(s.hits/s.n*100,0):'—')+'</td></tr>'}).join('')+'</table></div></details>'+
     '<details style="margin-top:6px"><summary>Como a IA aprende e ganha XP</summary><p class="note" style="margin:6px 0 0">A cada 3 min o servidor junta todos os sinais (DARR, margem, reajuste do BTC, BCH contra o BTC, blocos chegando, funding com 24 h estável e meia-vida, outras moedas) e transforma cada sinal numa previsão com prazo. Quando o prazo vence, ele confere com os dados reais: acerto vale até 15 XP (mais confiança, mais XP); erro vale 1. Não precisa que você execute: conta se a dica era boa. A confiança de cada tipo de previsão vem do histórico de acertos dele; tipos com 20+ conferidas e 60%+ de acerto viram "confiáveis" e as sugestões deles ficam mais assertivas. Níveis: Aprendiz → Analista (30 conferidas) → Estrategista (100, acerto ≥ 55%) → Mestre (300, acerto ≥ 60%).'+(nx?' Próximo nível: '+esc(nx.name)+' ('+A.resolved+' de '+nx.min+' conferidas'+(nx.hit?', acerto ≥ '+pctp(nx.hit*100,0):'')+').':'')+'</p></details>';

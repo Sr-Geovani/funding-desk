@@ -149,9 +149,14 @@ export function actionPlan(ctx) {
     const lam = ph / mkt.phDaysPerBlock * dur / 24, chance = 1 - Math.exp(-lam);
     const amountBtc = Math.max(0.001, Math.min(limits.maxOrderBtc, budget / mkt.btcUsd));
     const green = mkt.green;
+    // a sua configuração (o que o robô vai executar) com os mesmos números, para comparar com a sugestão
+    const myPh = Math.max(1, Math.min(cfg.targetPh || 1, limits.maxLimitPh)), myCostH = myPh * perPhDay / 24;
+    const mine = { ph: myPh, budgetUsd: budget, costPerHourUsd: myCostH, durationH: Math.min(999, budget / myCostH),
+      chance2h: 1 - Math.exp(-myPh / mkt.phDaysPerBlock * hours / 24), cost2h: myCostH * hours };
     out.mining = {
       action: green ? 'alugar' : 'esperar', edge: mkt.edgeAtBidPct, price: mkt.bidEH, maxPrice: mkt.capEH, ph, budgetUsd: budget, durationH: dur,
-      amountBtc: +amountBtc.toFixed(4), chance, expBlocks: lam, costPerHourUsd: costH, blockUsd: mkt.blockNetUsd, alt,
+      amountBtc: +amountBtc.toFixed(4), chance, expBlocks: lam, costPerHourUsd: costH, blockUsd: mkt.blockNetUsd, alt, mine,
+      chance2h: 1 - Math.exp(-ph / mkt.phDaysPerBlock * hours / 24), cost2h: costH * hours,
       why: [`Orçamento por sessão: US$${n(budget, 0)} (o seu stop-loss). É o máximo que você aceita perder se não sair bloco.`,
         `As janelas boas duram ~2 h (pesquisa de 6 meses). A potência é a que gasta esse orçamento dentro de uma janela: US$${n(budget, 0)} ÷ (US$${n(perPhDay / 24, 2)} por PH/s por hora × 2 h) = ${rawPh} PH/s.`,
         capBy ? `Limitado a ${ph} PH/s pelo ${capBy}.` : `Cabe no teto de segurança (${limits.maxLimitPh} PH/s) e na liquidez do mercado.`,

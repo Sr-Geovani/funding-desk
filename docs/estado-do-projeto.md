@@ -83,6 +83,9 @@ sempre identificado; nada de prometer previsão de sorte (Poisson é sem memóri
   Estrategista (100, ≥55%) → Mestre (300, ≥60%). Tela: barra no topo + cartão no Início. Log com eventos "ia".
 - Rede: cartão "Próximo bloco" (tempo desde o último, média, mempool, dificuldade exata do próximo, hash da rede);
   confirmações nos detalhes de cada bloco.
+- Plano de ação (`actionPlan`): potência = orçamento da sessão (stop-loss) ÷ (custo por PH/s/h × 2 h), até o teto e 5% do
+  mercado; recalculado na hora ao salvar a configuração; mostra "sua configuração × sugestão". Ajustes do operador ficam
+  em `opLog` (e no log como "operador"). Simulação roda 3 cenários com os mesmos blocos: sua config, copiloto, rajada 50.
 - Ciclo do servidor: 3 min. Mínimo do Cloudflare é 1 min, mas o KV grátis aceita 1.000 gravações/dia e propaga em até
   60 s; abaixo de 3 min exige plano pago + Durable Objects. Atraso de 3 min custa < US$1 com 10 PH/s.
 
