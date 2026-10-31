@@ -143,7 +143,7 @@ async function setup() {
   await new Promise((r) => server.listen(0, r));
   const base = 'http://127.0.0.1:' + server.address().port;
   const env = { FD_KV: memoryKV(), PANEL_TOKEN: 'token-de-teste-com-mais-de-24-chars', ALLOWED_ORIGIN: 'https://sr-geovani.github.io',
-    NH_BASE: base + '/nh', BCH_REST: base + '/bch', PRICE_URL: base + '/cg/x', HL_URL: base + '/hl/info', WTM_URL: base + '/wtm/asic.json', HP_URL: base + '/hp', MRR_URL: base + '/mrr', LIGHTER_URL: base + '/x', WTM_GPU_URL: base + '/x', UPBIT_URL: base + '/x', FX_URL: base + '/x', CRIPTOYA_URL: base + '/x', COINBASE_URL: base + '/x', OKX_URL: base + '/x', GATE_URL: base + '/x', BITGET_URL: base + '/x', GAMMA_URL: base + '/x', LLAMA_URL: base + '/x', BFX_URL: base + '/x', DERIBIT_URL: base + '/x', ETHENA_URL: base + '/x', HL_INFO_URL: base + '/x', ZPOOL_URL: base + '/x', MB_URL: base + '/x', BCB_PTAX_URL: base + '/x', BCB_SGS_URL: base + '/x', MEMPOOL_URL: base + '/mempool', KRAKEN_URL: base + '/kraken', NH_API_KEY: MOCK_KEYS.key, NH_API_SECRET: MOCK_KEYS.secret, NH_ORG_ID: MOCK_KEYS.org,
+    NH_BASE: base + '/nh', BCH_REST: base + '/bch', PRICE_URL: base + '/cg/x', HL_URL: base + '/hl/info', WTM_URL: base + '/wtm/asic.json', HP_URL: base + '/hp', MRR_URL: base + '/mrr', LIGHTER_URL: base + '/x', WTM_GPU_URL: base + '/x', UPBIT_URL: base + '/x', FX_URL: base + '/x', CRIPTOYA_URL: base + '/x', COINBASE_URL: base + '/x', OKX_URL: base + '/x', GATE_URL: base + '/x', BITGET_URL: base + '/x', GAMMA_URL: base + '/x', LLAMA_URL: base + '/x', BCB_FOCUS_URL: base + '/x', UST_URL: base + '/x', BFX_URL: base + '/x', DERIBIT_URL: base + '/x', ETHENA_URL: base + '/x', HL_INFO_URL: base + '/x', ZPOOL_URL: base + '/x', MB_URL: base + '/x', BCB_PTAX_URL: base + '/x', BCB_SGS_URL: base + '/x', MEMPOOL_URL: base + '/mempool', KRAKEN_URL: base + '/kraken', NH_API_KEY: MOCK_KEYS.key, NH_API_SECRET: MOCK_KEYS.secret, NH_ORG_ID: MOCK_KEYS.org,
     MAX_ORDER_BTC: '0.01', MAX_LIMIT_PH: '100', MAX_DAILY_USD: '1000' };
   const call = async (method, path, body, token = env.PANEL_TOKEN) => {
     const r = await worker.fetch(new Request('https://api.example' + path, { method, headers: { Authorization: 'Bearer ' + token, Origin: 'https://sr-geovani.github.io', 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined }), env, {});
@@ -979,6 +979,21 @@ test('lastro de mercado: ágio por país, BTC entre corretoras, Polymarket e ren
   const pm = F.polymarketOf(rd('polymarket-gamma.real.json'));
   assert.ok(pm.markets > 0 && pm.dailyUsd > 0 && pm.top[0].aprMax >= pm.top[pm.top.length - 1].aprMax);
   const y = F.llamaOf(rd('defillama-steth.real.json')); assert.equal(y.project, 'lido'); assert.ok(y.apy > 2 && y.apy < 5);
+});
+
+test('panorama do mercado (IA): macro fora de cripto, regime, ranking e mudanças em 7 dias', async () => {
+  const { macroOf, marketPanorama } = await import('../worker/src/panorama.js');
+  const rd = (f) => readFileSync(new URL('./fixtures/' + f, import.meta.url), 'utf8');
+  const mac = macroOf({ selic: [{ data: '04/11/2026', valor: '13.75' }], ipca12: [{ data: '01/09/2026', valor: '4.58' }], focus: JSON.parse(rd('bcb-focus-ipca.real.json')), tbillCsv: rd('ust-tbill.real.csv') });
+  assert.deepEqual([mac.selic, mac.ipca12, mac.tbill], [13.75, 4.58, 4.08]); assert.ok(mac.ipcaExp > 3 && mac.ipcaExp < 6);
+  const fronts = { cdi: 13.65, basis: { basisApr: 5.6, netApr: 4.8, contract: 'BTC-29JAN27' }, bfx: { frrApr: 9, netApr: 4.3 }, ethena: { apr30: 4.8 }, hlp: { apr: 4.4 },
+    asic: { hashpriceUsdPh: 33, breakEvenKwh: 0.1 }, lt: { top: [{ coin: 'X', spread: 60, be: 8.5, hours: 30 }] },
+    hist: { '2026-10-24': { bfx: 9, usdt: 0.5 }, '2026-10-31': { bfx: 4.3, usdt: 1.3 } } };
+  const P = marketPanorama({ fronts, market2: { macro: mac, yields: { stEth: { apy: 3.2 } }, prem: { br: { usdtPct: 1.3 } } }, mkt: { ok: true, edgeAtBidPct: 2 }, darr: 1.02, sentiment: { avg: 6 }, now: 1 });
+  assert.equal(P.regime.leverage, 'frio');
+  assert.equal(P.rank[0].name.startsWith('Funding com Lighter'), true, 'maior retorno medido em primeiro');
+  assert.ok(P.rank.some((r) => r.name === 'CDI (reais)') && P.rank.every((r, i, a) => !i || a[i - 1].apr >= r.apr));
+  assert.ok(P.changes.some((c) => /Bitfinex ↓/.test(c)) && P.lines.some((l) => /juro real/.test(l)));
 });
 
 test('auditoria IA: mesma régua do robô, reajuste real, funding acompanhado e grupo de controle', () => {

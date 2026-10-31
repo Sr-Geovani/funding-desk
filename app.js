@@ -1008,7 +1008,7 @@ function renderAI(){
     return r.trusted?'<span class="chip ok">confiável · '+r.n+' conferidas</span>':'<span class="chip">em teste · '+(r.n||0)+' conferidas</span>'};
   var dueTxt=function(o){var ms=o.due-Date.now();return ms>0?'confere em '+FDI.dur(ms):'conferindo'};
   var h='<div class="row between"><div class="eyebrow">Copiloto IA</div><span class="chip">Nível '+A.level.n+' · '+esc(A.level.name)+'</span></div>'+
-    '<div class="lead">O que está acontecendo agora</div>'+(an?'<ul class="note" style="margin:6px 0 0;padding-left:18px">'+an.lines.map(function(l){return '<li>'+esc(l)+'</li>'}).join('')+'</ul>':'');
+    '<div class="lead">O que está acontecendo agora</div>'+(an?'<ul class="note" style="margin:6px 0 0;padding-left:18px">'+an.lines.map(function(l){return '<li>'+esc(l)+'</li>'}).join('')+'</ul>':'')+panoramaHTML(st&&st.aiPanorama,false);
   if(an&&an.recs.length)h+='<div class="eyebrow" style="margin:12px 0 6px">Sugestões</div><div class="stack" style="gap:6px">'+an.recs.map(function(r){return '<div class="box" style="margin:0">'+esc(r.text)+' '+conf(r)+'</div>'}).join('')+'</div>';
   h+='<div class="eyebrow" style="margin:12px 0 6px">Previsões em aberto ('+A.open.length+')</div>'+(A.open.length?'<div class="stack" style="gap:4px">'+A.open.slice(0,8).map(function(o){return '<div class="trow"><div class="note">'+esc(o.text)+'</div>'+(o.why?'<div class="note"><b>Por quê:</b> '+esc(o.why)+'</div>':'')+'<div class="note">'+dueTxt(o)+' · confiança '+pctp(o.conf*100,0)+(o.trusted?' · confiável':'')+'</div></div>'}).join('')+'</div>':'<p class="note" style="margin:0">Nenhuma agora: ela prevê quando algum sinal aparece.</p>');
   var dn=A.done.filter(function(d){return d.hit!==null&&d.hit!==undefined});
@@ -1710,6 +1710,17 @@ function alertHTML(a,opts){opts=opts||{};var k=KIND[a.kind]||['Info','',''];
   return '<div class="alert '+a.kind+'"'+(resolved?' style="opacity:.65"':'')+'><div class="row between"><span class="chip '+k[1]+'">'+k[2]+' '+k[0]+'</span>'+when+'</div>'+body+life+acts+'</div>'}
 function dayLabel(t){var d=new Date(t),n=new Date(),y=new Date(n.getTime()-864e5);
   return d.toDateString()===n.toDateString()?'Hoje':d.toDateString()===y.toDateString()?'Ontem':d.toLocaleDateString('pt-BR',{weekday:'long',day:'2-digit',month:'2-digit'})}
+// Panorama do mercado escrito pelo copiloto: regime, ranking de retorno anual medido e o que mudou em 7 dias.
+function panoramaHTML(P,open){
+  if(!P||!P.lines)return '';
+  var reg={quente:'<span class="chip warn">alavancagem quente</span>',frio:'<span class="chip">alavancagem fria</span>',neutro:'<span class="chip">alavancagem neutra</span>'}[(P.regime||{}).leverage]||'';
+  return '<details'+(open?' open':'')+' style="margin-top:8px"><summary>Panorama do mercado (IA) '+reg+'</summary>'+
+    '<ul class="note" style="margin:6px 0 0;padding-left:18px">'+P.lines.map(function(l){return '<li>'+esc(l)+'</li>'}).join('')+'</ul>'+
+    ((P.rank||[]).length?'<div class="scroll" style="margin-top:6px"><table><tr><th>Retorno anual medido agora</th><th>a.a.</th><th>vs CDI</th></tr>'+P.rank.map(function(r){
+      return '<tr><td>'+esc(r.name)+(r.note?'<div class="note">'+esc(r.note)+'</div>':'')+'</td><td>'+pctp(r.apr,r.apr>=100?0:2)+'</td><td>'+(r.vsCdi===null?'—':(r.vsCdi>=0?'+':'')+nf(r.vsCdi,1)+' pts')+'</td></tr>'}).join('')+'</table></div>'+
+      '<p class="note" style="margin:4px 0 0">Taxas anuais do momento (não acumuladas). Em dólar, ETH ou SOL: a variação do ativo contra o real não entra aqui.</p>':'')+
+    ((P.ceilings||[]).length?'<p class="note" style="margin:6px 0 0"><b>Tetos teóricos (não são retorno medido):</b> '+P.ceilings.map(function(c){return esc(c.name)+' até '+pctp(c.apr,0)+' a.a. ('+esc(c.note)+')'}).join(' · ')+'</p>':'')+'</details>';
+}
 // Frentes em observação (docs/pesquisa-frentes.md): cada uma com o número de agora, a régua para valer a pena e o
 // resultado simulado desde o início do acompanhamento, sempre ao lado do CDI.
 function renderFronts(){
@@ -1722,7 +1733,7 @@ function renderFronts(){
   var pctA=function(x){return isFinite(x)&&x!==null?pctp(x,1)+' a.a.':'—'};
   var pap=function(k){var f=P&&P.f&&P.f[k];if(!f||!(f.usd>0))return '';var d=(Date.now()-f.since)/864e5;
     return '<div class="note">US$1.000 aqui desde '+new Date(f.since).toLocaleDateString('pt-BR')+': <b>'+signUsd(f.usd)+'</b> ('+pctp(f.usd/10,2)+') · CDI no mesmo período: '+pctp(f.cdiPct||0,2)+(d<7?' · poucos dias ainda':'')+'</div>'};
-  var h=head+'<p class="note" style="margin:0 0 8px">Régua: CDI hoje '+(cdi?pctp(cdi,2)+' a.a.':'—')+' (em reais). Frente em dólar se compara ao CDI somando a variação do dólar no período. Catálogo completo (todas as frentes, com e sem dado ao vivo): docs/catalogo-frentes-cripto.md.</p>';
+  var h=head+panoramaHTML(st.aiPanorama,true)+'<p class="note" style="margin:8px 0">Régua: CDI hoje '+(cdi?pctp(cdi,2)+' a.a.':'—')+' (em reais). Frente em dólar se compara ao CDI somando a variação do dólar no período. Catálogo completo (todas as frentes, com e sem dado ao vivo): docs/catalogo-frentes-cripto.md.</p>';
   // 1) funding com perna de taxa zero
   var L=F.lt;
   if(L){var seenC={},top=(L.top||[]).filter(function(p){if(seenC[p.coin])return false;seenC[p.coin]=1;return true}).slice(0,3),ls=LT&&LT.summary;

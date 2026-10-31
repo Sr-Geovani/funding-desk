@@ -127,6 +127,11 @@ sempre identificado; nada de prometer previsão de sorte (Poisson é sem memóri
   cotações (Kraken, Coinbase, Bitfinex, OKX, Gate, Bitget); Polymarket (recompensa de liquidez, 20 mercados de maior
   volume); rendimentos de referência da DefiLlama (stETH, jitoSOL, Aave USDC/USDT, sUSDS). O cartão das frentes não dá
   veredito: mostra os números e a distância até o CDI.
+- Panorama do mercado (copiloto, 31/10, `worker/src/panorama.js`): a cada ciclo junta frentes + lastro e escreve regime
+  (alavancagem quente/neutra/fria pela base, FRR, sUSDe e funding dos majors), demanda local (ágios), mineração (hashprice,
+  DARR) e juros (CDI, juro real pelo Focus, CDI − T-bill); ranking do retorno anual medido de tudo, com o CDI ao lado;
+  tetos teóricos (Polymarket) separados; mudanças em 7 dias. `market2.macro`: Selic, IPCA 12 m, Focus, T-bill 13 semanas.
+  Telas: Início (cartão do copiloto) e Radar (topo das frentes). Catálogo ganhou o grupo G (fora de cripto).
 - Ciclo do servidor: 3 min. Mínimo do Cloudflare é 1 min, mas o KV grátis aceita 1.000 gravações/dia e propaga em até
   60 s; abaixo de 3 min exige plano pago + Durable Objects. Atraso de 3 min custa < US$1 com 10 PH/s.
 

@@ -1,4 +1,4 @@
-# Catálogo global de frentes de ganho em cripto — lastro para comparação (31/10/2026)
+# Catálogo global de frentes de ganho (cripto e fora de cripto) — lastro para comparação (31/10/2026)
 
 Inventário neutro: todas as frentes encontradas, sem filtro por país, regulação, garantia ou risco. Cada linha traz o
 mecanismo, o número (**medido** = lido por nós nas APIs públicas neste dia; **relatado** = fonte de terceiros, muitas
@@ -99,6 +99,23 @@ Esforço: P = passivo, O = operacional, H = técnico/especializado.
 | Conteúdo, comunidade, consultoria, trabalho pago em cripto | variável | audiência/habilidade | não |
 | Vender a própria ferramenta (assinatura) | ver `docs/pesquisa-funding-negocio.md` | produto | não |
 
+## G. Fora de cripto (lastro de comparação: investimento com retorno por ciclo, sem vender produto)
+| Frente | Número | Ciclo / liquidez | Variáveis | Ao vivo |
+|---|---|---|---|---|
+| CDI / Tesouro Selic | **medido**: CDI 13,65%, Selic meta 13,75% (BCB) | diário | decisões do Copom | sim |
+| Juro real (Tesouro IPCA+) | **relatado**: IPCA+ 6,63% (2050) a 8,26% (2032) em out/26; IPCA 12 meses 4,58%, Focus 2027 4,34% (medidos) | até o vencimento; venda antes oscila | marcação a mercado | parcial (IPCA/Focus) |
+| Debêntures incentivadas (isentas de IR) | **relatado**: carteira de fundo a IPCA+8,76%; prêmio sobre o Tesouro de −0,12 a +0,78 pt em 2026 | anos | crédito, spread | não |
+| Crédito privado tokenizado (Brasil) | **relatado**: 132% do CDI em média em 2025; ofertas a CDI+7–10% | meses a anos | crédito do emissor; sem FGC | não |
+| Precatórios | **relatado**: deságio 20–60%; projeções de 15–30% a.a. conforme prazo (gestoras) | prazo de pagamento do ente | atraso, PEC 66, revenda com deságio | não |
+| FIIs (fundos imobiliários) | **relatado**: dividend yield do IFIX 12,53% (anualizado, ago/26); P/VP médio 0,89 no início de 2026 | mensal (rendimentos) | vacância, juros, preço da cota | não |
+| Aluguel de ações (doador) | **relatado**: taxa por papel; casos acima de 100% a.a. em papéis disputados; IR 22,5% até 180 dias; corretora fica com 20–50% | dias a meses | demanda por venda a descoberto | não |
+| Geração distribuída solar (cotas, fundos como SNEL11) | **relatado**: projeções comerciais de 15–30% a.a.; Fio B de 60% desde 2026 pesa | mensal | contratos de crédito de energia, regulação | não |
+| Juro em dólar (T-bills dos EUA) | **medido**: 4,08% (13 semanas) | semanas | Fed | sim |
+| High yield dos EUA / crédito privado | **relatado**: yield to worst 7,1–7,4%; direct lending 10–13% | meses a anos | inadimplência (2,1% em mar/26) | não |
+| Arbitragem de fusões (merger arb) | **relatado**: índice HFRI +8,2% até set/25; fundo Calamos +10,7% em 2025 | por operação (meses) | negócio desfeito | não |
+| Carry de câmbio (real × dólar) | **medido**: CDI − T-bill = 9,6 pts a favor do real | contínuo | desvalorização do real | sim |
+| Bolsas de apostas esportivas (trading em exchange) e surebet | **relatado**: diferença de odds; contas limitadas nas casas | por evento | limitação de conta | não |
+
 ## Fontes (além das já listadas em docs/pesquisa-frentes.md)
 GPU: [MinerCompare](https://minercompare.com/articles/is-gpu-mining-profitable-again-pearl-quantus-epic-cash-2026), [Coinspeaker](https://www.coinspeaker.com/guides/best-crypto-to-mine/), API WhatToMine ·
 Qubic: [The Defiant](https://thedefiant.io/news/defi/qubic-just-mined-monero-and-redefined-what-proof-of-work-can-be), [Club386](https://www.club386.com/qubic-crypto-miners-target-amd-ryzen-9-7950x-cpus/) ·
@@ -123,3 +140,12 @@ Golpes: [BP Money (CVM, Atlas)](https://bpmoney.com.br/mercado/cvm-multa-em-r-55
 Panorama ZH/RU: [KuCoin PoW × staking](https://www.kucoin.com/blog/en-2026-pow-mining-vs-staking-which-is-more-profitable-and-suitable-for-you), [profinvestment](https://profinvestment.com/how-earn-crypto/).
 Lastro de mercado (APIs lidas ao vivo): Upbit, Mercado Bitcoin, Kraken, Coinbase, Bitfinex, OKX, Gate, Bitget,
 Frankfurter (câmbio do BCE), CriptoYa (Argentina), Polymarket (gamma), DefiLlama (pools), Lido.
+Fora de cripto: BCB (SGS 4389, 432, 13522; Expectativas/Focus), Tesouro dos EUA (daily treasury bill rates),
+[InvestNews (Tesouro)](https://investnews.com.br/investimentos/tesouro-direto-taxas-rendimento-hoje-prefixados-sobem-22102026/amp/),
+[Acionista (IPCA+ 2032)](https://acionista.com.br/tesouro-ipca-2032-cai-para-ipca-826-hoje/),
+[relatório INFB11](https://acionista.com.br/wp-content/uploads/2026/10/202609-relatorio-mensal-drys-infb11-06-10-2026-21-43-00.pdf),
+[InfoMoney (precatórios)](https://www.infomoney.com.br/?p=2770089), [Investalk BB (FIIs out/26)](https://investalk.bb.com.br/noticias/onde-investir/carteira-fii-out-26),
+[XP (aluguel)](https://conteudos.xpi.com.br/aprenda-a-investir/relatorios/aluguel-de-acoes-como-investir/),
+[Agência Infra (GD solar)](https://agenciainfra.com/blog/fazendas-solares-perderam-atratividade-avaliam-especialistas/),
+[FRED (high yield)](https://fred.stlouisfed.org/series/BAMLH0A0HYM2SYTW/1000), [Morgan Stanley IM](https://insuranceaum.com/the-beat-for-q1-2026),
+[AllianceBernstein (merger arb)](https://www.alliancebernstein.com/us/en-us/investments/insights/investment-insights/merger-arbitrage-riding-the-wave-into-2026.html).

@@ -14,3 +14,4 @@
 - Lastro de mercado (31/10/2026): `upbit-ticker.real.json`, `mercadobitcoin-btc.real.json`, `kraken-ticker.real.json`,
   `frankfurter-usd.real.json`, `criptoya-dolar.real.json`, `polymarket-gamma.real.json` (6 mercados, campos usados),
   `defillama-steth.real.json`.
+- Fora de cripto (31/10/2026): `bcb-focus-ipca.real.json` (Focus, IPCA anual), `ust-tbill.real.csv` (T-bills, 3 linhas).

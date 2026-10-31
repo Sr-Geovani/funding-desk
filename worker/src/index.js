@@ -13,6 +13,7 @@ import FD from '../../core.js';
 import FDR from '../../radar.js';
 import { algoPaperStep } from './paperalgo.js';
 import { braiinsOf, mrrOf, stratumCheck } from './hashmarkets.js';
+import { macroOf, marketPanorama } from './panorama.js';
 import { bitfinexOf, deribitBasisOf, ethenaOf, hlpOf, zpoolOf, brlOf, cdiOf, lighterTable, lighterRows, lighterOi, lighterPairs, streakStep, frontsPaperStep, asicOf, gpuOf, premiumsOf, spotSpreadOf, polymarketOf, llamaOf, LLAMA_POOLS, LT_FEES } from './fronts.js';
 import { FUND_MODEL } from './fundmodel.js';
 import { updateHistory, pickCoins, scorePairs, stablePairs, pairStatsOf } from './fundai.js';
@@ -387,6 +388,7 @@ export async function tick(env, opts = {}) {
   let market2 = state.market2 || null;
   if (cfg.fronts !== false && !algoRan && !frontsRan && (!market2 || now - (market2.at || 0) >= 30 * 60e3)) {
     const getJ = (u) => fetchFn(u, { headers: { accept: 'application/json', 'user-agent': 'funding-desk/1.0' } }).then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
+    const getT = (u) => fetchFn(u, { headers: { 'user-agent': 'funding-desk/1.0' } }).then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); });
     const E = (k, d) => (env[k] || d).replace(/\/$/, '');
     const llamaKeys = Object.keys(LLAMA_POOLS);
     const R = await Promise.all([
@@ -401,8 +403,14 @@ export async function tick(env, opts = {}) {
       getJ(E('GATE_URL', 'https://api.gateio.ws') + '/api/v4/spot/tickers?currency_pair=BTC_USDT'),
       getJ(E('BITGET_URL', 'https://api.bitget.com') + '/api/v2/spot/market/tickers?symbol=BTCUSDT'),
       getJ(E('GAMMA_URL', 'https://gamma-api.polymarket.com') + '/markets?active=true&closed=false&limit=20&order=volume24hr&ascending=false')
-    ].concat(llamaKeys.map((k) => getJ(E('LLAMA_URL', 'https://yields.llama.fi') + '/poolsEnriched?pool=' + LLAMA_POOLS[k]))).map(settle));
-    const [up, mb2, kr, fx, ar, cb, bf2, ok2, gt, bg, gm] = R, ll = R.slice(11), old = market2 || {}, V = (r) => (r.ok ? r.v : null);
+    ].concat(llamaKeys.map((k) => getJ(E('LLAMA_URL', 'https://yields.llama.fi') + '/poolsEnriched?pool=' + LLAMA_POOLS[k]))).concat([
+      // referências fora de cripto: Selic (meta), IPCA 12 meses, expectativa Focus e T-bill de 13 semanas
+      getJ(E('BCB_SGS_URL', 'https://api.bcb.gov.br') + '/dados/serie/bcdata.sgs.432/dados/ultimos/1?formato=json'),
+      getJ(E('BCB_SGS_URL', 'https://api.bcb.gov.br') + '/dados/serie/bcdata.sgs.13522/dados/ultimos/1?formato=json'),
+      getJ(E('BCB_FOCUS_URL', 'https://olinda.bcb.gov.br') + "/olinda/servico/Expectativas/versao/v1/odata/ExpectativasMercadoAnuais?$top=8&$filter=Indicador%20eq%20'IPCA'&$orderby=Data%20desc&$format=json&$select=Indicador,Data,DataReferencia,Mediana"),
+      getT(E('UST_URL', 'https://home.treasury.gov') + '/resource-center/data-chart-center/interest-rates/daily-treasury-rates.csv/' + new Date(now).getUTCFullYear() + '/all?type=daily_treasury_bill_rates&_format=csv')
+    ]).map(settle));
+    const [up, mb2, kr, fx, ar, cb, bf2, ok2, gt, bg, gm] = R, ll = R.slice(11, 11 + llamaKeys.length), [sl, ip, fo, tb] = R.slice(11 + llamaKeys.length), old = market2 || {}, V = (r) => (r.ok ? r.v : null);
     const krPx = V(kr) && V(kr).result ? +Object.values(V(kr).result)[0].c[0] : null, bfx2 = V(bf2) || [];
     const bfPx = (sym) => { const t = bfx2.find((x) => Array.isArray(x) && x[0] === sym); return t ? +t[7] : null; };
     const quotes = [{ ex: 'Kraken', quote: 'USD', px: krPx }, { ex: 'Coinbase', quote: 'USD', px: V(cb) ? +V(cb).price : null }, { ex: 'Bitfinex', quote: 'USD', px: bfPx('tBTCUSD') },
@@ -411,8 +419,13 @@ export async function tick(env, opts = {}) {
     const yields = {}; llamaKeys.forEach((k, i) => { yields[k] = ll[i].ok ? llamaOf(ll[i].v) : (old.yields || {})[k] || null; });
     market2 = { at: now, prem: up.ok || mb2.ok ? premiumsOf({ upbit: V(up), mb: V(mb2), kraken: V(kr), fx: V(fx), ars: V(ar) }) : old.prem || null,
       spot: spotSpreadOf(quotes), poly: gm.ok ? polymarketOf(V(gm)) : old.poly || null, yields,
+      macro: sl.ok || tb.ok ? macroOf({ selic: V(sl), ipca12: V(ip), focus: V(fo), tbillCsv: V(tb) }) : old.macro || null,
       err: [['Upbit', up], ['Mercado Bitcoin', mb2], ['Kraken', kr], ['Câmbio', fx], ['CriptoYa', ar], ['Polymarket', gm]].filter(([, r]) => !r.ok).map(([n, r]) => n + ': ' + r.e) };
   }
+
+  // Panorama do mercado (copiloto): o que todas as frentes dizem juntas. Barato: roda a cada ciclo com o que já foi lido.
+  const aiPanorama = marketPanorama({ fronts, market2, mkt, darr: darr ? darr.v : null, now,
+    sentiment: funding && funding.rows ? FDR.sentiment(funding.rows, ['Binance', 'Bybit', 'Hyperliquid']) : null });
 
   // Placar: cada alerta de entrada de funding vira uma posição hipotética acompanhada pelo prazo projetado.
   const byKey = {}; for (const b of (funding && funding.best) || []) byKey[b.key] = b;
@@ -442,7 +455,7 @@ export async function tick(env, opts = {}) {
   const mempool = mpR.ok ? Object.assign({ at: now }, mpR.v) : state.mempool || null;
 
   const next = Object.assign({}, dec.state, alertState, {
-    lastTick: now, verified: Object.fromEntries(Object.entries(verified).filter(([, x]) => now - x.at <= 6 * 3600e3)), ai: br.ai, aiAnalysis, plan, acct, algoMap, mempool, stable24, pairStats, msig, darr, recentBlocks, nhWeek, paper, paperBurst, paperPlan, paperAlways, hashMkts, fronts, frontsPaper, ltStreak, fundPaperLT, market2, blockBuf, blockFlush, lastBlockT, real, fundPaper, alertScore, algoPaper, algoTs, aiScores, fundPaperAI, fhistHour, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig,
+    lastTick: now, verified: Object.fromEntries(Object.entries(verified).filter(([, x]) => now - x.at <= 6 * 3600e3)), ai: br.ai, aiAnalysis, plan, acct, algoMap, mempool, stable24, pairStats, msig, darr, recentBlocks, nhWeek, paper, paperBurst, paperPlan, paperAlways, hashMkts, fronts, frontsPaper, ltStreak, fundPaperLT, market2, aiPanorama, blockBuf, blockFlush, lastBlockT, real, fundPaper, alertScore, algoPaper, algoTs, aiScores, fundPaperAI, fhistHour, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig,
     market: mkt.ok ? { breakEvenEH: mkt.breakEvenEH, capEH: mkt.capEH, fillEH: mkt.fillEH, medianEH: mkt.medianEH, bidEH: mkt.bidEH,
       edgeAtBidPct: mkt.edgeAtBidPct, green: mkt.green, D: mkt.D, bookTotalPH: book ? book.totalPH : 0, bchUsd: mkt.bchUsd, btcUsd: mkt.btcUsd, costPerBlockUsd: mkt.costPerBlockUsd,
       hashpriceNet: mkt.hashpriceNet, blockNetUsd: mkt.blockNetUsd, phDaysPerBlock: mkt.phDaysPerBlock, market: mkt.market } : { ok: false, reason: mkt.reason },
@@ -552,7 +565,7 @@ async function api(req, env, url, fetchFn) {
       telegram: !!(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID), creds: credStatus(env), limits, config: cfg,
       state: { lastTick: state.lastTick, lastHeight: state.lastHeight, market: state.market, myBlocks: state.myBlocks || [], dailyUsd: state.dailyUsd || 0,
         errors: state.errors || [], edgeHist: state.edgeHist || [], alerts: (state.alerts || []).slice(-30).reverse(),
-        paper: state.paper || null, paperBurst: state.paperBurst || null, paperPlan: state.paperPlan || null, paperAlways: state.paperAlways || null, hashMkts: state.hashMkts || null, fronts: state.fronts || null, frontsPaper: state.frontsPaper || null, market2: state.market2 || null,
+        paper: state.paper || null, paperBurst: state.paperBurst || null, paperPlan: state.paperPlan || null, paperAlways: state.paperAlways || null, hashMkts: state.hashMkts || null, fronts: state.fronts || null, frontsPaper: state.frontsPaper || null, market2: state.market2 || null, aiPanorama: state.aiPanorama || null,
         fundPaperLT: state.fundPaperLT ? { summary: fundPaperSummary(state.fundPaperLT, LT_FEES), open: state.fundPaperLT.open, closed: state.fundPaperLT.closed.slice(-50).reverse() } : null, opLog: (state.opLog || []).slice(-20).reverse(), real: state.real ? Object.assign({}, state.real, { paid: undefined }) : null,
         fundPaper: state.fundPaper ? { summary: fundPaperSummary(state.fundPaper, FD.DEFAULT_FEES), open: state.fundPaper.open, closed: state.fundPaper.closed.slice(-100).reverse() } : null,
         algoPaper: state.algoPaper || null,
