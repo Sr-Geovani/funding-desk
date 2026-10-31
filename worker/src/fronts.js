@@ -117,3 +117,24 @@ export function frontsPaperStep(prev, { rates, cdi, now }) {
   p.lastTs = now;
   return p;
 }
+
+/* ---------- mineração com equipamento próprio ---------- */
+// ASIC de bitcoin: hashprice (US$ por PH/s por dia) pela dificuldade e taxas do BTC, e o lucro por dia de uma máquina
+// atual (S21 XP: 270 TH/s, 3,645 kW) conforme o preço da energia. Pool FPPS ~2%. Não inclui compra da máquina.
+export const ASIC_REF = { name: 'S21 XP', th: 270, kw: 3.645 };
+export const POWER = [['Etiópia (hospedagem)', 0.053], ['Paraguai (hospedagem)', 0.065], ['Brasil residencial', 0.15]];
+export function asicOf({ dBtc, feesBtc = 0, btcUsd }) {
+  if (!(dBtc > 0 && btcUsd > 0)) return null;
+  const hp = 86400e15 / (dBtc * 4294967296) * (3.125 + feesBtc) * btcUsd, rev = hp * ASIC_REF.th / 1000 * 0.98;
+  return { hashpriceUsdPh: hp, revUsdDay: rev, breakEvenKwh: rev / (ASIC_REF.kw * 24),
+    rows: POWER.map(([where, kwh]) => ({ where, kwh, profitUsdDay: rev - ASIC_REF.kw * 24 * kwh })) };
+}
+// GPU: moedas que mais pagam por placa de referência da WhatToMine (receita bruta de 24 h, US$/dia), só com liquidez.
+export function gpuOf(wtm, btcUsd, minVolBtc = 2) {
+  if (!wtm || !wtm.coins || !(btcUsd > 0)) return null;
+  const all = Object.entries(wtm.coins).map(([name, c]) => ({ name, tag: c.tag, algo: c.algorithm, usdDay: (+c.btc_revenue24 || +c.btc_revenue || 0) * btcUsd, vol: +c.exchange_rate_vol || 0, lag: !!c.lagging }))
+    .filter((c) => c.usdDay > 0 && !c.lag && c.tag !== 'NICEHASH');
+  const ok = all.filter((c) => c.vol >= minVolBtc).sort((a, b) => b.usdDay - a.usdDay);
+  const ref = all.find((c) => c.tag === 'RVN');
+  return { top: ok.slice(0, 5).map(({ name, tag, algo, usdDay, vol }) => ({ name, tag, algo, usdDay, vol })), rvnUsdDay: ref ? ref.usdDay : null };
+}

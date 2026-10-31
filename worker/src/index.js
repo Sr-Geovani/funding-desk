@@ -13,7 +13,7 @@ import FD from '../../core.js';
 import FDR from '../../radar.js';
 import { algoPaperStep } from './paperalgo.js';
 import { braiinsOf, mrrOf, stratumCheck } from './hashmarkets.js';
-import { bitfinexOf, deribitBasisOf, ethenaOf, hlpOf, zpoolOf, brlOf, cdiOf, lighterTable, lighterRows, lighterOi, lighterPairs, streakStep, frontsPaperStep, LT_FEES } from './fronts.js';
+import { bitfinexOf, deribitBasisOf, ethenaOf, hlpOf, zpoolOf, brlOf, cdiOf, lighterTable, lighterRows, lighterOi, lighterPairs, streakStep, frontsPaperStep, asicOf, gpuOf, LT_FEES } from './fronts.js';
 import { FUND_MODEL } from './fundmodel.js';
 import { updateHistory, pickCoins, scorePairs, stablePairs, pairStatsOf } from './fundai.js';
 import { blockRecord, blockSummary, poolOf } from './blocks.js';
@@ -323,7 +323,7 @@ export async function tick(env, opts = {}) {
   if (cfg.hashMarkets !== false && (!hashMkts || now - (hashMkts.at || 0) >= 15 * 60e3)) {
     const hp = (env.HP_URL || 'https://hashpower.braiins.com').replace(/\/$/, ''), mr = (env.MRR_URL || 'https://www.miningrigrentals.com').replace(/\/$/, '');
     const getJ = (u) => fetchFn(u, { headers: { accept: 'application/json', 'user-agent': 'funding-desk/1.0' } }).then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
-    const [hb, hs, mi] = await Promise.all([getJ(hp + '/v1/spot/orderbook'), getJ(hp + '/v1/spot/stats'), getJ(mr + '/api/v2/info/algos/sha256?currency=BTC')].map(settle));
+    const [hb, hs, mi] = await Promise.all([getJ(hp + '/v1/spot/orderbook'), getJ(hp + '/v1/spot/stats'), getJ(mr + '/api/v2/info/algos/sha256ab?currency=BTC')].map(settle));
     hashMkts = { at: now, braiins: hb.ok ? braiinsOf(hb.v, hs.ok ? hs.v : null) : (hashMkts && hashMkts.braiins) || null,
       mrr: mi.ok ? mrrOf(mi.v) : (hashMkts && hashMkts.mrr) || null, err: [hb.ok ? null : 'Braiins: ' + hb.e, mi.ok ? null : 'MRR: ' + mi.e].filter(Boolean) };
   }
@@ -335,7 +335,7 @@ export async function tick(env, opts = {}) {
     const getJ = (u, o) => fetchFn(u, Object.assign({ headers: { accept: 'application/json', 'user-agent': 'funding-desk/1.0' } }, o || {})).then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
     const U = (k, d) => (env[k] || d).replace(/\/$/, '');
     const day = (t) => { const d = new Date(t); return String(d.getUTCMonth() + 1).padStart(2, '0') + '-' + String(d.getUTCDate()).padStart(2, '0') + '-' + d.getUTCFullYear(); };
-    const [lt, lo, bf, db, et, hl, zp, mb, px, cd] = await Promise.all([
+    const [lt, lo, bf, db, et, hl, zp, mb, px, cd, wg] = await Promise.all([
       getJ(U('LIGHTER_URL', 'https://mainnet.zklighter.elliot.ai') + '/api/v1/funding-rates'),
       getJ(U('LIGHTER_URL', 'https://mainnet.zklighter.elliot.ai') + '/api/v1/orderBooks'),
       getJ(U('BFX_URL', 'https://api-pub.bitfinex.com') + '/v2/tickers?symbols=fUST,fUSD'),
@@ -345,12 +345,15 @@ export async function tick(env, opts = {}) {
       getJ(U('ZPOOL_URL', 'https://www.zpool.ca') + '/api/status'),
       getJ(U('MB_URL', 'https://api.mercadobitcoin.net') + '/api/v4/tickers?symbols=USDT-BRL,USDC-BRL'),
       getJ(U('BCB_PTAX_URL', 'https://olinda.bcb.gov.br') + "/olinda/servico/PTAX/versao/v1/odata/CotacaoDolarPeriodo(dataInicial=@dataInicial,dataFinalCotacao=@dataFinalCotacao)?@dataInicial='" + day(now - 7 * 864e5) + "'&@dataFinalCotacao='" + day(now) + "'&$format=json&$select=cotacaoVenda,dataHoraCotacao"),
-      getJ(U('BCB_SGS_URL', 'https://api.bcb.gov.br') + '/dados/serie/bcdata.sgs.4389/dados/ultimos/1?formato=json')
+      getJ(U('BCB_SGS_URL', 'https://api.bcb.gov.br') + '/dados/serie/bcdata.sgs.4389/dados/ultimos/1?formato=json'),
+      getJ(env.WTM_GPU_URL || 'https://whattomine.com/coins.json')
     ].map(settle));
     const old = fronts || {}, v = (r, f, k) => (r.ok ? f(r.v) : old[k] || null);
     fronts = { at: now, bfx: v(bf, bitfinexOf, 'bfx'), basis: db.ok ? deribitBasisOf(db.v && db.v.result, now) : old.basis || null, ethena: v(et, ethenaOf, 'ethena'), hlp: v(hl, hlpOf, 'hlp'),
       zpool: v(zp, zpoolOf, 'zpool'), brl: mb.ok || px.ok ? brlOf(mb.ok ? mb.v : null, px.ok ? px.v : null) : old.brl || null, cdi: cd.ok ? cdiOf(cd.v) : old.cdi || null,
-      err: [['Lighter', lt], ['Bitfinex', bf], ['Deribit', db], ['Ethena', et], ['Hyperliquid', hl], ['zpool', zp], ['Mercado Bitcoin', mb], ['PTAX', px], ['CDI', cd]].filter(([, r]) => !r.ok).map(([n, r]) => n + ': ' + r.e) };
+      asic: asicOf({ dBtc: msig.dBtc, feesBtc: msig.feesBtc || 0, btcUsd: prices.ok ? prices.v.btcUsd : null }) || old.asic || null,
+      gpu: wg.ok ? gpuOf(wg.v, prices.ok ? prices.v.btcUsd : null) : old.gpu || null,
+      err: [['WhatToMine GPU', wg], ['Lighter', lt], ['Bitfinex', bf], ['Deribit', db], ['Ethena', et], ['Hyperliquid', hl], ['zpool', zp], ['Mercado Bitcoin', mb], ['PTAX', px], ['CDI', cd]].filter(([, r]) => !r.ok).map(([n, r]) => n + ': ' + r.e) };
     // checagem de realidade da mineração: o que o multipool pagou de fato × o aluguel na NiceHash (com a taxa)
     const sc = (algoMap || []).find((m) => m.algo === 'SCRYPT');
     const sane = (x) => (isFinite(x) && Math.abs(x) <= 300 ? x : null); // acima de 300%: unidade ou dado errado

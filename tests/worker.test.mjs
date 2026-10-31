@@ -143,7 +143,7 @@ async function setup() {
   await new Promise((r) => server.listen(0, r));
   const base = 'http://127.0.0.1:' + server.address().port;
   const env = { FD_KV: memoryKV(), PANEL_TOKEN: 'token-de-teste-com-mais-de-24-chars', ALLOWED_ORIGIN: 'https://sr-geovani.github.io',
-    NH_BASE: base + '/nh', BCH_REST: base + '/bch', PRICE_URL: base + '/cg/x', HL_URL: base + '/hl/info', WTM_URL: base + '/wtm/asic.json', HP_URL: base + '/hp', MRR_URL: base + '/mrr', LIGHTER_URL: base + '/x', BFX_URL: base + '/x', DERIBIT_URL: base + '/x', ETHENA_URL: base + '/x', HL_INFO_URL: base + '/x', ZPOOL_URL: base + '/x', MB_URL: base + '/x', BCB_PTAX_URL: base + '/x', BCB_SGS_URL: base + '/x', MEMPOOL_URL: base + '/mempool', KRAKEN_URL: base + '/kraken', NH_API_KEY: MOCK_KEYS.key, NH_API_SECRET: MOCK_KEYS.secret, NH_ORG_ID: MOCK_KEYS.org,
+    NH_BASE: base + '/nh', BCH_REST: base + '/bch', PRICE_URL: base + '/cg/x', HL_URL: base + '/hl/info', WTM_URL: base + '/wtm/asic.json', HP_URL: base + '/hp', MRR_URL: base + '/mrr', LIGHTER_URL: base + '/x', WTM_GPU_URL: base + '/x', BFX_URL: base + '/x', DERIBIT_URL: base + '/x', ETHENA_URL: base + '/x', HL_INFO_URL: base + '/x', ZPOOL_URL: base + '/x', MB_URL: base + '/x', BCB_PTAX_URL: base + '/x', BCB_SGS_URL: base + '/x', MEMPOOL_URL: base + '/mempool', KRAKEN_URL: base + '/kraken', NH_API_KEY: MOCK_KEYS.key, NH_API_SECRET: MOCK_KEYS.secret, NH_ORG_ID: MOCK_KEYS.org,
     MAX_ORDER_BTC: '0.01', MAX_LIMIT_PH: '100', MAX_DAILY_USD: '1000' };
   const call = async (method, path, body, token = env.PANEL_TOKEN) => {
     const r = await worker.fetch(new Request('https://api.example' + path, { method, headers: { Authorization: 'Bearer ' + token, Origin: 'https://sr-geovani.github.io', 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined }), env, {});
@@ -954,6 +954,12 @@ test('frentes: leitura das fontes reais e robô de funding com a Lighter (taxa z
   let st = null; for (let h = 0; h < 24; h++) st = F.streakStep(st, pairs, 1000 + h);
   assert.equal(st.s[pairs[0].key], 24);
   st = F.streakStep(st, pairs.map((p) => Object.assign({}, p, { spread: p.key === pairs[0].key ? 0 : p.spread })), 1024); assert.equal(st.s[pairs[0].key], undefined);
+  // ASIC próprio: hashprice e lucro por energia; GPU: moedas que mais pagam, com liquidez
+  const a = F.asicOf({ dBtc: 148364561003867.4, feesBtc: 2.96190910 / 144, btcUsd: 77392.6 });
+  assert.ok(Math.abs(a.hashpriceUsdPh - 33.0) < 0.1, String(a.hashpriceUsdPh)); assert.ok(a.breakEvenKwh > 0.09 && a.breakEvenKwh < 0.11);
+  assert.ok(a.rows.find((r) => r.kwh === 0.065).profitUsdDay > 2 && a.rows.find((r) => r.kwh === 0.15).profitUsdDay < 0);
+  const g = F.gpuOf(rd('wtm-gpu.real.json'), 77392.6);
+  assert.equal(g.top[0].tag, 'PRL'); assert.ok(g.top[0].usdDay > 3 && g.rvnUsdDay < 1); assert.ok(!g.top.some((c) => c.tag === 'XTM'), 'pouca liquidez fica fora');
   // papel das frentes passivas: US$1.000 a 10% a.a. por 1 h; CDI ao lado
   let pp = F.frontsPaperStep(null, { rates: { bfx: 10 }, cdi: 13.65, now: NOWF });
   pp = F.frontsPaperStep(pp, { rates: { bfx: 10 }, cdi: 13.65, now: NOWF + 3600e3 });

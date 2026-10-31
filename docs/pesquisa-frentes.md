@@ -22,8 +22,9 @@ a alta esperada do dólar. Juros do Tesouro americano de 2 anos ~3,8%.
 ## Mineração: checagem de realidade (o que pagou de fato)
 - **Multipool zpool** (API pública com o pago nas últimas 24 h): SHA-256 pagou 0,343 BTC/EH/dia contra ~0,437 do
   aluguel na NiceHash com taxa (**−22%**). Estimativas dos multipools são infladas (o "estimado" do SHA-256 era 0,59).
-- **Revender hash da NiceHash na MiningRigRentals**: preço pedido ~43–51% acima, mas só ~29 PH/s alugados de 3 EH/s
-  anunciados; as 100 máquinas mais baratas estavam sem aluguel. Oferta sobrando.
+- **Revender hash da NiceHash na MiningRigRentals** (corrigido: mercado SHA-256 AsicBoost): aluguel a 0,47–0,51 BTC/EH/dia,
+  8–16% acima da NiceHash com taxa; ~620 PH/s alugados, mas 43,8 EH/s anunciados parados. Margem fina e muita concorrência
+  (a primeira leitura usou o SHA-256 simples, mercado pequeno e mais caro).
 - **Moedas extras do merged mining (PEP, DINGO, LKY)**: ~US$1/TH/dia somadas (+0,3% no Scrypt).
 - **DOGE bloco a bloco** (1.370 blocos em 24 h): um minerador constante ganhou US$362,8/TH/dia; a conta pela
   dificuldade do momento daria US$509 (+40%, ilusão). Ver `docs/auditoria-ia-e-simulacoes.md`.

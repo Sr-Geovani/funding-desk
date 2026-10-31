@@ -1,7 +1,8 @@
 // Outros fornecedores de hash SHA-256 além da NiceHash (pesquisa em docs/fornecedores-hash.md), só leitura.
 // - Braiins Hashpower: livro de ofertas por preço (BTC/EH/dia), taxa 0% durante o beta, paga por hora o hash entregue.
 //   Exige pool com extranonce2_size ≥ 7: a maioria dos pools de BCH usa 4 (conferir com stratumCheck).
-// - MiningRigRentals: aluguel de máquinas com preço do dono; preço sugerido do SHA-256 bem acima do hashprice.
+// - MiningRigRentals: aluguel de máquinas com preço do dono. O mercado relevante é o SHA-256 AsicBoost (sha256ab: ~620 PH/s
+//   alugados); o SHA-256 simples é pequeno e mais caro.
 export const BRAIINS_FEE_PCT = 0; // beta; a Braiins avisa que pode mudar ao sair do beta
 
 // Livro da Braiins → preço para receber hash agora (o menor lance que está recebendo), oferta e hash casado.
@@ -20,7 +21,7 @@ export function braiinsOf(book, stats) {
   };
 }
 
-// MiningRigRentals /api/v2/info/algos/sha256 → BTC/EH/dia (a API dá BTC por PH por dia).
+// MiningRigRentals /api/v2/info/algos/sha256ab → BTC/EH/dia (a API dá BTC por PH por dia).
 export function mrrOf(info) {
   const d = info && info.data, st = d && d.stats;
   if (!st) return null;

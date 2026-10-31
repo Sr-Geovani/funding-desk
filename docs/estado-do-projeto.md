@@ -116,6 +116,11 @@ sempre identificado; nada de prometer previsão de sorte (Poisson é sem memóri
   (ágio) e CDI. `frontsPaper`: US$1.000 por frente passiva com o CDI ao lado; `fronts.hist` 60 dias. `fundPaperLT`:
   robô simulado de funding com uma perna na Lighter (taxa zero), regra de 24 h acima do empate (`ltStreak`), só
   cripto e OI ≥ US$300 mil. Tela: Radar → "Frentes em observação"; Início → Simulado inclui o robô da Lighter.
+- Catálogo global de frentes (31/10, `docs/catalogo-frentes-cripto.md`): ~45 frentes em 6 grupos (mineração e outros
+  "hashes", validação, DeFi, trading, eventos de tokens, serviços) com número medido, risco e prioridade. O monitor das
+  frentes ganhou ASIC próprio (`asicOf`: hashprice e lucro/dia por preço de energia) e GPU (`gpuOf`: moedas que mais
+  pagam por placa, WhatToMine `coins.json`). MiningRigRentals passou a ler o SHA-256 AsicBoost (`sha256ab`), o mercado
+  certo (o simples é pequeno e mais caro).
 - Ciclo do servidor: 3 min. Mínimo do Cloudflare é 1 min, mas o KV grátis aceita 1.000 gravações/dia e propaga em até
   60 s; abaixo de 3 min exige plano pago + Durable Objects. Atraso de 3 min custa < US$1 com 10 PH/s.
 

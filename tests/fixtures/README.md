@@ -10,3 +10,4 @@
 - `mrr-sha256.real.json`: MiningRigRentals `/api/v2/info/algos/sha256?currency=BTC` (31/10/2026).
 - Frentes (31/10/2026): `lighter-funding.real.json` (recortado), `bitfinex-funding-tickers.real.json`, `deribit-btc-futures.real.json`,
   `ethena-yield.real.json`, `zpool-status.real.json` (sha256 e scrypt), `mercadobitcoin-tickers.real.json`, `bcb-ptax.real.json`.
+- `wtm-gpu.real.json`: WhatToMine `coins.json` (GPU), recortado (31/10/2026).
