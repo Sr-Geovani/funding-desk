@@ -1,8 +1,24 @@
 // Leitura da rede Bitcoin Cash e cotações, feita pelo servidor.
-// REST compatível com a API v2 do Bitcoin.com (padrão: ActorForth). Cotações: CoinGecko.
+// REST compatível com a API v2 do Bitcoin.com (padrão: ActorForth). Cotações: CoinGecko, com Kraken e Coinbase de reserva
+// (a CoinGecko às vezes bloqueia pedidos vindos do Cloudflare).
 
 export const DEFAULT_BCH_REST = 'https://rest.bch.actorforth.org/v2';
 export const DEFAULT_PRICE_URL = 'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,bitcoin-cash&vs_currencies=usd';
+
+const num = (v) => { const n = parseFloat(v); return isFinite(n) && n > 0 ? n : null; };
+// Fontes de cotação em ordem; a primeira que trouxer BTC e BCH vale.
+export const PRICE_SOURCES = [
+  { name: 'CoinGecko', get: async (get) => { const d = await get(DEFAULT_PRICE_URL); return { btcUsd: num(d.bitcoin && d.bitcoin.usd), bchUsd: num(d['bitcoin-cash'] && d['bitcoin-cash'].usd) }; } },
+  { name: 'Kraken', get: async (get) => {
+    const d = await get('https://api.kraken.com/0/public/Ticker?pair=XBTUSD,BCHUSD'), r = d.result || {};
+    const last = (k) => num(r[k] && r[k].c && r[k].c[0]);
+    return { btcUsd: last('XXBTZUSD') || last('XBTUSD'), bchUsd: last('BCHUSD') };
+  } },
+  { name: 'Coinbase', get: async (get) => {
+    const [b, c] = await Promise.all(['BTC', 'BCH'].map((x) => get('https://api.coinbase.com/v2/prices/' + x + '-USD/spot')));
+    return { btcUsd: num(b.data && b.data.amount), bchUsd: num(c.data && c.data.amount) };
+  } }
+];
 
 export function normAddr(a) {
   return String(a || '').trim().toLowerCase().replace(/^bitcoincash:/, '');
@@ -10,7 +26,7 @@ export function normAddr(a) {
 
 export function createChain({ base = DEFAULT_BCH_REST, priceUrl = DEFAULT_PRICE_URL, fetchFn = fetch }) {
   async function get(u) {
-    const r = await fetchFn(u, { headers: { accept: 'application/json' } });
+    const r = await fetchFn(u, { headers: { accept: 'application/json', 'user-agent': 'funding-desk/1.0' } });
     if (!r.ok) throw new Error('HTTP ' + r.status + ' em ' + u.replace(/\?.*/, ''));
     return r.json();
   }
@@ -30,8 +46,19 @@ export function createChain({ base = DEFAULT_BCH_REST, priceUrl = DEFAULT_PRICE_
       return { height, time: b.time * 1000, difficulty: b.difficulty, txid: b.tx[0], outs };
     },
     prices: async () => {
-      const d = await get(priceUrl);
-      return { btcUsd: d.bitcoin && d.bitcoin.usd, bchUsd: d['bitcoin-cash'] && d['bitcoin-cash'].usd };
+      if (priceUrl !== DEFAULT_PRICE_URL) { // fonte fixa (testes ou configuração própria)
+        const d = await get(priceUrl);
+        return { btcUsd: d.bitcoin && d.bitcoin.usd, bchUsd: d['bitcoin-cash'] && d['bitcoin-cash'].usd, src: 'personalizada' };
+      }
+      const fails = [];
+      for (const s of PRICE_SOURCES) {
+        try {
+          const p = await s.get(get);
+          if (p.btcUsd && p.bchUsd) return Object.assign(p, { src: s.name });
+          fails.push(s.name + ': resposta sem preço');
+        } catch (e) { fails.push(s.name + ': ' + (e.message || e)); }
+      }
+      throw new Error('nenhuma fonte de cotação respondeu (' + fails.join('; ') + ')');
     }
   };
 }

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
 import { authMessage, hmacHex, algoUnits } from '../worker/src/nicehash.js';
-import { paidTo, normAddr } from '../worker/src/chain.js';
+import { paidTo, normAddr, createChain } from '../worker/src/chain.js';
 import { DEFAULT_CONFIG, sanitizeConfig, parseBook, computeMarket, decide, DOWN_STEP_MS } from '../worker/src/bot.js';
 import worker, { tick } from '../worker/src/index.js';
 import { createMock, MOCK_KEYS } from '../worker/dev/mock.mjs';
@@ -404,4 +404,21 @@ test('credenciais: chave da conta real com "Teste" escolhido sugere Produção',
     const cfg = JSON.parse(await env.FD_KV.get('config'));
     assert.equal(cfg.mode, 'observe', 'conta real começa em Observar');
   } finally { t.server.close(); }
+});
+
+test('cotações: CoinGecko bloqueada cai para Kraken, depois Coinbase', async () => {
+  const calls = [];
+  const mk = (rules) => async (u) => {
+    calls.push(String(u));
+    for (const [re, status, body] of rules) if (re.test(u)) return new Response(JSON.stringify(body), { status });
+    return new Response('{}', { status: 404 });
+  };
+  let c = createChain({ fetchFn: mk([[/coingecko/, 403, {}], [/kraken/, 200, { error: [], result: { XXBTZUSD: { c: ['77220.3', '1'] }, BCHUSD: { c: ['296.51', '1'] } } }]]) });
+  assert.deepEqual(await c.prices(), { btcUsd: 77220.3, bchUsd: 296.51, src: 'Kraken' });
+  c = createChain({ fetchFn: mk([[/coingecko/, 403, {}], [/kraken/, 520, {}], [/BTC-USD/, 200, { data: { amount: '77000' } }], [/BCH-USD/, 200, { data: { amount: '296' } }]]) });
+  assert.deepEqual(await c.prices(), { btcUsd: 77000, bchUsd: 296, src: 'Coinbase' });
+  c = createChain({ fetchFn: mk([]) });
+  await assert.rejects(c.prices(), /nenhuma fonte de cotação respondeu \(CoinGecko: HTTP 404/);
+  c = createChain({ fetchFn: mk([[/coingecko/, 200, { bitcoin: { usd: 77100 }, 'bitcoin-cash': { usd: 295 } }]]) });
+  assert.equal((await c.prices()).src, 'CoinGecko');
 });
