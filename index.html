@@ -51,7 +51,7 @@ h3{font:700 14px/1.2 var(--f-display);margin:0}
 a{color:var(--accent)}
 .chip{display:inline-block;font:600 11px/1 var(--f-mono);padding:5px 8px;border-radius:99px;border:1px solid var(--line);color:var(--mute);white-space:nowrap;vertical-align:middle}
 .chip.live,.chip.ok{color:var(--good);border-color:var(--good)} .chip.demo,.chip.warn{color:var(--warn);border-color:var(--warn)}
-.chip.bad{color:var(--bad);border-color:var(--bad)}
+.chip.bad{color:var(--bad);border-color:var(--bad)} .chip:empty{display:none}
 .mono,.kv span,.big,input{font-variant-numeric:tabular-nums}
 .mono{font-family:var(--f-mono)}
 .mute{color:var(--mute)} .good{color:var(--good)} .bad{color:var(--bad)} .warn{color:var(--warn)}
@@ -517,7 +517,7 @@ details.card>summary{color:var(--fg);font-size:15px}
       <ol class="steps">
         <li class="info"><span class="n">1</span><div><b>Crie a conta no Cloudflare (grátis)</b><p class="note"><a href="https://dash.cloudflare.com/sign-up" target="_blank" rel="noopener">dash.cloudflare.com/sign-up</a> e confirme o e-mail.</p></div></li>
         <li class="info"><span class="n">2</span><div><b>Gere um token e mande para o Claude</b><p class="note"><a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noopener">API Tokens</a> → Create Token → <b>Edit Cloudflare Workers</b> → Use template → em Account Resources escolha a sua conta e em Zone Resources "All zones" → Continue to summary → Create Token. Copie o token e mande no chat. O resto ele instala.</p></div></li>
-        <li class="info"><span class="n">3</span><div><b>Toque no link que voltar</b><p class="note">O link abre este painel já conectado ao backend, neste aparelho.</p></div></li>
+        <li class="info"><span class="n">3</span><div><b>Conecte com o link que voltar</b><p class="note">No Safari: toque no link. No atalho da tela de início do iPhone (memória separada do Safari): copie o link e, aqui no atalho, toque em "Colar link de conexão" logo abaixo.</p></div></li>
         <li class="info"><span class="n">4</span><div><b>Conecte NiceHash e Telegram aqui embaixo</b><p class="note">Em "Conectar contas". Essas chaves vão direto para o seu backend, cifradas. Não mande essas chaves no chat.</p></div></li>
       </ol>
       <p class="note" style="margin:8px 0 0">Prefere fazer sozinho? <a href="https://github.com/Sr-Geovani/funding-desk/blob/main/docs/configurar-backend.md" target="_blank" rel="noopener">Guia técnico</a>.</p>
@@ -525,10 +525,10 @@ details.card>summary{color:var(--fg);font-size:15px}
     <div class="card">
       <h2>Backend (operação)</h2>
       <div class="grid2">
-        <label style="grid-column:1/-1">Endereço do backend<input id="api_url" type="url" inputmode="url" placeholder="https://funding-desk-api.seu-nome.workers.dev" autocomplete="off"></label>
+        <label style="grid-column:1/-1">Endereço do backend<input id="api_url" type="url" inputmode="url" placeholder="endereço ou o link de conexão inteiro" autocomplete="off"></label>
         <label style="grid-column:1/-1">Token do painel<input id="api_token" type="password" autocomplete="off" placeholder="vem no link de conexão"></label>
       </div>
-      <div class="row" style="margin-top:10px"><button class="pri" id="api_save">Salvar e testar</button><button id="api_clear">Esquecer token</button></div>
+      <div class="row" style="margin-top:10px"><button class="pri" id="api_paste">Colar link de conexão</button><button id="api_save">Salvar e testar</button><button id="api_clear">Esquecer token</button></div>
       <p class="note" id="api_msg" style="margin:8px 0 0">Normalmente o link de conexão preenche isto sozinho. O token fica só neste aparelho; as chaves da NiceHash e do Telegram ficam cifradas no backend. Com o backend conectado, ele também serve de proxy em tempo real.</p>
     </div>
     <div class="card" id="acct">

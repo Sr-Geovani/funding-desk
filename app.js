@@ -923,7 +923,7 @@ function renderProd(){
   var items=[
     ['Painel publicado (GitHub Pages)',true,''],
     ['Dados ao vivo das exchanges',n===VENUES.length,n+' de '+VENUES.length+' diretas'],
-    ['Backend publicado e conectado',!!st,settings.apiUrl?(st?'ok':'sem resposta'):'Ajustes → Conectar o backend: mande o token do Cloudflare'],
+    ['Backend publicado e conectado',!!st,settings.apiUrl?(st?'ok':'sem resposta'):(STANDALONE?'neste atalho do iPhone: Ajustes → Backend → Colar link de conexão':'Ajustes → Conectar o backend')],
     ['NiceHash conectada (chave sem saque)',!!(st&&st.keys),st&&st.keys?'':'Ajustes → Conectar contas'],
     ['Telegram para alertas 24 h',!!(st&&st.telegram),st&&st.telegram?'':'Ajustes → Conectar contas'],
     ['Endereço BCH e pool cadastrados',!!(cfg&&cfg.payoutAddress&&ops.pools.length),''],
@@ -1310,25 +1310,55 @@ setInterval(function(){if(document.visibilityState==='visible'&&state.live)load(
 document.querySelectorAll('#invSeg button').forEach(function(b){b.addEventListener('click',function(){
   invScenario=b.dataset.sc;document.querySelectorAll('#invSeg button').forEach(function(x){x.setAttribute('aria-pressed',x===b?'true':'false')});renderInvest()})});
 // Link de conexão gerado pela instalação: #api=<endereço>&tok=<token>. Pede confirmação e some da barra de endereço.
-var linkConnect=(function(){
-  var h=location.hash.slice(1);if(!/(^|&)tok=/.test(h))return null;
+// Aceita o link inteiro ou só o trecho depois do #. Devolve null se não for link de conexão.
+function parseConnect(str){
+  str=String(str||'').trim();var i=str.indexOf('#'),h=i>=0?str.slice(i+1):str;
+  if(!/(^|&)tok=/.test(h))return null;
   var q=new URLSearchParams(h),u=(q.get('api')||'').trim().replace(/\/+$/,''),t=(q.get('tok')||'').trim();
+  return /^(https:\/\/[a-z0-9.-]+|http:\/\/(localhost|127\.0\.0\.1))(:\d+)?$/i.test(u)&&t.length>=24?{u:u,t:t}:{error:'Link de conexão inválido.'};
+}
+// No iPhone, o atalho da tela de início tem memória separada do Safari: o link aberto no Safari não conecta o atalho.
+var STANDALONE=navigator.standalone===true||!!(window.matchMedia&&matchMedia('(display-mode: standalone)').matches);
+var linkConnect=(function(){
+  var c=parseConnect(location.hash);if(!c)return null;
   try{history.replaceState(null,'',location.pathname+location.search)}catch(e){}
-  if(!/^(https:\/\/[a-z0-9.-]+|http:\/\/(localhost|127\.0\.0\.1))(:\d+)?$/i.test(u)||t.length<24)return {error:'Link de conexão inválido.'};
-  if(!confirm('Conectar este painel ao backend '+u.replace(/^https?:\/\//,'')+'? Só aceite se foi você quem pediu este link.'))return {error:'Conexão cancelada.'};
-  settings.apiUrl=u;ls('fd_set',settings);ls('fd_tok',t);return {ok:true};
+  if(c.error)return c;
+  if(!confirm('Conectar este painel ao backend '+c.u.replace(/^https?:\/\//,'')+'? Só aceite se foi você quem pediu este link.'))return {error:'Conexão cancelada.'};
+  settings.apiUrl=c.u;ls('fd_set',settings);ls('fd_tok',c.t);return {ok:true};
 })();
 $('setup').open=!settings.apiUrl;
+if(STANDALONE&&!settings.apiUrl&&!linkConnect)opsMsg('api_msg','Este atalho do iPhone tem memória separada do Safari: copie o link de conexão e toque em "Colar link de conexão".');
 $('api_url').value=settings.apiUrl||'';
 if(ls('fd_tok'))$('api_token').placeholder='token salvo neste aparelho';
+function useConnect(c){
+  settings.apiUrl=c.u;ls('fd_set',settings);ls('fd_tok',c.t);
+  $('api_url').value=c.u;$('api_token').value='';$('api_token').placeholder='token salvo neste aparelho';
+  testBackend(true);
+}
+$('api_paste').addEventListener('click',function(){
+  var manual='Não consegui ler a área de transferência. Toque e segure no campo "Endereço do backend", cole o link inteiro e toque em Salvar e testar.';
+  if(!navigator.clipboard||!navigator.clipboard.readText){opsMsg('api_msg',manual,true);return}
+  navigator.clipboard.readText().then(function(txt){
+    var c=parseConnect(txt);
+    if(!c){opsMsg('api_msg','O que está copiado não é o link de conexão. Copie o link inteiro (começa com https://sr-geovani.github.io/funding-desk/#api=) e tente de novo.',true);return}
+    if(c.error){opsMsg('api_msg',c.error,true);return}
+    useConnect(c);
+  },function(){opsMsg('api_msg',manual,true)});
+});
 $('api_save').addEventListener('click',function(){
+  var c=parseConnect($('api_url').value);
+  if(c&&c.error){opsMsg('api_msg',c.error,true);return}
+  if(c){useConnect(c);return}
   settings.apiUrl=$('api_url').value.trim().replace(/\/+$/,'');ls('fd_set',settings);
   if($('api_token').value)ls('fd_tok',$('api_token').value.trim());
   $('api_token').value='';$('api_token').placeholder=ls('fd_tok')?'token salvo neste aparelho':'';
   if(!settings.apiUrl){opsMsg('api_msg','Endereço vazio: backend desligado.');renderOps();return}
-  opsMsg('api_msg','Testando…');
-  apiCall('GET','/status').then(function(st){opsMsg('api_msg','Conectado. NiceHash: '+st.nhEnv+' · chaves '+(st.keys?'ok':'faltando')+' · robô '+MODE_TXT[st.config.mode]+'.');cache={};loadOps();loadMining()},function(e){opsMsg('api_msg','Falhou: '+e.message,true)});
+  testBackend(false);
 });
+function testBackend(fromLink){
+  opsMsg('api_msg','Testando…');
+  apiCall('GET','/status').then(function(st){opsMsg('api_msg','Conectado'+(fromLink?' pelo link':'')+'. NiceHash: '+st.nhEnv+' · chaves '+(st.keys?'ok':'faltando')+' · Telegram '+(st.telegram?'ok':'—')+' · robô '+MODE_TXT[st.config.mode]+'.');cache={};loadOps();loadMining()},function(e){opsMsg('api_msg','Falhou: '+e.message,true)});
+}
 /* ---------- conectar contas (chaves vão direto para o backend, cifradas lá; nada fica no painel) ---------- */
 function acctBusy(id,on){$(id).disabled=on}
 $('ac_env').addEventListener('change',function(){$('ac_env').dataset.touched='1'});
