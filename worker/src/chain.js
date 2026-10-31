@@ -20,6 +20,14 @@ export const PRICE_SOURCES = [
   } }
 ];
 
+// Texto legível da assinatura do minerador no coinbase (ex.: "solopool.org", "/BlockSniper/").
+export function tagFrom(hex) {
+  if (!hex) return '';
+  let s = '';
+  for (let i = 0; i + 1 < hex.length; i += 2) { const c = parseInt(hex.substr(i, 2), 16); s += c >= 32 && c < 127 ? String.fromCharCode(c) : '\u0000'; }
+  return s.split('\u0000').filter((x) => x.length >= 4 && /[A-Za-z]{3}/.test(x)).join(' ').trim().slice(0, 60);
+}
+
 export function normAddr(a) {
   return String(a || '').trim().toLowerCase().replace(/^bitcoincash:/, '');
 }
@@ -43,7 +51,8 @@ export function createChain({ base = DEFAULT_BCH_REST, priceUrl = DEFAULT_PRICE_
         value: parseFloat(o.value),
         addrs: ((o.scriptPubKey && (o.scriptPubKey.cashAddrs || o.scriptPubKey.addresses)) || []).map(normAddr)
       }));
-      return { height, hash: b.hash, time: b.time * 1000, difficulty: b.difficulty, txid: b.tx[0], outs };
+      return { height, hash: b.hash, time: b.time * 1000, difficulty: b.difficulty, txid: b.tx[0], outs,
+        size: b.size, txs: b.nTx || (b.tx || []).length, tag: tagFrom(tx.vin && tx.vin[0] && tx.vin[0].coinbase) };
     },
     prices: async () => {
       if (priceUrl !== DEFAULT_PRICE_URL) { // fonte fixa (testes ou configuração própria)

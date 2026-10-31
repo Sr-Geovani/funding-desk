@@ -61,9 +61,9 @@ export function createMock() {
     ]);
     if (p === '/bch/blockchain/getBlockchainInfo') return send(200, { blocks: s.height, difficulty: s.difficulty });
     let m = /^\/bch\/block\/detailsByHeight\/(\d+)$/.exec(p);
-    if (m) return send(200, { height: +m[1], hash: (s.hashes && s.hashes[m[1]]) || crypto.createHash('sha256').update('bloco' + m[1]).digest('hex'), time: Math.floor(Date.now() / 1000), difficulty: s.difficulty, tx: ['cb' + m[1]] });
+    if (m) return send(200, { height: +m[1], hash: (s.hashes && s.hashes[m[1]]) || crypto.createHash('sha256').update('bloco' + m[1]).digest('hex'), time: Math.floor(Date.now() / 1000), difficulty: s.difficulty, size: 20000 + (+m[1] % 1000), nTx: 40, tx: ['cb' + m[1]] });
     m = /^\/bch\/transaction\/details\/cb(\d+)$/.exec(p);
-    if (m) { const b = s.blocks[+m[1]] || { addr: 'qx', value: 3.125 }; return send(200, { vin: [{ coinbase: '00' }], vout: [{ value: b.value, scriptPubKey: { cashAddrs: ['bitcoincash:' + b.addr] } }] }); }
+    if (m) { const b = s.blocks[+m[1]] || { addr: 'qx', value: 3.125 }; return send(200, { vin: [{ coinbase: Buffer.from(b.addr.startsWith('qpool') ? '\u0003abc/ViaBTC/Mined by x' : '\u0003abc/mock solo pool/').toString('hex') }], vout: [{ value: b.value, scriptPubKey: { cashAddrs: ['bitcoincash:' + b.addr] } }] }); }
     // ---- NiceHash público ----
     if (p === '/nh/api/v2/time') return send(200, { serverTime: Date.now() });
     if (p === '/nh/main/api/v2/mining/algorithms') return send(200, { miningAlgorithms: ['SHA256', 'SHA256ASICBOOST'].map((algorithm) => ({ algorithm, marketFactor: '1000000000000000000.00000000', displayMarketFactor: 'EH', priceFactor: '1000000000000000000.00000000', minSpeedLimit: '0.00010000', maxSpeedLimit: '50.00000000', priceDownStep: '-0.01000000', minimalOrderAmount: '0.00100000', enabledMarketsNewOrder: 'BTC' })) });

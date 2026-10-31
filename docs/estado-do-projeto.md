@@ -60,6 +60,10 @@ sempre identificado; nada de prometer previsão de sorte (Poisson é sem memóri
   O servidor guarda o previsto de hora em hora (KV `fhist`, 72 h), dá nota aos pares (`fundai.js`) e roda o robô
   "Regras + IA" ao lado do "Regras"; o placar registra a nota da IA em cada alerta. Retreinar: rodar o script e publicar.
 - Mineração: variante "rajada" (50 PH/s, para no bloco, método do vídeo) ao lado da contínua, mesmos blocos e sorteio.
+- Registro dos blocos da rede BCH (`worker/src/blocks.js`, KV `blocks`, até 600): pool pela assinatura do coinbase
+  (solo ou não), intervalo, tamanho, transações, recompensa, taxas, taxa do pool solo, hash da rede e, ao vivo, hash
+  alugado na NiceHash, preço, empate, margem e a simulação (potência, chance, sorteio). `/api/blocks` + resumo de
+  padrões; `/api/blocks/backfill` busca blocos anteriores (só blockchain). Tela: Mineração → Rede, com CSV.
 - Ciclo do servidor: 3 min. Mínimo do Cloudflare é 1 min, mas o KV grátis aceita 1.000 gravações/dia e propaga em até
   60 s; abaixo de 3 min exige plano pago + Durable Objects. Atraso de 3 min custa < US$1 com 10 PH/s.
 

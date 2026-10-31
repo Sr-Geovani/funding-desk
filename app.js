@@ -864,6 +864,46 @@ document.addEventListener('click',function(e){
   if(!confirm('Zerar as operações simuladas de '+({funding:'funding',algos:'outras moedas'}[r.dataset.roboreset]||'mineração')+' e começar de agora?'))return;
   apiCall('POST','/paper/reset',{what:r.dataset.roboreset}).then(function(){loadOps()},function(err){alert('Erro: '+err.message)});
 });
+/* ---------- registro dos blocos da rede (servidor) ---------- */
+var blk={list:[],sum:null,at:0,err:null};
+function loadBlocksLog(force){
+  if(!settings.apiUrl){$('bl_msg').textContent='Conecte o backend (Ajustes) para ver o registro: ele roda no servidor 24 h.';return}
+  if(!force&&Date.now()-blk.at<120000){renderBlocksLog();return}
+  apiCall('GET','/blocks').then(function(r){blk.list=r.blocks||[];blk.sum=r.summary;blk.at=Date.now();blk.err=null;renderBlocksLog()},function(e){blk.err=e.message;renderBlocksLog()});
+}
+function hhU(t){return hhmm(t)+' ('+utcHM(t)+' UTC)'}
+function renderBlocksLog(){
+  var L=blk.list,S=blk.sum;
+  if(blk.err){$('bl_msg').textContent='Falhou: '+blk.err;return}
+  if(!L.length){$('bl_msg').textContent='O registro começa no próximo bloco. Toque em "Buscar blocos anteriores" para trazer as últimas horas.';$('bl_sum').innerHTML='';$('bl_list').innerHTML='';return}
+  $('bl_msg').textContent=L.length+' blocos registrados, de '+dt2(S.from)+' a '+dt2(S.to)+'. Mais novo primeiro.';
+  var lh=new Array(24).fill(0);S.solo.hoursUtc.forEach(function(n,h){var d=new Date(Date.UTC(2026,0,1,h));lh[d.getHours()]+=n});
+  var top=lh.map(function(n,h){return [h,n]}).filter(function(x){return x[1]>0}).sort(function(a,b){return b[1]-a[1]}).slice(0,4);
+  $('bl_sum').innerHTML='<div class="kv"><div><small>Intervalo médio</small><span>'+(S.dt?FDI.dur(S.dt*1000):'—')+'</span></div><div><small>Transações (média)</small><span>'+(S.txs?nf(S.txs,0):'—')+'</span></div><div><small>Tamanho (média)</small><span>'+(S.size?nf(S.size/1000,1)+' KB':'—')+'</span></div>'+
+    '<div><small>Taxas (média)</small><span>'+(S.fees!==null?S.fees.toFixed(4)+' BCH':'—')+'</span></div><div><small>Blocos lentos (&gt;30 min)</small><span>'+S.slow+'</span></div><div><small>Rápidos (&lt;2 min)</small><span>'+S.fast+'</span></div></div>'+
+    '<div class="eyebrow" style="margin:10px 0 4px">Quem achou</div><div class="row" style="gap:6px">'+S.byPool.map(function(p){return '<span class="chip'+(p.solo?' ok':'')+'">'+esc(p.pool)+' '+p.n+(p.solo?' · solo':'')+'</span>'}).join('')+'</div>'+
+    '<div class="box" style="margin-top:8px"><b>Padrões dos blocos solo (onde vai o hash alugado)</b>'+S.solo.n+' de '+S.n+' blocos ('+pctp(S.n?S.solo.n/S.n*100:0,0)+'). '+
+    (S.solo.edge!==null?'Margem média do aluguel quando saíram: '+pct(S.solo.edge,1)+' (nos outros blocos: '+(S.other.edge!==null?pct(S.other.edge,1):'—')+'). ':'')+
+    (top.length?'Horários (local) com mais blocos solo: '+top.map(function(x){return ('0'+x[0]).slice(-2)+'h ('+x[1]+')'}).join(', ')+'. ':'')+
+    'Com poucos blocos, isso ainda é coincidência; vira padrão com semanas de registro.</div>';
+  $('bl_list').innerHTML='<div class="stack" style="gap:6px;margin-top:10px">'+L.slice(0,40).map(function(b){
+    var ctx=b.netPH?'Rede '+nf(b.netPH,0)+' PH/s':'';
+    if(b.nhPH)ctx+=' · NiceHash '+nf(b.nhPH,0)+' PH/s alugados'+(b.nhBid?' a '+b.nhBid.toFixed(4):'')+(b.be?' (empate '+b.be.toFixed(4)+', margem '+pct(b.edge,1)+')':'');
+    var sim=b.simPH?' · Simulação: '+nf(b.simPH,0)+' PH/s, chance '+pctp(b.simProb*100,2)+', '+(b.simWon?'<b class="good">seria seu</b>':'não saiu'):'';
+    return '<div class="trow"><div><b>'+b.h+'</b> <span class="note">'+hhU(b.t)+'</span> · <b>'+esc(b.pool)+'</b>'+(b.solo?' <span class="chip ok">solo</span>':'')+(b.mine?' <span class="chip ok">seu bloco</span>':'')+(b.dt!==null&&b.dt!==undefined?' <span class="note">'+(b.dt<60?'menos de 1 min':FDI.dur(b.dt*1000))+' após o anterior</span>':'')+'</div>'+
+      '<div class="note">'+(b.txs?b.txs+' transações · ':'')+(b.size?nf(b.size/1000,1)+' KB · ':'')+'recompensa '+b.reward.toFixed(4)+' BCH'+(b.usd?' ('+usd(b.usd,0)+')':'')+' · taxas '+b.fees.toFixed(4)+(b.poolFeePct!==null&&b.poolFeePct!==undefined?' · pool '+nf(b.poolFeePct,1)+'%':'')+'</div>'+
+      (ctx||sim?'<div class="note">'+ctx+sim+'</div>':'')+(b.backfill?'<div class="note">Buscado depois: sem dados de mercado do momento.</div>':'')+'</div>'}).join('')+'</div>'+(L.length>40?'<p class="note">Mostrando 40 de '+L.length+'. O CSV tem todos.</p>':'');
+}
+$('bl_csv').addEventListener('click',function(){
+  if(!blk.list.length)return;
+  var cols=['h','t','dt','pool','solo','tag','txs','size','reward','fees','poolFeePct','usd','bchUsd','D','netPH','nhPH','nhBid','nhMedian','be','edge','simPH','simProb','simWon','mine','backfill'];
+  var csv=['altura,hora_utc,'+cols.slice(2).join(',')].concat(blk.list.map(function(b){return [b.h,new Date(b.t).toISOString()].concat(cols.slice(2).map(function(c){var v=b[c];return v===undefined||v===null?'':String(v).replace(/,/g,' ')})).join(',')})).join('\n');
+  saveFile('blocos-bch-'+stamp()+'.csv',csv,'text/csv');
+});
+$('bl_more').addEventListener('click',function(){
+  var b=$('bl_more');b.disabled=true;b.textContent='Buscando…';
+  apiCall('POST','/blocks/backfill',{count:20}).then(function(r){b.textContent='Buscar blocos anteriores';b.disabled=false;loadBlocksLog(true)},function(e){b.textContent='Buscar blocos anteriores';b.disabled=false;$('bl_msg').textContent='Falhou: '+e.message});
+});
 function renderOps(){
   var c=apiCfg(),st=ops.status;
   if(!c.url){
@@ -1426,6 +1466,7 @@ function subTab(t,sub){
   var cfg=SUBS[t];
   if(t==='mine'&&sub==='algos'){loadMarketMap();renderAlgos()}
   if(t==='mine'&&sub==='ops')loadOps();
+  if(t==='mine'&&sub==='net')loadBlocksLog();
   if(t==='diary'&&sub==='robo'){renderRobo();if(settings.apiUrl&&Date.now()-(ops.at||0)>60000)loadOps()}
   cfg[1].forEach(function(x){$(t+'-'+x).hidden=x!==sub});
   document.querySelectorAll('#'+cfg[0]+' button').forEach(function(b){b.setAttribute('aria-pressed',b.dataset.sub===sub?'true':'false')});

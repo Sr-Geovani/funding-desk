@@ -14,6 +14,7 @@ import FDR from '../../radar.js';
 import { algoPaperStep } from './paperalgo.js';
 import { FUND_MODEL } from './fundmodel.js';
 import { updateHistory, pickCoins, scorePairs } from './fundai.js';
+import { blockRecord, blockSummary } from './blocks.js';
 import { withCreds, reloadCreds, saveCreds, credStatus, parseNiceHash, TG_TOKEN_RE, chatFromUpdates } from './creds.js';
 
 export const VERSION = '1.0.0';
@@ -120,10 +121,11 @@ export async function tick(env, opts = {}) {
     for (let h = state.lastHeight + 1; h <= upto; h++) {
       const cb = await settle(chain.coinbase(h));
       if (!cb.ok) { errors.push('coinbase ' + h + ': ' + cb.e); break; }
-      newBlocks.push({ height: h, hash: cb.v.hash, difficulty: cb.v.difficulty, time: cb.v.time });
+      newBlocks.push(cb.v);
       const total = cb.v.outs.reduce((s, o) => s + o.value, 0);
       state.feesBch = state.feesBch == null ? Math.max(0, total - 3.125) : state.feesBch * 0.9 + Math.max(0, total - 3.125) * 0.1;
       const mine = cfg.payoutAddress ? paidTo(cb.v, cfg.payoutAddress) : 0;
+      cb.v.mine = mine;
       if (mine > 0) {
         blockEvent = { height: h, bch: mine, time: cb.v.time, txid: cb.v.txid };
         state.myBlocks = (state.myBlocks || []).concat(blockEvent).slice(-50);
@@ -153,6 +155,23 @@ export async function tick(env, opts = {}) {
     paper = ps.paper;
     for (const e of ps.events) log.push({ t: now, kind: 'simulado', text: e });
   } else if (paper) paper.lastTs = now; // fora do Observar a simulação fica parada
+  // Registro dos blocos da rede com o contexto do momento (padrões e coincidências). Grava no KV a cada 20 min.
+  let blockBuf = state.blockBuf || [], blockFlush = state.blockFlush || 0, lastBlockT = state.lastBlockT || null;
+  {
+    const won = new Set(((paper && paper.wins) || []).map((w) => w.height)), sp = state.paper;
+    for (const b of newBlocks) {
+      const on = cfg.mode === 'observe' && !!(sp && sp.on && sp.ph > 0);
+      const prob = on && b.difficulty ? sp.ph * 1e15 / (b.difficulty * 4294967296 / 600 + sp.ph * 1e15) : 0;
+      blockBuf.push(blockRecord(b, { prevT: lastBlockT, mkt, book, sim: { ph: on ? sp.ph : 0, prob, won: won.has(b.height) }, mineBch: b.mine }));
+      lastBlockT = b.time;
+    }
+    if (blockBuf.length && now - blockFlush >= 20 * 60e3) {
+      const merged = (await kvGet(env, 'blocks', [])).concat(blockBuf).sort((a, b) => a.h - b.h).filter((b, i, a) => !i || b.h !== a[i - 1].h);
+      for (let i = 1; i < merged.length; i++) if (merged[i].dt == null && merged[i].h === merged[i - 1].h + 1) merged[i].dt = Math.round((merged[i].t - merged[i - 1].t) / 1000);
+      await kvPut(env, 'blocks', merged.slice(-600));
+      blockBuf = []; blockFlush = now;
+    }
+  }
   // Variante "rajada" (método do vídeo): 50 PH/s, para no bloco; mesmos blocos reais, mesmo sorteio, mesmos limites.
   let paperBurst = state.paperBurst || null;
   if (cfg.mode === 'observe') paperBurst = paperStep(paperBurst, { cfg: Object.assign({}, cfg, { targetPh: 50, onBlock: 'cancel' }), mkt, now, units, limits, blocks: newBlocks }).paper;
@@ -261,7 +280,7 @@ export async function tick(env, opts = {}) {
   const alertScore = alertScoreStep(state.alertScore, { rows: funding && funding.rows, entries, now, fees: FD.DEFAULT_FEES, holdDays: cfg.alertHold || 3 });
 
   const next = Object.assign({}, dec.state, alertState, {
-    lastTick: now, paper, paperBurst, real, fundPaper, alertScore, algoPaper, algoTs, aiScores, fundPaperAI, fhistHour, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig,
+    lastTick: now, paper, paperBurst, blockBuf, blockFlush, lastBlockT, real, fundPaper, alertScore, algoPaper, algoTs, aiScores, fundPaperAI, fhistHour, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig,
     market: mkt.ok ? { breakEvenEH: mkt.breakEvenEH, capEH: mkt.capEH, fillEH: mkt.fillEH, medianEH: mkt.medianEH, bidEH: mkt.bidEH,
       edgeAtBidPct: mkt.edgeAtBidPct, green: mkt.green, D: mkt.D, bchUsd: mkt.bchUsd, btcUsd: mkt.btcUsd, costPerBlockUsd: mkt.costPerBlockUsd,
       hashpriceNet: mkt.hashpriceNet, blockNetUsd: mkt.blockNetUsd, phDaysPerBlock: mkt.phDaysPerBlock, market: mkt.market } : { ok: false, reason: mkt.reason },
@@ -388,6 +407,28 @@ async function api(req, env, url, fetchFn) {
     return json({ config });
   }
   if (p === '/tick' && m === 'POST') return json(await tick(env, { fetchFn }));
+  if (p === '/blocks/backfill' && m === 'POST') {
+    // Busca blocos anteriores ao registro (só dados da blockchain; o contexto de mercado não existe para o passado).
+    const count = Math.max(1, Math.min(20, +body.count || 20)), chain = chainClient(env, fetchFn);
+    const st = await kvGet(env, 'state', {}), list = await kvGet(env, 'blocks', []);
+    const all = list.concat(st.blockBuf || []);
+    let top = all.length ? Math.min(...all.map((b) => b.h)) - 1 : (st.lastHeight || 0);
+    const got = [];
+    for (let h = top; h > top - count && h > 0; h--) {
+      const cb = await settle(chain.coinbase(h));
+      if (!cb.ok) break;
+      got.push(Object.assign(blockRecord(cb.v, {}), { backfill: true }));
+    }
+    const merged = list.concat(got).sort((a, b) => a.h - b.h).filter((b, i, a) => !i || b.h !== a[i - 1].h);
+    for (let i = 1; i < merged.length; i++) if (merged[i].dt == null && merged[i].h === merged[i - 1].h + 1) merged[i].dt = Math.round((merged[i].t - merged[i - 1].t) / 1000);
+    await kvPut(env, 'blocks', merged.slice(-600));
+    return json({ added: got.length, from: got.length ? got[got.length - 1].h : null, to: got.length ? got[0].h : null });
+  }
+  if (p === '/blocks' && m === 'GET') {
+    const st = await kvGet(env, 'state', {});
+    const list = (await kvGet(env, 'blocks', [])).concat(st.blockBuf || []);
+    return json({ blocks: list.slice(-300).reverse(), summary: blockSummary(list) });
+  }
   if (p === '/paper/reset' && m === 'POST') {
     const st = await kvGet(env, 'state', {});
     if (body.what === 'funding') { st.fundPaper = null; st.fundPaperAI = null; }

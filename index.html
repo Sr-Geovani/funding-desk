@@ -459,6 +459,20 @@ details.card>summary{color:var(--fg);font-size:15px}
       <div class="card"><button id="o_kill" style="width:100%;background:var(--bad);border-color:var(--bad);color:#fff">Emergência: desligar robô e cancelar ordens gerenciadas</button></div>
     </div>
     <div id="mine-net" class="stack" hidden>
+      <div class="card" id="bl_card"><h2>Blocos da rede, um a um</h2><p class="note" id="bl_msg">Carregando o registro do servidor…</p><div id="bl_sum"></div><div id="bl_list"></div>
+        <details style="margin-top:10px"><summary>O que é cada campo</summary><dl class="gloss" style="margin-top:6px">
+          <dt>Transações</dt><dd>Pagamentos de pessoas incluídos no bloco. Cada uma paga uma pequena taxa, que vai para quem achou o bloco.</dd>
+          <dt>Tamanho</dt><dd>Quanto o bloco ocupa (KB). Mais transações, bloco maior.</dd>
+          <dt>Recompensa</dt><dd>O que quem achou o bloco recebe: 3,125 BCH novos (subsídio) + as taxas das transações. Em pool solo, o pool fica com uma fatia (a "taxa do pool").</dd>
+          <dt>Taxas</dt><dd>A parte da recompensa paga pelos usuários. No BCH costuma ser pequena (milésimos de BCH).</dd>
+          <dt>Intervalo</dt><dd>Tempo desde o bloco anterior. A média é 10 min, mas varia muito por sorte: blocos de 1 min e de 40 min são normais.</dd>
+          <dt>Dificuldade e hash da rede</dt><dd>Quão difícil é achar um bloco; dela sai a potência total da rede (PH/s). No BCH a dificuldade se ajusta a cada bloco.</dd>
+          <dt>Pool</dt><dd>Lido da assinatura que o minerador grava no bloco. "Solo" = pool em que cada minerador concorre sozinho (onde vai o hash alugado, como BlockSniper, SoloPool, MolePool).</dd>
+          <dt>NiceHash e margem</dt><dd>Hash SHA-256 alugado na NiceHash naquele momento, o preço que o robô pagaria, o empate e a margem. Só existe para blocos registrados ao vivo.</dd>
+          <dt>Potência de quem achou</dt><dd>Não fica gravada na blockchain. O que dá para saber é o pool, o hash total da rede e o hash alugado no mercado naquele momento.</dd>
+        </dl></details>
+        <div class="row" style="margin-top:10px"><button class="sm" id="bl_csv">Exportar CSV</button><button class="sm" id="bl_more">Buscar blocos anteriores</button></div>
+      </div>
       <div class="card"><h2>Rede Bitcoin Cash <span class="tag">dado real</span></h2><div class="kv" id="n_kv"></div></div>
       <div class="card"><h3 style="margin-bottom:8px">Dificuldade nos últimos blocos (G)</h3><div class="chart" id="n_chart"></div>
         <p class="note" style="margin:6px 0 0">O BCH reajusta a dificuldade a cada bloco (ASERT, meia-vida de 2 dias). Blocos atrasados baixam a dificuldade do próximo; isso deixa o hash um pouco mais rentável, não "mais perto" de achar.</p></div>

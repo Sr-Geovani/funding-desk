@@ -733,3 +733,53 @@ test('integração: simulação em rajada (50 PH/s, para no bloco) roda ao lado 
     assert.ok(st.paperBurst.spendUsd > st.paper.spendUsd * 4.9, 'rajada gasta 5x mais por hora');
   } finally { t.server.close(); }
 });
+
+/* ---------- registro dos blocos da rede ---------- */
+import { blockRecord, blockSummary, poolOf } from '../worker/src/blocks.js';
+import { tagFrom } from '../worker/src/chain.js';
+
+test('blocos: assinatura do pool, recompensa, taxas, hash da rede e contexto', () => {
+  assert.equal(tagFrom('03a7e10e042553e56a0e736f6c6f706f6f6c2e6f7267eeac348e3d15cb587f3b80000088'), 'solopool.org', 'bloco 975271 de verdade');
+  assert.deepEqual(poolOf('/BlockSniper/ x'), { pool: 'BlockSniper', solo: true });
+  assert.deepEqual(poolOf('/ViaBTC/Mined by y'), { pool: 'ViaBTC', solo: false });
+  const b = { height: 975271, hash: '00ab', time: 1793413925000, difficulty: 522769773689.7484, size: 23618, txs: 46, tag: 'solopool.org',
+    outs: [{ value: 3.06350017 }, { value: 0.06252041 }] };
+  const r = blockRecord(b, { prevT: 1793413925000 - 540e3, mkt: { ok: true, bchUsd: 290, bidEH: 0.41, medianEH: 0.42, breakEvenEH: 0.4380, edgeAtBidPct: 6.8 }, book: { totalPH: 19450.2 }, sim: { ph: 10, prob: 0.0026, won: false } });
+  assert.deepEqual([r.pool, r.solo, r.dt, r.size, r.txs, r.outs], ['SoloPool.org', true, 540, 23618, 46, 2]);
+  close(r.reward, 3.12602058); close(r.fees, 0.00102058, 1e-8); close(r.poolFeePct, 2, 0.01);
+  close(r.netPH, 3742, 1); close(r.usd, 906.55, 0.01); assert.equal(r.nhPH, 19450.2); assert.equal(r.simPH, 10);
+  const sum = blockSummary([r, Object.assign({}, r, { pool: 'ViaBTC', solo: false, dt: 2000, edge: -2 })]);
+  assert.deepEqual([sum.n, sum.solo.n, sum.other.n, sum.slow], [2, 1, 1, 1]);
+  assert.equal(sum.byPool.length, 2); assert.equal(sum.solo.hoursUtc[2], 1);
+});
+
+test('integração: blocos da rede ficam registrados com o contexto', async () => {
+  const t = await setup();
+  try {
+    await t.call('PUT', '/api/config', { mode: 'observe', targetPh: 10 });
+    await t.call('POST', '/api/tick');
+    await fetch(t.base + '/_mine', { method: 'POST', body: JSON.stringify({ address: 'qoutro' }) });
+    await t.call('POST', '/api/tick');
+    const r = await t.call('GET', '/api/blocks');
+    assert.equal(r.body.blocks.length, 1);
+    const b = r.body.blocks[0];
+    assert.deepEqual([b.pool, b.solo, b.txs, b.simPH], ['Solo (outro)', true, 40, 10]);
+    assert.ok(b.netPH > 0 && b.nhPH > 0 && b.edge !== undefined && b.simProb > 0);
+    assert.equal(r.body.summary.n, 1);
+  } finally { t.server.close(); }
+});
+
+test('integração: busca blocos anteriores ao registro (só dados da blockchain)', async () => {
+  const t = await setup();
+  try {
+    await t.call('POST', '/api/tick');
+    await fetch(t.base + '/_mine', { method: 'POST', body: JSON.stringify({ address: 'qoutro' }) });
+    await t.call('POST', '/api/tick');
+    const r = await t.call('POST', '/api/blocks/backfill', { count: 5 });
+    assert.equal(r.body.added, 5);
+    const b = (await t.call('GET', '/api/blocks')).body.blocks;
+    assert.equal(b.length, 6); assert.ok(b[5].backfill); assert.equal(b[5].pool, 'ViaBTC');
+    assert.deepEqual(b.map((x) => x.h), [...b.map((x) => x.h)].sort((x, y) => y - x), 'mais novo primeiro');
+    assert.ok(b[1].dt !== null, 'intervalo calculado com o vizinho');
+  } finally { t.server.close(); }
+});
