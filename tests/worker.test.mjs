@@ -916,3 +916,19 @@ test('integração: ajuste do operador recalcula o plano na hora e fica registra
     assert.ok(st.paperPlan, 'cenário do copiloto roda na simulação');
   } finally { t.server.close(); }
 });
+
+test('integração: par conferido pelo painel destrava a entrada do robô de funding', async () => {
+  const t = await setup();
+  try {
+    await t.call('PUT', '/api/config', { fundStable24: true });
+    await t.call('POST', '/api/tick'); let r = await t.call('POST', '/api/tick');
+    assert.equal(r.body.alerts.filter((a) => a.kind === 'entrada' && a.area === 'funding').length, 0, 'sem histórico: não entra');
+    const v = await t.call('POST', '/api/funding/verified', { pairs: [{ key: 'ENA|Bybit|Hyperliquid', stable24: true, expNet: 2.5, halfLifeH: 30 }, { key: 'x"bad', stable24: true }] });
+    assert.equal(v.body.pairs, 1);
+    await t.call('POST', '/api/tick'); r = await t.call('POST', '/api/tick');
+    const st = (await t.call('GET', '/api/status')).body.state;
+    assert.equal(st.fundPaper.summary.open, 1, 'robô simulado entrou no par conferido');
+    // conferido mas a meia-vida não paga as taxas: não vale
+    await t.call('POST', '/api/funding/verified', { pairs: [{ key: 'ENA|Bybit|Hyperliquid', stable24: true, expNet: -1 }] });
+  } finally { t.server.close(); }
+});

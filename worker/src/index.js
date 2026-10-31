@@ -243,7 +243,11 @@ export async function tick(env, opts = {}) {
 
   // Alertas (entrada/saída/risco) com aviso no Telegram; não dependem do modo do robô.
   let newAlerts = [], alertState = { alertPrev: state.alertPrev, alertMem: state.alertMem, alerts: state.alerts };
-  const funding = predR.ok ? fundingSnapshot(predR.v, cfg, now, cfg.fundStable24 !== false ? (state.stable24 || {}) : null) : null;
+  // Estável = histórico próprio do servidor (24 h) OU conferido pelo painel no histórico pago das corretoras (últimas 6 h,
+  // com a meia-vida pagando as taxas).
+  const verified = state.verified || {}, stableNow = Object.assign({}, state.stable24 || {});
+  for (const [k, x] of Object.entries(verified)) if (now - x.at <= 6 * 3600e3 && x.stable24 && !(x.expNet !== null && x.expNet <= 0)) stableNow[k] = true;
+  const funding = predR.ok ? fundingSnapshot(predR.v, cfg, now, cfg.fundStable24 !== false ? stableNow : null) : null;
   if (!predR.ok) errors.push('funding (Hyperliquid): ' + predR.e);
   // Operações simuladas de funding: rodam sempre (o funding ainda é manual; isto mostra o que um robô com regras fixas faria).
   let fundPaper = state.fundPaper || null;
@@ -333,7 +337,7 @@ export async function tick(env, opts = {}) {
   const mempool = mpR.ok ? Object.assign({ at: now }, mpR.v) : state.mempool || null;
 
   const next = Object.assign({}, dec.state, alertState, {
-    lastTick: now, ai: br.ai, aiAnalysis, plan, acct, algoMap, mempool, stable24, pairStats, msig, darr, recentBlocks, nhWeek, paper, paperBurst, paperPlan, blockBuf, blockFlush, lastBlockT, real, fundPaper, alertScore, algoPaper, algoTs, aiScores, fundPaperAI, fhistHour, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig,
+    lastTick: now, verified: Object.fromEntries(Object.entries(verified).filter(([, x]) => now - x.at <= 6 * 3600e3)), ai: br.ai, aiAnalysis, plan, acct, algoMap, mempool, stable24, pairStats, msig, darr, recentBlocks, nhWeek, paper, paperBurst, paperPlan, blockBuf, blockFlush, lastBlockT, real, fundPaper, alertScore, algoPaper, algoTs, aiScores, fundPaperAI, fhistHour, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig,
     market: mkt.ok ? { breakEvenEH: mkt.breakEvenEH, capEH: mkt.capEH, fillEH: mkt.fillEH, medianEH: mkt.medianEH, bidEH: mkt.bidEH,
       edgeAtBidPct: mkt.edgeAtBidPct, green: mkt.green, D: mkt.D, bookTotalPH: book ? book.totalPH : 0, bchUsd: mkt.bchUsd, btcUsd: mkt.btcUsd, costPerBlockUsd: mkt.costPerBlockUsd,
       hashpriceNet: mkt.hashpriceNet, blockNetUsd: mkt.blockNetUsd, phDaysPerBlock: mkt.phDaysPerBlock, market: mkt.market } : { ok: false, reason: mkt.reason },
@@ -501,6 +505,18 @@ async function api(req, env, url, fetchFn) {
     const st = await kvGet(env, 'state', {});
     const list = (await kvGet(env, 'blocks', [])).concat(st.blockBuf || []).map((b) => Object.assign(b, poolOf(b.tag))); // nomes sempre com a regra atual
     return json({ blocks: list.slice(-300).reverse(), summary: blockSummary(list) });
+  }
+  if (p === '/funding/verified' && m === 'POST') {
+    // Pares conferidos pelo painel no histórico pago de 72 h das corretoras (valem 6 h). Ajuda o robô a decidir igual ao painel
+    // até o servidor ter 24 h de histórico próprio do par.
+    const st = await kvGet(env, 'state', {}), now = Date.now(), v = st.verified || {};
+    for (const x of (Array.isArray(body.pairs) ? body.pairs : []).slice(0, 40)) {
+      if (typeof x.key !== 'string' || !/^[A-Za-z0-9.]{1,20}\|[A-Za-z]{2,12}\|[A-Za-z]{2,12}$/.test(x.key)) continue;
+      v[x.key] = { stable24: !!x.stable24, expNet: isFinite(x.expNet) ? +x.expNet : null, halfLifeH: isFinite(x.halfLifeH) ? +x.halfLifeH : null, at: now };
+    }
+    for (const k of Object.keys(v)) if (now - v[k].at > 6 * 3600e3) delete v[k];
+    st.verified = v; await kvPut(env, 'state', st);
+    return json({ ok: true, pairs: Object.keys(v).length });
   }
   if (p === '/paper/reset' && m === 'POST') {
     const st = await kvGet(env, 'state', {});

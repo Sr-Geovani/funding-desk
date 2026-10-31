@@ -67,6 +67,8 @@ sempre identificado; nada de prometer previsão de sorte (Poisson é sem memóri
 - Funding (regra validada, 31/10): "Compensa" exige diferença acima do empate nas últimas 24 h seguidas; execução padrão
   maker (ordem limite). Painel: histórico pago de 72 h (`stable24` em `ensureStability`). Servidor: `stablePairs` sobre o
   histórico horário próprio (`fhist`), precisa de 24 h; `fundStable24` na config desliga. Simulações e placar com taxa maker.
+  Enquanto o servidor não tem 24 h, o painel envia os pares que conferiu (`POST /api/funding/verified`, válidos 6 h,
+  só com esperado positivo) e o robô de funding usa essa conferência.
 - Mineração: abas em grade 3 × 2; Rede com uma lista só de blocos (servidor; Blockchair sem backend) e cartão de padrões.
 - iPhone: barra inferior reancorada pelo visualViewport ao voltar do segundo plano.
 - Sinais além da sorte (`worker/src/signals.js`, pesquisa em `docs/pesquisa-mineracao.md`): DARR (BCH paga por hash ÷

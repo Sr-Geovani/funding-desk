@@ -241,6 +241,16 @@ function loadHist(venue,sym,fallbackH){
   return p.then(function(pts){var s=FD.historySeries(pts,fallbackH);histCache[key]={at:Date.now(),s:s};return s});
 }
 function oppKey(o){return o.coin+'|'+o.s+'|'+o.l}
+// O painel confere 72 h de funding pago nas corretoras; manda ao servidor o que conferiu, para o robô decidir igual ao painel
+// enquanto o servidor ainda não tem 24 h de histórico próprio do par. No máximo a cada 5 min.
+var lastShare=0;
+function shareVerified(){
+  if(!settings.apiUrl||Date.now()-lastShare<5*60e3)return;
+  var pairs=Object.keys(stabMap).map(function(k){var x=stabMap[k];return x&&x.stable24!==undefined?{key:k,stable24:!!x.stable24,expNet:isFinite(x.expNet)?x.expNet:null,halfLifeH:x.halfLifeH||null}:null}).filter(Boolean);
+  if(!pairs.length)return;
+  lastShare=Date.now();
+  apiCall('POST','/funding/verified',{pairs:pairs}).catch(function(){});
+}
 function toggleHist(key){
   if(openHist[key]){delete openHist[key];var el=document.querySelector('[data-hist="'+CSS.escape(key)+'"]');if(el)el.hidden=true;return}
   var o=state.ops.filter(function(x){return oppKey(x)===key})[0];if(!o)return;
@@ -432,7 +442,7 @@ function ensureStability(list){
       var expNet=cap===null?null:o.m.notional*cap/100-o.m.cost;
       stabMap[oppKey(o)]={at:Date.now(),stab:FDC.stability(FD.seriesStats(sp,o.m.beApr)),bt:bt,stable24:s24,expNet:expNet,halfLifeH:ar?ar.halfLifeH:null};
     }).catch(function(){stabMap[oppKey(o)]={at:Date.now(),stab:null}});
-  })).then(function(){stabPending=false;renderScan();renderHome()});
+  })).then(function(){stabPending=false;renderScan();renderHome();shareVerified()});
 }
 
 /* ---------- funding: calculadora ---------- */
