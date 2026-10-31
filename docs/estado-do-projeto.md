@@ -106,6 +106,10 @@ sempre identificado; nada de prometer previsão de sorte (Poisson é sem memóri
   só no trecho cobrado e chance = h ÷ rede; funding mostra "se 1 perna fosse a mercado".
 - Fornecedores (`docs/fornecedores-hash.md`, `worker/src/hashmarkets.js`): Braiins Hashpower e MiningRigRentals lidos a
   cada 15 min (`hashMkts`); `POST /api/pool/check` confere extranonce2 do pool (Braiins exige ≥ 7) via Stratum.
+- Início → "Resultado financeiro" (31/10): Simulado × Real. Simulado soma as simulações do servidor (mineração BCH,
+  outras moedas, funding) com "sem sorte" (média esperada); Real soma o robô na NiceHash (`real`), as sessões e posições
+  do Diário e os aportes/retiradas que o usuário registra (`fd_cash`, só no aparelho). Gráfico do resultado acumulado
+  por dia (UTC), tabela por dia. Servidor: `algoPaper.days` e totais de funding (`fundingUsd`, `feesUsd`, `capitalUsd`).
 - Ciclo do servidor: 3 min. Mínimo do Cloudflare é 1 min, mas o KV grátis aceita 1.000 gravações/dia e propaga em até
   60 s; abaixo de 3 min exige plano pago + Durable Objects. Atraso de 3 min custa < US$1 com 10 PH/s.
 

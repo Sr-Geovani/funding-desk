@@ -543,6 +543,7 @@ test('funding simulado: entra após 2 leituras, recebe nos horários de cada exc
   close(c.netUsd, 1 - 0.0125 - 2 * 1.15, 1e-9); assert.match(c.reason, /virou contra/); assert.match(r.events[0], /saiu de ENA .* −US\$1\.31/);
   const sum = fundPaperSummary(r.pf);
   assert.deepEqual([sum.closed, sum.wins, sum.open], [1, 0, 0]);
+  close(sum.fundingUsd - sum.feesUsd, sum.netUsd, 1e-9, 'quadro financeiro: recebido − taxas = resultado');
 });
 
 test('funding simulado: no máximo 3 abertas, uma por moeda; moeda que some fecha', () => {
@@ -658,6 +659,7 @@ test('outras moedas (PPS): orçamento fixo enquanto compensa; pausa com o motivo
   r = algoPaperStep(r.pa, { map: mk('go', 10), now: T0 + 15 * M });
   const a = r.pa.algos.SCRYPT, sp = 100 * 15 / 1440;
   close(a.spendUsd, sp, 1e-9); close(a.revUsd, sp * 1.10, 1e-9); close(a.hoursOn, 0.25, 1e-9);
+  close(r.pa.days['2026-10-31'].revUsd - r.pa.days['2026-10-31'].spendUsd, sp * 0.10, 1e-9, 'total do dia para a evolução no Início');
   r = algoPaperStep(r.pa, { map: mk('maybe', 4, true), now: T0 + 30 * M });
   assert.match(r.events[0], /pausaria Scrypt \(livro raso/);
   const b = r.pa.algos.SCRYPT;

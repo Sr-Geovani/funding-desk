@@ -1399,9 +1399,93 @@ function renderHome(){
     ((state.active||[]).length?'<p class="note" style="margin:0 0 8px">Radar agora: '+plural((state.active||[]).length,'item','itens')+' ('+esc(state.active[0].title)+(state.active.length>1?'…':'')+').</p>':'')+
     '<div class="row"><button class="sm" data-go="radar">Abrir radar</button><button class="sm" data-go="diary">Abrir diário</button>'+(settings.apiUrl?'<button class="sm" data-go="mine:ops">Operar</button>':'')+'</div>';
   renderJourneys(V);
+  renderFin();
   renderPlanCard(pp,sp,V,L);
   renderReal();renderProd();
 }
+/* ---------- quadro financeiro (Início): simulado × real ---------- */
+// Simulado = o que as regras do robô teriam feito no mercado real, sem dinheiro. Real = o que foi pago e recebido de
+// fato (robô na NiceHash + o que você registra no Diário) e os aportes que você registra aqui.
+var cash=(ls('fd_cash')||[]); // {id,t,usd,kind:'in'|'out',where}
+function saveCash(){ls('fd_cash',cash)}
+function finData(mode){
+  var st=(ops.status&&ops.status.state)||{},fr=[],days={},today=new Date().toISOString().slice(0,10);
+  var add=function(d,v){if(d&&isFinite(v)&&v!==0)days[d]=(days[d]||0)+v};
+  var dayOf=function(t){return new Date(t).toISOString().slice(0,10)};
+  if(mode==='sim'){
+    var p=st.paper;
+    if(p){fr.push({name:'Mineração BCH (robô)',cost:p.spendUsd||0,rev:p.wonUsd||0,exp:(p.evUsd||0)-(p.spendUsd||0),note:(p.blocks||0)+' de '+(p.draws||0)+' blocos sorteados seriam seus'});
+      Object.keys(p.days||{}).forEach(function(d){var x=p.days[d];add(d,(x.wonUsd||0)-x.spendUsd)})}
+    var ap=st.algoPaper;
+    if(ap){var as=0,ar=0;Object.keys(ap.algos||{}).forEach(function(k){as+=ap.algos[k].spendUsd||0;ar+=ap.algos[k].revUsd||0});
+      fr.push({name:'Outras moedas (PPS)',cost:as,rev:ar,exp:ar-as,note:ap.v===2?'margem realista, US$'+((ap.budgetUsdDay)||100)+'/dia enquanto compensa':'conta antiga (bruta)'});
+      Object.keys(ap.days||{}).forEach(function(d){var x=ap.days[d];add(d,x.revUsd-x.spendUsd)})}
+    var fp=st.fundPaper,fs=fp&&fp.summary;
+    if(fs&&isFinite(fs.fundingUsd)){var fres=fs.fundingUsd-fs.feesUsd;
+      fr.push({name:'Funding (robô)',cost:fs.feesUsd,rev:fs.fundingUsd,exp:fres,note:fs.closed+' fechadas, '+fs.open+' abertas'+(fs.capitalUsd?' (US$'+nf(fs.capitalUsd,0)+' de capital em uso)':'')});
+      (fp.closed||[]).forEach(function(c){add(dayOf(c.closedAt),c.netUsd)});add(today,fs.openNetUsd||0)}
+  }else{
+    var r=st.real;
+    if(r&&(r.spendUsd||r.revenueUsd)){fr.push({name:'Mineração BCH (robô)',cost:r.spendUsd||0,rev:r.revenueUsd||0,note:(r.blocks||0)+' bloco(s) pagos no seu endereço'});
+      Object.keys(r.days||{}).forEach(function(d){var x=r.days[d];add(d,(x.revenueUsd||0)-(x.spendUsd||0))})}
+    var ms=FDM.summarize(sessions);
+    if(ms.n){fr.push({name:'Mineração (Diário)',cost:ms.cost,rev:ms.reward,note:plural(ms.n,'sessão registrada','sessões registradas')});
+      sessions.forEach(function(x){add(dayOf(x.t),(+x.rewardUsd||0)-(+x.costUsd||0))})}
+    if(pos.length){var fc=0,fv=0,op=0;pos.forEach(function(q){fv+=q.funding||0;fc+=(q.fee||0)+(q.closed?(q.exitFee||0):0);
+        if(q.closed)add(dayOf(q.closed),q.pnl);else{op++;add(today,(q.funding||0)-(q.fee||0))}});
+      fr.push({name:'Funding (Diário)',cost:fc,rev:fv,note:plural(pos.length,'posição','posições')+', '+op+' aberta'+(op===1?'':'s')})}
+  }
+  var tot={cost:0,rev:0,res:0,exp:0};fr.forEach(function(f){f.res=f.rev-f.cost;tot.cost+=f.cost;tot.rev+=f.rev;tot.res+=f.res;tot.exp+=(f.exp===undefined||f.exp===null?f.res:f.exp)});
+  // gráfico: começa no que veio antes do histórico diário (30 dias) e termina no total de agora
+  var ks=Object.keys(days).sort(),sum=ks.reduce(function(a,d){return a+days[d]},0),acc=tot.res-sum,series=[];
+  if(ks.length){series.push({t:Date.parse(ks[0]+'T00:00:00Z'),v:acc});ks.forEach(function(d){acc+=days[d];series.push({t:Math.min(Date.parse(d+'T23:59:59Z'),Date.now()),v:acc,day:days[d],d:d})})}
+  return {fronts:fr,tot:tot,series:series};
+}
+function renderFin(){
+  var el=$('h_fin');if(!el)return;
+  var mode=settings.finMode==='real'?'real':'sim',F=finData(mode),T=F.tot;
+  var inv=cash.reduce(function(a,c){return a+(c.kind==='out'?-c.usd:c.usd)},0),ref=+settings.finRef||1000;
+  var base=mode==='real'?inv:ref,roi=base>0?T.res/base*100:null;
+  var resTxt='<b class="'+(T.res>=0?'good':'bad')+'">'+(T.res>=0?'Lucro ':'Prejuízo ')+signUsd(T.res)+'</b>';
+  var h='<div class="row between"><div class="eyebrow">Resultado financeiro</div><div class="seg" id="finSeg"><button class="sm" data-fin="sim" aria-pressed="'+(mode==='sim')+'">Simulado</button><button class="sm" data-fin="real" aria-pressed="'+(mode==='real')+'">Real</button></div></div>'+
+    '<div class="lead" style="margin-top:6px">'+(F.fronts.length?resTxt+(roi!==null?' <span class="note">('+pct(roi,1)+' sobre '+(mode==='real'?'o aportado':'o capital de referência')+')</span>':''):(mode==='sim'?'Simulação ainda sem resultado':'Nada registrado ainda'))+'</div>'+
+    '<div class="kv" style="margin-top:8px"><div><small>'+(mode==='real'?'Aportado':'Capital de referência')+'</small><span>'+usd(base,0)+'</span></div>'+
+    '<div><small>Gasto (aluguel e taxas)</small><span>'+usd(T.cost)+'</span></div><div><small>Receita</small><span>'+usd(T.rev)+'</span></div>'+
+    '<div><small>'+(T.res>=0?'Lucro':'Prejuízo')+'</small><span class="'+(T.res>=0?'good':'bad')+'">'+signUsd(T.res)+'</span></div></div>';
+  if(mode==='sim'&&F.fronts.length&&Math.abs(T.exp-T.res)>=0.5)h+='<p class="note" style="margin:6px 0 0">Sem a sorte dos blocos (média esperada): <b class="'+(T.exp>=0?'good':'bad')+'">'+signUsd(T.exp)+'</b>. Na mineração solo o resultado de cada período é sorte; a média mostra se a regra ganha no longo prazo.</p>';
+  if(F.series.length>=2)h+='<div class="eyebrow" style="margin:12px 0 4px">Evolução do resultado (acumulado, US$)</div><div class="chart" id="fin_chart">'+chartSVG(F.series,NaN,function(v){return signUsd(v)},function(v){return nf(v,0)})+'<div class="tip" hidden></div></div>';
+  else if(F.fronts.length)h+='<p class="note" style="margin:8px 0 0">A evolução aparece a partir do segundo dia com resultado.</p>';
+  if(F.fronts.length)h+='<div class="stack" style="gap:4px;margin-top:10px">'+F.fronts.map(function(f){var ex=mode==='sim'&&f.exp!==undefined&&f.exp!==null&&Math.abs(f.exp-f.res)>=0.5;
+    return '<div class="trow"><div class="row between"><b>'+esc(f.name)+'</b><b class="'+(Math.abs(f.res)<0.005?'':f.res>0?'good':'bad')+'">'+signUsd(f.res)+'</b></div>'+
+      '<div class="note">gasto '+usd(f.cost)+' · receita '+usd(f.rev)+(ex?' · sem sorte: '+signUsd(f.exp):'')+'</div><div class="note">'+esc(f.note||'')+'</div></div>'}).join('')+'</div>'+
+    (F.series.length>=2?'<details style="margin-top:6px"><summary class="note">Por dia</summary><div class="scroll"><table><tr><th>Dia (UTC)</th><th>Resultado</th><th>Acumulado</th></tr>'+
+      F.series.filter(function(x){return x.d}).slice().reverse().map(function(x){return '<tr><td>'+x.d.slice(8,10)+'/'+x.d.slice(5,7)+'</td><td class="'+(x.day>=0?'good':'bad')+'">'+signUsd(x.day)+'</td><td>'+signUsd(x.v)+'</td></tr>'}).join('')+'</table></div></details>':'');
+  if(mode==='sim'){
+    h+=(settings.apiUrl?'':'<p class="note" style="margin:8px 0 0">Conecte o backend (Ajustes) para ver as simulações do robô.</p>')+
+      '<p class="note" style="margin:8px 0 0">Simulado: as regras do robô aplicadas ao mercado real, sem dinheiro. Não é lucro de verdade; serve para saber se a regra merece dinheiro.</p>'+
+      '<div class="row" style="margin-top:6px;align-items:end"><label class="note">Capital de referência (US$)<input id="fin_ref" type="number" inputmode="decimal" value="'+ref+'" style="width:110px"></label></div>';
+  }else{
+    var st=(ops.status&&ops.status.state)||{},ac=st.acct,btc=(st.market||{}).btcUsd;
+    if(ac&&isFinite(ac.balanceBtc)&&btc)h+='<p class="note" style="margin:8px 0 0">Saldo na NiceHash agora: <b>'+usd(ac.balanceBtc*btc)+'</b> ('+nf(ac.balanceBtc,6)+' BTC).</p>';
+    h+='<details style="margin-top:8px"'+(cash.length?'':' open')+'><summary>Aportes e retiradas ('+cash.length+')</summary>'+
+      (cash.length?'<div class="stack" style="gap:4px;margin-top:6px">'+cash.slice().sort(function(a,b){return b.t-a.t}).map(function(c){return '<div class="trow row between"><span>'+new Date(c.t).toLocaleDateString('pt-BR')+' · '+(c.kind==='out'?'retirada':'aporte')+' · '+esc(c.where||'')+'</span><span><b>'+(c.kind==='out'?'−':'+')+usd(c.usd)+'</b> <button class="sm" data-cashdel="'+esc(c.id)+'">Excluir</button></span></div>'}).join('')+'</div>':'<p class="note" style="margin:6px 0">Registre aqui o dinheiro que você colocou (depósito na NiceHash, na Braiins, nas corretoras do funding) e o que tirou. Fica só neste aparelho.</p>')+
+      '<div class="grid2" style="margin-top:6px"><label>Valor (US$)<input id="cash_usd" type="number" inputmode="decimal"></label><label>Tipo<select id="cash_kind"><option value="in">Aporte</option><option value="out">Retirada</option></select></label>'+
+      '<label>Onde<input id="cash_where" placeholder="NiceHash, Binance…"></label><label>Data<input id="cash_t" type="date" value="'+new Date().toISOString().slice(0,10)+'"></label></div>'+
+      '<div class="row" style="margin-top:6px"><button class="sm pri" data-cashadd="1">Registrar</button></div></details>'+
+      '<p class="note" style="margin:8px 0 0">Real: o que o robô pagou e recebeu na NiceHash e o que você registra no Diário (sessões e posições de funding). Rentabilidade = resultado ÷ aportado.</p>';
+  }
+  el.innerHTML=h;
+  if(F.series.length>=2)bindChart($('fin_chart'),F.series,function(v){return signUsd(v)});
+}
+document.addEventListener('click',function(e){
+  var b=e.target.closest('#h_fin [data-fin],#h_fin [data-cashadd],#h_fin [data-cashdel]');if(!b)return;
+  if(b.dataset.fin){settings.finMode=b.dataset.fin;ls('fd_set',settings);renderFin();return}
+  if(b.dataset.cashdel){if(confirm('Excluir este registro?')){cash=cash.filter(function(c){return c.id!==b.dataset.cashdel});saveCash();renderFin()}return}
+  var v=parseFloat($('cash_usd').value);if(!(v>0))return;
+  cash.push({id:'c'+Date.now().toString(36),t:Date.parse($('cash_t').value+'T12:00:00')||Date.now(),usd:v,kind:$('cash_kind').value,where:$('cash_where').value.trim()});
+  saveCash();renderFin();
+});
+document.addEventListener('change',function(e){if(e.target&&e.target.id==='fin_ref'){var v=parseFloat(e.target.value);if(v>0){settings.finRef=v;ls('fd_set',settings);renderFin()}}});
 function renderPlanCard(pp,sp,V,L){
   var best=pp.sum.level==='go'?pp.sum.best:(sp.sum.level==='go'?sp.sum.best:null),p=scanParams();
   var bt=best?(stabMap[oppKey(best)]||{}).bt:null;

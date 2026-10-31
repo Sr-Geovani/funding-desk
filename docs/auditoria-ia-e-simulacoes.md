@@ -56,7 +56,10 @@ entrega oscilando ±10% (muda chance e custo juntos), bloco órfão (~0,5–1%),
 Fora da conta: ordem limite que não executa (perna solta), diferença de preço entre as duas corretoras na entrada e
 na saída (basis: ±0,05–0,3% do tamanho, maior que o lucro médio por operação), saques e rebalanceamento entre corretoras.
 
-**Outras moedas (PPS)**: sem sorte; agora com a conta realista. Fora: entrega abaixo do pedido, preço subir com a
+**Outras moedas (PPS)**: sem sorte; agora com a conta realista. Conferência bloco a bloco (31/10, 1.370 blocos do DOGE em
+24 h): um minerador constante ganhou US$362,8/TH/dia (dificuldade equivalente 41,7 M). A conta bruta (dificuldade do
+momento, 29,7 M) daria ~US$509 (+40%, ilusão); a realista (média de 24 h da WhatToMine, 44,5 M) dá ~US$340 (6%
+conservadora). Mesmo com o número exato, Scrypt ficou em ~−9% nesse dia. Fora: entrega abaixo do pedido, preço subir com a
 nossa ordem em mercado pequeno, câmbio das moedas recebidas.
 
 ## Antes de dinheiro real (checklist)

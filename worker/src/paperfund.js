@@ -88,7 +88,10 @@ export function fundPaperSummary(p, fees) {
     return (x.notional || 1000) * 2 * Math.min(d(x.s), d(x.l)) / 100; };
   const netMixed = c.reduce((a, x) => a + x.netUsd - extra(x), 0);
   return { since: p.since, closed: c.length, wins, netUsd: net, avgHours: c.length ? hours / c.length : 0, open: (p.open || []).length, openNetUsd: openNet,
-    netMixedUsd: netMixed, winsMixed: c.filter((x) => x.netUsd - extra(x) > 0).length };
+    netMixedUsd: netMixed, winsMixed: c.filter((x) => x.netUsd - extra(x) > 0).length,
+    // totais para o quadro financeiro: o que entrou (funding recebido) e o que saiu (taxas), fechadas + abertas
+    fundingUsd: c.concat(p.open || []).reduce((a, x) => a + (x.fundingUsd || 0), 0), feesUsd: c.concat(p.open || []).reduce((a, x) => a + (x.feesUsd || 0), 0),
+    capitalUsd: (p.open || []).length * FUND_RULES.capital };
 }
 
 /* ---------- placar dos alertas de funding ----------

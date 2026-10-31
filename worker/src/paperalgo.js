@@ -12,13 +12,17 @@ export function algoPaperStep(pa, { map, now, rules = ALGO_RULES }) {
   const p = !fresh ? JSON.parse(JSON.stringify(pa)) : { v: 2, since: now, lastTs: now, budgetUsdDay: rules.budgetUsdDay, algos: {} };
   const events = fresh && pa && pa.since ? ['Outras moedas: simulação recomeçou com a margem realista (dificuldade média de 24 h, pool PPS 4%, perdas 2,5%); a anterior usava a dificuldade do momento e exagerava o lucro'] : [];
   const dt = Math.min(Math.max(0, now - (p.lastTs || now)), rules.maxGap);
-  // 1) o intervalo que passou, com a decisão anterior
+  // 1) o intervalo que passou, com a decisão anterior (e o total do dia UTC, para a evolução no Início)
+  p.days = p.days || {};
+  const day = new Date(now).toISOString().slice(0, 10);
   for (const a of Object.values(p.algos)) {
     if (!a.on || !(dt > 0)) continue;
     const spend = p.budgetUsdDay * dt / 864e5, rev = spend * (1 + a.edgePct / 100);
     a.spendUsd += spend; a.revUsd += rev; a.hoursOn += dt / 3600e3;
     if (a.run) { a.run.spendUsd += spend; a.run.revUsd += rev; }
+    const d = p.days[day] || (p.days[day] = { spendUsd: 0, revUsd: 0 }); d.spendUsd += spend; d.revUsd += rev;
   }
+  for (const k of Object.keys(p.days).sort().slice(0, -30)) delete p.days[k];
   // 2) decisão de agora, algoritmo por algoritmo
   const seen = {};
   for (const m of map || []) {
