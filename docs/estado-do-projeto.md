@@ -51,6 +51,10 @@ sempre identificado; nada de prometer previsão de sorte (Poisson é sem memóri
   controla). Bloco encerra a operação (como o robô real) e ela reabre se o mercado seguir favorável.
 - Mineração simulada mostra os desfechos reais: sem bloco (o mais provável) perde o aluguel; com bloco, bloco − aluguel;
   a média de longo prazo é separada. Simulação (Operar) e Diário usam os mesmos totais.
+- Outras moedas (`worker/src/paperalgo.js`): a cada 15 min o servidor monta o mesmo mapa de mineração do painel
+  (WhatToMine + livros da NiceHash) e simula pool PPS com orçamento igual por algoritmo (US$100/dia enquanto
+  "Compensa"); PPS não tem sorte de bloco, então o resultado é o esperado. Margem > 100% é ignorada (dado suspeito).
+- Horários: cabeçalho com hora local e UTC; diário e log mostram as duas; dias das tabelas são UTC.
 - Ciclo do servidor: 3 min. Mínimo do Cloudflare é 1 min, mas o KV grátis aceita 1.000 gravações/dia e propaga em até
   60 s; abaixo de 3 min exige plano pago + Durable Objects. Atraso de 3 min custa < US$1 com 10 PH/s.
 

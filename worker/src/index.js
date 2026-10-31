@@ -10,6 +10,8 @@ import { fundingSnapshot, runAlerts } from './alerts.js';
 import { paperStep, realStep } from './paper.js';
 import { fundPaperStep, fundPaperSummary, alertScoreStep, alertScoreSummary } from './paperfund.js';
 import FD from '../../core.js';
+import FDR from '../../radar.js';
+import { algoPaperStep } from './paperalgo.js';
 import { withCreds, reloadCreds, saveCreds, credStatus, parseNiceHash, TG_TOKEN_RE, chatFromUpdates } from './creds.js';
 
 export const VERSION = '1.0.0';
@@ -211,6 +213,24 @@ export async function tick(env, opts = {}) {
     alertState.digest = queue.slice(-30); alertState.lastDigest = lastDigest;
   }
 
+  // Outras moedas (simulado, pool PPS): a cada 15 min, com o mapa de mineração (a mesma conta do painel).
+  let algoPaper = state.algoPaper || null, algoTs = state.algoTs || 0;
+  if (cfg.algoPaper !== false && prices.ok && now - algoTs >= 15 * 60e3) {
+    const pub = (env.NH_BASE || 'https://api2.nicehash.com').replace(/\/$/, '');
+    const getJ = (u) => fetchFn(u, { headers: { accept: 'application/json', 'user-agent': 'funding-desk/1.0' } }).then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
+    const algos = FDR.ALGOS.map((a) => a.nh);
+    const res = await Promise.all([getJ(env.WTM_URL || 'https://whattomine.com/asic.json')].concat(algos.map((a) =>
+      a === nh.algorithm && bookR.ok ? Promise.resolve(bookR.v) : getJ(pub + '/main/api/v2/hashpower/orderBook?algorithm=' + a + '&size=1000'))).map(settle));
+    if (res[0].ok) {
+      const books = {};
+      algos.forEach((a, i) => { if (res[i + 1].ok) books[a] = res[i + 1].v; });
+      const map = FDR.miningMap(res[0].v, books, { btcUsd: prices.v.btcUsd, minEdgePct: cfg.minEdgePct, rentFeePct: cfg.rentFeePct, poolFeePct: cfg.poolFeePct });
+      const ap = algoPaperStep(algoPaper, { map, now });
+      algoPaper = ap.pa; algoTs = now;
+      for (const e of ap.events) log.push({ t: now, kind: 'simulado', text: e });
+    } else errors.push('WhatToMine: ' + res[0].e);
+  }
+
   // Placar: cada alerta de entrada de funding vira uma posição hipotética acompanhada pelo prazo projetado.
   const byKey = {}; for (const b of (funding && funding.best) || []) byKey[b.key] = b;
   const entries = newAlerts.filter((a) => a.area === 'funding' && a.kind === 'entrada' && /^fe:/.test(a.key || '')).map((a) => {
@@ -219,7 +239,7 @@ export async function tick(env, opts = {}) {
   const alertScore = alertScoreStep(state.alertScore, { rows: funding && funding.rows, entries, now, fees: FD.DEFAULT_FEES, holdDays: cfg.alertHold || 3 });
 
   const next = Object.assign({}, dec.state, alertState, {
-    lastTick: now, paper, real, fundPaper, alertScore, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig,
+    lastTick: now, paper, real, fundPaper, alertScore, algoPaper, algoTs, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig,
     market: mkt.ok ? { breakEvenEH: mkt.breakEvenEH, capEH: mkt.capEH, fillEH: mkt.fillEH, medianEH: mkt.medianEH, bidEH: mkt.bidEH,
       edgeAtBidPct: mkt.edgeAtBidPct, green: mkt.green, D: mkt.D, bchUsd: mkt.bchUsd, btcUsd: mkt.btcUsd, costPerBlockUsd: mkt.costPerBlockUsd,
       hashpriceNet: mkt.hashpriceNet, blockNetUsd: mkt.blockNetUsd, phDaysPerBlock: mkt.phDaysPerBlock, market: mkt.market } : { ok: false, reason: mkt.reason },
@@ -331,6 +351,7 @@ async function api(req, env, url, fetchFn) {
         errors: state.errors || [], edgeHist: state.edgeHist || [], alerts: (state.alerts || []).slice(-30).reverse(),
         paper: state.paper || null, real: state.real ? Object.assign({}, state.real, { paid: undefined }) : null,
         fundPaper: state.fundPaper ? { summary: fundPaperSummary(state.fundPaper), open: state.fundPaper.open, closed: state.fundPaper.closed.slice(-100).reverse() } : null,
+        algoPaper: state.algoPaper || null,
         alertScore: state.alertScore ? { summary: alertScoreSummary(state.alertScore), open: state.alertScore.open.map((o) => Object.assign({}, o, { legs: undefined })), done: state.alertScore.done.slice(-100).reverse() } : null } });
   }
   if (p === '/config' && m === 'PUT') {
@@ -344,9 +365,10 @@ async function api(req, env, url, fetchFn) {
   if (p === '/tick' && m === 'POST') return json(await tick(env, { fetchFn }));
   if (p === '/paper/reset' && m === 'POST') {
     const st = await kvGet(env, 'state', {});
-    if (body.what === 'funding') st.fundPaper = null; else if (body.what === 'all') { st.paper = null; st.fundPaper = null; } else st.paper = null;
+    if (body.what === 'funding') st.fundPaper = null; else if (body.what === 'algos') { st.algoPaper = null; st.algoTs = 0; }
+    else if (body.what === 'all') { st.paper = null; st.fundPaper = null; st.algoPaper = null; st.algoTs = 0; } else st.paper = null;
     await kvPut(env, 'state', st);
-    await appendLog(env, [{ t: Date.now(), kind: 'config', text: 'simulação reiniciada (' + (body.what === 'funding' ? 'funding' : body.what === 'all' ? 'tudo' : 'mineração') + ')' }]);
+    await appendLog(env, [{ t: Date.now(), kind: 'config', text: 'simulação reiniciada (' + ({ funding: 'funding', algos: 'outras moedas', all: 'tudo' }[body.what] || 'mineração') + ')' }]);
     return json({ ok: true });
   }
   if (p === '/credentials' && m === 'GET') return json(credStatus(env));

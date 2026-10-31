@@ -179,6 +179,7 @@ details.card>summary{color:var(--fg);font-size:15px}
 <header>
   <div class="top"><h1>Funding Desk</h1>
     <div class="row"><span id="status" class="chip demo">carregando</span><button class="icon" id="theme" aria-label="Tema">auto</button></div></div>
+  <div class="note mono" id="clock" style="margin-top:4px;font-size:12px"></div>
 </header>
 <main>
 
@@ -497,6 +498,7 @@ details.card>summary{color:var(--fg);font-size:15px}
       <div class="card" id="rb_fund"></div>
       <div class="card" id="rb_score"></div>
       <div class="card" id="rb_mine"></div>
+      <div class="card" id="rb_algo"></div>
       <details class="card"><summary>Regras do robô simulado (fixas, sem olhar o futuro)</summary>
         <p class="note" style="margin:8px 0 4px"><b>Sem viés:</b> cada operação é registrada no ciclo em que a decisão acontece (a cada 3 min), só com os dados daquele momento. Toda oportunidade que passa nas regras entra; nada é escolhido ou apagado depois. Nenhum dinheiro é usado.</p>
         <p class="note" style="margin:8px 0 4px"><b>Funding (Perp × Perp)</b></p>
@@ -506,6 +508,12 @@ details.card>summary{color:var(--fg);font-size:15px}
           <li>Recebe ou paga no horário de cada exchange, com a taxa prevista na última leitura antes do horário (short recebe, long paga).</li>
           <li>Sai quando a diferença de funding fica ≤ 0 em 2 leituras seguidas (ou a moeda some dos dados). Não há prazo fixo.</li>
           <li>Exchanges: Binance, Bybit e Hyperliquid (o que o servidor lê de qualquer região).</li>
+        </ul>
+        <p class="note" style="margin:8px 0 4px"><b>Outras moedas (pool PPS)</b></p>
+        <ul class="note" style="margin:0;padding-left:18px">
+          <li>Para cada algoritmo do mapa (Scrypt, RandomX, kHeavyHash, Equihash...): compra quando o mapa diz "Compensa" (margem ≥ mínima e livro com ordens suficientes) e pausa quando deixa de compensar. Recalcula a cada 15 min.</li>
+          <li>Mesmo orçamento para todos (US$100/dia de aluguel enquanto compensa), para comparar algoritmos de unidades diferentes.</li>
+          <li>Pool PPS paga por share: não há sorte de bloco, o que entra é a receita esperada já sem a taxa do pool (2%). Aluguel = preço típico do livro + 3% da NiceHash.</li>
         </ul>
         <p class="note" style="margin:8px 0 4px"><b>Placar dos alertas de funding</b></p>
         <ul class="note" style="margin:0;padding-left:18px">
@@ -517,6 +525,7 @@ details.card>summary{color:var(--fg);font-size:15px}
           <li>Entra ("compraria") quando o lance fica abaixo do teto (empate − margem mínima); sai ("pausaria") quando passa do teto ou bate o limite do dia. Stop-loss da sessão encerra a operação.</li>
           <li>Gasto: potência alvo × lance × tempo + taxa da NiceHash. Receita média: blocos esperados × valor do bloco (sem taxa do pool).</li>
           <li>Achou bloco? Cada bloco real da rede BCH achado enquanto o robô estaria comprando seria seu com chance = sua potência ÷ (potência da rede + a sua). O número sorteado vem do hash do próprio bloco, que ninguém controla: o resultado não pode ser escolhido depois. Com bloco, a operação encerra (como o robô real) e reabre se o mercado seguir favorável.</li>
+          <li>Horários: a hora local do aparelho e, entre parênteses, a hora UTC (a do servidor). Os "dias" das tabelas são dias UTC (começam às 21:00 em Brasília).</li>
           <li>Pausa e volta: acima do teto, o robô real baixa a ordem para a potência mínima e desce o preço aos poucos; quando o preço volta para baixo do teto, sobe de novo para a potência alvo na mesma ordem. Na simulação isso aparece como uma operação que termina ("pausaria") e outra que começa ("compraria").</li>
         </ul>
       </details>

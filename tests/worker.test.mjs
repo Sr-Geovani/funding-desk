@@ -11,6 +11,7 @@ import { createMock, MOCK_KEYS } from '../worker/dev/mock.mjs';
 import { memoryKV } from '../worker/dev/server.mjs';
 import { seal, unseal, chatFromUpdates, parseNiceHash } from '../worker/src/creds.js';
 import { paperStep, realStep } from '../worker/src/paper.js';
+import { algoPaperStep } from '../worker/src/paperalgo.js';
 import { fundPaperStep, fundPaperSummary, alertScoreStep, alertScoreSummary } from '../worker/src/paperfund.js';
 const FDM = createRequire(import.meta.url)('../mining.js');
 
@@ -127,7 +128,7 @@ async function setup() {
   await new Promise((r) => server.listen(0, r));
   const base = 'http://127.0.0.1:' + server.address().port;
   const env = { FD_KV: memoryKV(), PANEL_TOKEN: 'token-de-teste-com-mais-de-24-chars', ALLOWED_ORIGIN: 'https://sr-geovani.github.io',
-    NH_BASE: base + '/nh', BCH_REST: base + '/bch', PRICE_URL: base + '/cg/x', HL_URL: base + '/hl/info', NH_API_KEY: MOCK_KEYS.key, NH_API_SECRET: MOCK_KEYS.secret, NH_ORG_ID: MOCK_KEYS.org,
+    NH_BASE: base + '/nh', BCH_REST: base + '/bch', PRICE_URL: base + '/cg/x', HL_URL: base + '/hl/info', WTM_URL: base + '/wtm/asic.json', NH_API_KEY: MOCK_KEYS.key, NH_API_SECRET: MOCK_KEYS.secret, NH_ORG_ID: MOCK_KEYS.org,
     MAX_ORDER_BTC: '0.01', MAX_LIMIT_PH: '100', MAX_DAILY_USD: '1000' };
   const call = async (method, path, body, token = env.PANEL_TOKEN) => {
     const r = await worker.fetch(new Request('https://api.example' + path, { method, headers: { Authorization: 'Bearer ' + token, Origin: 'https://sr-geovani.github.io', 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined }), env, {});
@@ -629,4 +630,48 @@ test('integração: bloco real da rede sorteado como seu na simulação', async 
     const log = await t.call('GET', '/api/log');
     assert.ok(log.body.log.some((l) => /seria seu \(sorteio pelo hash do bloco/.test(l.text)));
   } finally { t.server.close(); }
+});
+
+test('outras moedas (PPS): orçamento fixo enquanto compensa; pausa com o motivo', () => {
+  const T0 = Date.UTC(2026, 9, 31, 12), M = 60e3;
+  const mk = (level, edge, thin) => [{ algo: 'SCRYPT', label: 'Scrypt', coins: ['LTC', 'DOGE'], level, edgePct: edge, thin: !!thin }];
+  let r = algoPaperStep(null, { map: mk('go', 10), now: T0 });
+  assert.match(r.events[0], /compraria Scrypt \(LTC\+DOGE\) com margem de 10\.0%/);
+  r = algoPaperStep(r.pa, { map: mk('go', 10), now: T0 + 15 * M });
+  const a = r.pa.algos.SCRYPT, sp = 100 * 15 / 1440;
+  close(a.spendUsd, sp, 1e-9); close(a.revUsd, sp * 1.10, 1e-9); close(a.hoursOn, 0.25, 1e-9);
+  r = algoPaperStep(r.pa, { map: mk('maybe', 4, true), now: T0 + 30 * M });
+  assert.match(r.events[0], /pausaria Scrypt \(livro raso/);
+  const b = r.pa.algos.SCRYPT;
+  assert.equal(b.on, false); assert.equal(b.runs.length, 1); close(b.runs[0].revUsd - b.runs[0].spendUsd, 2 * sp * 0.10, 1e-9);
+  // parado não gasta; volta com nova operação
+  r = algoPaperStep(r.pa, { map: mk('no', -20), now: T0 + 45 * M });
+  close(r.pa.algos.SCRYPT.spendUsd, 2 * sp, 1e-9);
+  r = algoPaperStep(r.pa, { map: mk('go', 6), now: T0 + 60 * M });
+  assert.ok(r.pa.algos.SCRYPT.run && r.pa.algos.SCRYPT.run.start === T0 + 60 * M);
+  // intervalo longo (servidor parado) conta no máximo 20 min
+  r = algoPaperStep(r.pa, { map: mk('go', 6), now: T0 + 60 * M + 5 * 36e5 });
+  close(r.pa.algos.SCRYPT.run.spendUsd, 100 * 20 / 1440, 1e-9);
+});
+
+test('integração: outras moedas entram no status a cada 15 min', async () => {
+  const t = await setup();
+  try {
+    const T0 = Date.now();
+    await tick(t.env, { now: T0 });
+    let st = (await t.call('GET', '/api/status')).body.state;
+    assert.ok(st.algoPaper && st.algoPaper.algos.SCRYPT, JSON.stringify(st.algoPaper));
+    const since = st.algoPaper.since;
+    await tick(t.env, { now: T0 + 5 * 60e3 }); // antes de 15 min: não recalcula
+    st = (await t.call('GET', '/api/status')).body.state;
+    assert.equal(st.algoPaper.lastTs, since);
+    await tick(t.env, { now: T0 + 16 * 60e3 });
+    st = (await t.call('GET', '/api/status')).body.state;
+    assert.equal(st.algoPaper.lastTs, T0 + 16 * 60e3);
+  } finally { t.server.close(); }
+});
+
+test('outras moedas: margem irreal (> 100%) não entra', () => {
+  const r = algoPaperStep(null, { map: [{ algo: 'X11', label: 'X11', coins: ['DASH'], level: 'go', edgePct: 450 }], now: Date.UTC(2026, 9, 31) });
+  assert.equal(r.pa.algos.X11.on, false); assert.deepEqual(r.events, []);
 });

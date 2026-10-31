@@ -60,6 +60,9 @@ function ago(ms){
   var h=Math.floor(m/60);return h<48?h+'h '+m%60+'min':Math.floor(h/24)+' dias';
 }
 function hhmm(ms){return new Date(ms).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}
+// Relógio do cabeçalho: hora local do aparelho e UTC.
+var TZ=(function(){try{var z=Intl.DateTimeFormat().resolvedOptions().timeZone||'';return z==='America/Sao_Paulo'?'Brasília':z.split('/').pop().replace(/_/g,' ')}catch(e){return 'local'}})();
+function tickClock(){var el=document.getElementById('clock');if(el){var n=Date.now();el.textContent='Agora: '+hhmm(n)+' ('+TZ+') · '+utcHM(n)+' UTC'}}
 function tick(){
   document.querySelectorAll('[data-next]').forEach(function(e){e.textContent=cd(+e.dataset.next)});
   document.querySelectorAll('[data-ago]').forEach(function(e){e.textContent=ago(+e.dataset.ago)});
@@ -725,7 +728,7 @@ function renderPaper(st){
     (cfg.mode!=='observe'?'<b>Parada</b>: o robô não está em Observar.':(p.on?'Agora: <b class="good">compraria</b> '+nf(p.ph,0)+' PH/s a '+(+p.priceEH).toFixed(4)+'.':'Agora: <b>pausado</b> (aluguel acima do teto ou limite do dia).'))+'</p>'+
     simResultHTML(p)+
     '<div class="kv" style="margin-top:8px"><div><small>Tempo comprando</small><span>'+nf(p.hoursOn,1)+' h</span></div><div><small>Sessões</small><span>'+p.sessions+'</span></div><div><small>Stop-loss</small><span>'+p.stops+'</span></div></div>'+
-    dayRows(p.days,[['Dia'],['Horas',function(d){return nf(d.hoursOn,1)}],['Gasto',function(d){return usd(d.spendUsd)}],['Blocos',function(d){return (d.blocks||0)+' de '+(d.draws||0)}],['Resultado',function(d){return signUsd((d.wonUsd||0)-d.spendUsd)}]])+
+    dayRows(p.days,[['Dia (UTC)'],['Horas',function(d){return nf(d.hoursOn,1)}],['Gasto',function(d){return usd(d.spendUsd)}],['Blocos',function(d){return (d.blocks||0)+' de '+(d.draws||0)}],['Resultado',function(d){return signUsd((d.wonUsd||0)-d.spendUsd)}]])+
     '<p class="note" style="margin:8px 0 0">Acerto do robô = só comprar abaixo do empate (média de longo prazo positiva) sem estourar os limites. O dinheiro de verdade depende de sorte: a simulação não inventa blocos, mostra os dois desfechos e a chance de cada um.</p>'+
     '<div class="row" style="margin-top:8px"><button class="sm pri" data-go="diary:robo">Ver operações simuladas</button><button class="sm" id="o_paper_reset">Reiniciar simulação</button></div>';
   var real=s.real,re=$('o_real');
@@ -733,11 +736,13 @@ function renderPaper(st){
   if(!re.hidden){var rr=(real.revenueUsd||0)-(real.spendUsd||0);
     re.innerHTML='<div class="row" style="justify-content:space-between"><h2 style="margin:0">Resultado real</h2><span class="chip '+(rr>=0?'ok':'bad')+'">'+(rr>=0?'+':'')+usd(rr)+'</span></div>'+
       '<div class="kv" style="margin-top:8px"><div><small>Gasto (ordens do robô)</small><span>'+usd(real.spendUsd||0)+'</span></div><div><small>Blocos</small><span>'+(real.blocks||0)+'</span></div><div><small>Recebido</small><span>'+usd(real.revenueUsd||0)+'</span></div></div>'+
-      dayRows(real.days,[['Dia'],['Gasto',function(d){return usd(d.spendUsd)}],['Blocos',function(d){return d.blocks}],['Recebido',function(d){return usd(d.revenueUsd)}]])+
+      dayRows(real.days,[['Dia (UTC)'],['Gasto',function(d){return usd(d.spendUsd)}],['Blocos',function(d){return d.blocks}],['Recebido',function(d){return usd(d.revenueUsd)}]])+
       '<p class="note" style="margin:8px 0 0">Desde '+new Date(real.since).toLocaleDateString('pt-BR')+'. Conta só ordens marcadas "robô gerencia"; o extrato da NiceHash é o registro oficial.</p>';}
 }
 /* ---------- diário do robô simulado ---------- */
-function dt2(ms){return new Date(ms).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}
+function utcHM(ms){var d=new Date(ms);return ('0'+d.getUTCHours()).slice(-2)+':'+('0'+d.getUTCMinutes()).slice(-2)}
+// Data e hora local, com a hora UTC (a do servidor) entre parênteses.
+function dt2(ms){return new Date(ms).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})+' ('+utcHM(ms)+' UTC)'}
 function signUsd(x){return (x>=0?'+':'')+usd(x)}
 var roboAll={f:false,m:false};
 function renderRobo(){
@@ -745,7 +750,7 @@ function renderRobo(){
   var st=ops.status,s=st&&st.state||{},fp=s.fundPaper,mp=s.paper;
   if(!settings.apiUrl||!st){
     $('rb_head').innerHTML='<div class="eyebrow">Robô simulado</div><div class="lead">O que o robô teria feito</div><p class="note">'+(settings.apiUrl?esc(ops.err.status||'Carregando do servidor…'):'Ele roda no servidor 24 h. Conecte o backend em Ajustes para ver.')+'</p>';
-    $('rb_fund').innerHTML='';$('rb_mine').innerHTML='';$('rb_score').innerHTML='';return;
+    $('rb_fund').innerHTML='';$('rb_mine').innerHTML='';$('rb_score').innerHTML='';$('rb_algo').innerHTML='';return;
   }
   var fs=fp&&fp.summary,runs=(mp&&mp.runs)||[],cur=mp&&mp.run;
   var mAll=runs.concat(cur?[cur]:[]),mSpend=mp?mp.spendUsd:0,mEv=mp?mp.evUsd:0,mLam=mp?mp.lambda:0; // mesmos totais da aba Operar
@@ -784,6 +789,24 @@ function renderRobo(){
   }
   mh+='<div class="row" style="margin-top:8px"><button class="sm" data-roboreset="funding">Reiniciar funding</button><button class="sm" data-roboreset="mining">Reiniciar mineração</button></div>';
   $('rb_mine').innerHTML=mh;
+  renderAlgoPaper(s.algoPaper);
+}
+var algoOpen={};
+function renderAlgoPaper(ap){
+  var h='<div class="row between"><h2 style="margin:0">Outras moedas (pool PPS)</h2>'+(ap?'<span class="note">desde '+dt2(ap.since)+'</span>':'')+'</div>'+
+    '<p class="note" style="margin:4px 0 8px">Mesmo orçamento para cada algoritmo (US$'+((ap&&ap.budgetUsdDay)||100)+'/dia de aluguel enquanto compensa). Pool PPS paga por share: sem sorte de bloco, o resultado é o esperado. Recalcula a cada 15 min.</p>';
+  if(!ap){$('rb_algo').innerHTML=h+'<p class="note">Começa no próximo cálculo do servidor (até 15 min).</p>';return}
+  var list=Object.keys(ap.algos).map(function(k){var a=ap.algos[k];a.key=k;a.res=a.revUsd-a.spendUsd;return a}).sort(function(x,y){return y.res-x.res||(y.edgeNow||-1e9)-(x.edgeNow||-1e9)});
+  var tot=list.reduce(function(s,a){return s+a.res},0),sp=list.reduce(function(s,a){return s+a.spendUsd},0);
+  h+='<div class="kv"><div><small>Gasto total</small><span>'+usd(sp)+'</span></div><div><small>Resultado total</small><span class="'+(tot>=0?'good':'bad')+'">'+signUsd(tot)+'</span></div><div><small>Comprando agora</small><span>'+list.filter(function(a){return a.on}).length+' de '+list.length+'</span></div></div>'+
+    '<div class="stack" style="gap:6px;margin-top:8px">'+list.map(function(a){
+      var st=a.on?'<span class="chip ok">comprando</span>':'<span class="chip">parado</span>';
+      var runs=(a.runs||[]).slice().reverse();
+      return '<div class="trow"><div class="row between"><span><b>'+esc(a.label)+'</b> <span class="note">'+esc((a.coins||[]).join('+'))+'</span></span>'+st+'</div>'+
+        '<div class="note">Margem agora '+(isFinite(a.edgeNow)&&a.edgeNow!==null?pct(a.edgeNow,1):'—')+' · '+nf(a.hoursOn,1)+' h comprando · gasto '+usd(a.spendUsd)+' · receita '+usd(a.revUsd)+' → <strong class="'+(a.res>=0?'good':'bad')+'">'+signUsd(a.res)+'</strong>'+(a.spendUsd>0?' ('+pct(a.res/a.spendUsd*100,1)+')':'')+'</div>'+
+        (runs.length?'<details'+(algoOpen[a.key]?' open':'')+' data-algoruns="'+esc(a.key)+'"><summary class="note">Operações ('+runs.length+')</summary>'+runs.slice(0,10).map(function(r){return '<div class="note">'+dt2(r.start)+' → '+dt2(r.end)+' · margem '+pct(r.edgePct,1)+' · '+signUsd(r.revUsd-r.spendUsd)+' · saída: '+esc(r.reason)+'</div>'}).join('')+'</details>':'')+'</div>'}).join('')+'</div>'+
+    '<div class="row" style="margin-top:8px"><button class="sm" data-roboreset="algos">Reiniciar outras moedas</button></div>';
+  $('rb_algo').innerHTML=h;
 }
 // Placar dos alertas de funding: projetado no alerta × o que de fato pagou no prazo, já com as taxas.
 function renderScore(sc){
@@ -804,8 +827,9 @@ function renderScore(sc){
 }
 document.addEventListener('click',function(e){
   var a=e.target.closest('[data-roboall]');if(a){roboAll[a.dataset.roboall]=!roboAll[a.dataset.roboall];renderRobo();return}
+  var ar=e.target.closest('[data-algoruns] summary');if(ar){var k=ar.parentNode.dataset.algoruns;setTimeout(function(){algoOpen[k]=ar.parentNode.open},0);return}
   var r=e.target.closest('[data-roboreset]');if(!r)return;
-  if(!confirm('Zerar as operações simuladas de '+(r.dataset.roboreset==='funding'?'funding':'mineração')+' e começar de agora?'))return;
+  if(!confirm('Zerar as operações simuladas de '+({funding:'funding',algos:'outras moedas'}[r.dataset.roboreset]||'mineração')+' e começar de agora?'))return;
   apiCall('POST','/paper/reset',{what:r.dataset.roboreset}).then(function(){loadOps()},function(err){alert('Erro: '+err.message)});
 });
 function renderOps(){
@@ -854,7 +878,7 @@ function renderOps(){
   if(eh.length>1){$('o_edge').innerHTML=chartSVG(eh,0,function(v){return pct(v,1)})+'<div class="tip" hidden></div>';bindChart($('o_edge'),eh,function(v){return pct(v,1)})}
   else $('o_edge').innerHTML='<p class="note">O histórico aparece depois de algumas horas de ciclos.</p>';
   var KC={acao:'ok',simulado:'warn',erro:'bad',bloco:'ok',config:''};
-  $('o_log').innerHTML=ops.log.slice(0,40).map(function(l){return '<div><span class="note" style="flex:1"><span class="chip '+(KC[l.kind]||'')+'">'+esc(l.kind)+'</span> '+esc(l.text)+'</span><span class="mono note">'+new Date(l.t).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})+'</span></div>'}).join('')||'<div class="note">Sem eventos.</div>';
+  $('o_log').innerHTML=ops.log.slice(0,40).map(function(l){return '<div><span class="note" style="flex:1"><span class="chip '+(KC[l.kind]||'')+'">'+esc(l.kind)+'</span> '+esc(l.text)+'</span><span class="mono note">'+new Date(l.t).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})+' ('+utcHM(l.t)+' UTC)'+'</span></div>'}).join('')||'<div class="note">Sem eventos.</div>';
 }
 function opsMsg(id,t,bad){$(id).textContent=t;$(id).className='note'+(bad?' bad':'')}
 function botForm(){
@@ -1618,6 +1642,7 @@ applyTheme();setMode(state.mode);fillVenueSelects();fillTagSel();
 renderCalc();renderLiq();renderFees();renderPositions();renderSessions();renderPlan();renderConn();
 state.rows=FD.demoData(Date.now());renderScan();renderHome();
 tab(TABS.indexOf(settings.tab)>=0?settings.tab:'home');
+tickClock();setInterval(tickClock,20000);
 load();loadMining();if(settings.apiUrl)loadOps();
 renderAcct();
 if(linkConnect){tab('set');opsMsg('api_msg',linkConnect.ok?'Backend conectado pelo link. Agora conecte NiceHash e Telegram logo abaixo.':linkConnect.error,!linkConnect.ok);

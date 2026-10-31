@@ -48,6 +48,10 @@ export function createMock() {
       if (tg[2] === 'sendMessage') { s.tgSent.push(JSON.parse(body || '{}')); return send(200, { ok: true, result: {} }); }
       return send(404, { ok: false, description: 'Not Found' });
     }
+    // ---- WhatToMine (WTM_URL=<mock>/wtm/asic.json): uma moeda Scrypt e uma SHA-256 ----
+    if (p === '/wtm/asic.json') return send(200, s.wtm || { coins: {
+      Litecoin: { tag: 'LTC', algorithm: 'Scrypt', block_time: '150', block_reward: 6.25, nethash: 2e15, exchange_rate: 0.0008, exchange_rate_vol: 500 },
+      BitcoinCash: { tag: 'BCH', algorithm: 'SHA-256', block_time: '600', block_reward: 3.125, nethash: 4e18, exchange_rate: 0.0037, exchange_rate_vol: 300 } } });
     // ---- cotações e BCH ----
     if (p.startsWith('/cg/')) return send(200, { bitcoin: { usd: s.btcUsd }, 'bitcoin-cash': { usd: s.bchUsd } });
     // previsto de funding da Hyperliquid: ENA com 0,1%/8 h na Bybit e 0,00125%/h na HL (≈ 98% a.a. de diferença)
