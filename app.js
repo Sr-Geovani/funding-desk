@@ -1144,8 +1144,8 @@ function renderLuck(){
   var lab=function(h){return h>=48?(h/24)+' dias':h+' h'};
   var h=head+'<div class="seg" style="margin-bottom:6px">'+L.windows.map(function(w){return '<button class="sm" data-luckw="'+w.hours+'" aria-pressed="'+(w===W)+'">'+lab(w.hours)+'</button>'}).join('')+'</div>'+
     '<p class="note" style="margin:0 0 6px">'+W.blocks+' blocos da rede (esperado '+W.expectedBlocks+'). O bloco mais "fácil" teria saído com '+nf(W.minNeedPH,0)+' PH/s.</p>'+
-    '<div class="scroll"><table style="font-size:12px"><tr><th>PH/s</th><th>Blocos seus</th><th>Custo</th><th>Receita</th><th>Lucro (com sorte)</th><th>Média (sem sorte)</th></tr>'+
-    W.rows.map(function(r){return '<tr><td>'+r.ph+'</td><td>'+r.won+'<div class="note">esperado '+nf(r.expected,2)+'</div></td><td>'+usd(r.costUsd,0)+'</td><td>'+usd(r.revUsd,0)+'</td><td>'+money(r.profitUsd,r.costUsd)+'</td><td>'+(r.expPct===null?'—':'<span class="'+(r.expPct>=0?'good':'bad')+'">'+pct(r.expPct,1)+'</span>')+'</td></tr>'}).join('')+'</table></div>';
+    '<div class="scroll"><table style="font-size:12px"><tr><th>PH/s</th><th>Blocos seus</th><th>Lucro (com sorte)</th><th>Média (sem sorte)</th></tr>'+
+    W.rows.map(function(r){return '<tr><td>'+r.ph+'</td><td>'+r.won+'<div class="note">esperado '+nf(r.expected,2)+'</div></td><td>'+'<b class="'+(r.profitUsd>=0?'good':'bad')+'">'+(r.profitUsd>=0?'+':'')+usd(r.profitUsd,0)+'</b> <span class="note">'+(r.costUsd>0?pct(r.profitUsd/r.costUsd*100,0):'')+'</span><div class="note">custo '+usd(r.costUsd,0)+'</div><div class="note">receita '+usd(r.revUsd,0)+'</div></td><td>'+(r.expPct===null?'—':'<span class="'+(r.expPct>=0?'good':'bad')+'">'+pct(r.expPct,1)+'</span>')+'</td></tr>'}).join('')+'</table></div>';
   var T=L.tests;
   if(T)h+='<div class="box" style="margin-top:8px"><b>Existe padrão? '+(T.pattern?'<span class="warn">algo fora do acaso: acompanhar</span>':'<span class="good">não: dentro do acaso</span>')+'</b>'+
     '<ul class="note" style="margin:4px 0 0;padding-left:18px">'+
@@ -1170,7 +1170,7 @@ function renderBlocksLog(){
     var head='<b class="mono">'+b.h+'</b> <span class="note">'+hhmm(b.t)+'</span> · <b>'+esc(b.pool)+'</b>'+(b.solo?' <span class="chip ok">solo</span>':'')+(b.mine?' <span class="chip ok">seu</span>':'')+(b.simWon?' <span class="chip ok">seria seu</span>':'')+
       (gap?' <span class="note">· '+gap+(b.dt>1800?' <span class="warn">(lento)</span>':'')+'</span>':'');
     var line=(b.txs?b.txs+' tx · ':'')+(b.size?nf(b.size/1000,1)+' KB · ':'')+(isFinite(b.reward)?b.reward.toFixed(4)+' BCH':'—')+(b.usd?' ('+usd(b.usd,0)+')':'')+(b.edge!==undefined&&b.edge!==null?' · margem '+pct(b.edge,1):'');
-    var det=['Hora: '+dt2(b.t),'Taxas das transações: '+b.fees.toFixed(5)+' BCH'+(b.poolFeePct!==null&&b.poolFeePct!==undefined?' · fatia do pool: '+nf(b.poolFeePct,1)+'%':''),
+    var det=['Hora: '+dt2(b.t),'Taxas das transações: '+(+b.fees||0).toFixed(5)+' BCH'+(b.poolFeePct!==null&&b.poolFeePct!==undefined?' · fatia do pool: '+nf(b.poolFeePct,1)+'%':''),
       b.netPH?'Potência da rede: '+nf(b.netPH,0)+' PH/s (dificuldade '+nf(b.D/1e9,1)+' G)':'',
       b.nhPH?'NiceHash: '+nf(b.nhPH,0)+' PH/s alugados; lance '+(b.nhBid||0).toFixed(4)+', empate '+(b.be||0).toFixed(4)+' BTC/EH/dia':'',
       b.realPH?'Suas ordens: '+nf(b.realPH,2)+' PH/s (chance de ser seu: '+pctp(b.realProb*100,2)+')':'',
