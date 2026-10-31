@@ -6,7 +6,7 @@ const FDM = require('../mining.js');
 const FDR = require('../radar.js');
 
 const outDir = process.argv[2] || '_site/data';
-const NH = 'https://api2.nicehash.com/main/api/v2/hashpower/orderBook?algorithm=';
+const NH = 'https://api2.nicehash.com/main/api/v2/hashpower/orderBook?size=1000&algorithm='; // sem size: só as 100 mais caras
 const get = async (u) => { const r = await fetch(u, { headers: { accept: 'application/json', 'user-agent': 'funding-desk/1.0' } }); if (!r.ok) throw new Error('HTTP ' + r.status + ' ' + u); return r.json(); };
 // Mantém só o necessário do livro (preço, velocidade aceita, ativa) para o arquivo ficar pequeno.
 const slim = (d) => { for (const m of Object.values(d.stats || {})) m.orders = (m.orders || []).map((o) => ({ price: o.price, acceptedSpeed: o.acceptedSpeed, alive: o.alive, type: o.type, rigsCount: o.rigsCount })); return d; };

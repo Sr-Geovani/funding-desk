@@ -167,7 +167,7 @@ function load(){
 /* ---------- mineração: coleta ---------- */
 var mineLoading=false,mineAgain=false;
 function loadBook(){
-  var direct='https://api2.nicehash.com/main/api/v2/hashpower/orderBook?algorithm=SHA256ASICBOOST';
+  var direct='https://api2.nicehash.com/main/api/v2/hashpower/orderBook?algorithm=SHA256ASICBOOST&size=1000'; // sem size a NiceHash manda só as 100 mais caras
   var pu=proxied(direct);
   var snap=function(){return fetchJSON('data/nicehash.json?'+Math.floor(Date.now()/60000)).then(function(d){return {markets:d.markets,src:'foto GitHub',at:Date.parse(d.at)}})};
   if(pu)return fetchJSON(pu).then(function(d){return {markets:FDM.parseNiceHashBook(d),src:'proxy',at:Date.now()}}).catch(snap);
@@ -1012,7 +1012,7 @@ function loadMarketMap(){
   if(marketLoading||(market.map&&Date.now()-market.at<5*60e3))return;
   marketLoading=true;
   var wtmU=proxied('https://whattomine.com/asic.json');
-  var live$=wtmU?Promise.all([fetchJSON(wtmU)].concat(FDR.ALGOS.map(function(a){return settle(fetchJSON(proxied('https://api2.nicehash.com/main/api/v2/hashpower/orderBook?algorithm='+a.nh)))}))).then(function(r){
+  var live$=wtmU?Promise.all([fetchJSON(wtmU)].concat(FDR.ALGOS.map(function(a){return settle(fetchJSON(proxied('https://api2.nicehash.com/main/api/v2/hashpower/orderBook?size=1000&algorithm='+a.nh)))}))).then(function(r){
       var books={};FDR.ALGOS.forEach(function(a,i){if(r[i+1].ok)books[a.nh]=r[i+1].v});return {wtm:r[0],books:books,at:Date.now(),src:'tempo real'}})
     :Promise.reject(new Error('sem backend'));
   live$.catch(function(){return fetchJSON('data/market.json?'+Math.floor(Date.now()/60000)).then(function(d){return {wtm:d.wtm,books:d.books||{},at:Date.parse(d.at),src:'foto GitHub'}})})

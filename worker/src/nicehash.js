@@ -93,7 +93,7 @@ export function createClient({ base, key, secret, org, algorithm = DEFAULT_ALGO,
   return {
     call, units, publicGet, algorithm,
     serverTime: async () => now() + (await serverOffset()),
-    orderBook: () => publicGet('/main/api/v2/hashpower/orderBook', 'algorithm=' + algorithm),
+    orderBook: () => publicGet('/main/api/v2/hashpower/orderBook', 'algorithm=' + algorithm + '&size=1000'), // sem size vêm só as 100 ordens mais caras
     balance: () => call('GET', '/main/api/v2/accounting/account2/BTC'),
     pools: () => call('GET', '/main/api/v2/pools', 'size=100&page=0'),
     createPool: (p) => call('POST', '/main/api/v2/pool', '', {

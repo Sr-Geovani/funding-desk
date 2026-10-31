@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
-import { authMessage, hmacHex, algoUnits } from '../worker/src/nicehash.js';
+import { authMessage, hmacHex, algoUnits, createClient } from '../worker/src/nicehash.js';
 import { paidTo, normAddr, createChain } from '../worker/src/chain.js';
 import { DEFAULT_CONFIG, sanitizeConfig, parseBook, computeMarket, decide, DOWN_STEP_MS } from '../worker/src/bot.js';
 import worker, { tick } from '../worker/src/index.js';
@@ -426,4 +426,11 @@ test('cotações: CoinGecko bloqueada cai para Kraken, depois Coinbase', async (
   await assert.rejects(c.prices(), /nenhuma fonte de cotação respondeu \(CoinGecko: HTTP 404/);
   c = createChain({ fetchFn: mk([[/coingecko/, 200, { bitcoin: { usd: 77100 }, 'bitcoin-cash': { usd: 295 } }]]) });
   assert.equal((await c.prices()).src, 'CoinGecko');
+});
+
+test('livro: pede o mercado SHA256ASICBOOST inteiro (sem size vêm só as 100 mais caras)', async () => {
+  let url = '';
+  const c = createClient({ base: 'https://api2.nicehash.com', fetchFn: async (u) => { url = String(u); return Response.json({ stats: {} }); } });
+  await c.orderBook();
+  assert.match(url, /algorithm=SHA256ASICBOOST/); assert.match(url, /size=1000/);
 });
