@@ -184,11 +184,16 @@ details.card>summary{color:var(--fg);font-size:15px}
   <div class="top"><h1>Funding Desk</h1>
     <div class="row"><span id="status" class="chip demo">carregando</span><button class="icon" id="theme" aria-label="Tema">auto</button></div></div>
   <div class="note mono" id="clock" style="margin-top:4px;font-size:12px"></div>
+  <button id="aibar" data-go="home" data-focus="#h_ai" style="all:unset;display:none;cursor:pointer;margin-top:6px;width:100%;box-sizing:border-box">
+    <div class="row between" style="font-size:12px"><span id="aibar_t"></span><span class="note mono" id="aibar_r"></span></div>
+    <div style="height:6px;border-radius:3px;background:var(--line);overflow:hidden;margin-top:3px"><div id="aibar_p" style="height:100%;width:0;background:var(--accent)"></div></div>
+  </button>
 </header>
 <main>
 
   <!-- INÍCIO -->
   <section id="tab-home" class="stack">
+    <div class="card" id="h_ai" hidden></div>
     <div class="card sig neutro" id="h_link" hidden><div class="eyebrow">Conexão</div><div class="lead">Conectar este aparelho ao backend</div>
       <p class="note" id="h_link_txt" style="margin:6px 0 10px"></p>
       <div class="row"><button class="pri" id="h_paste">Colar link de conexão</button><button data-go="set" data-focus="#api_url">Abrir Ajustes</button></div>
@@ -465,6 +470,7 @@ details.card>summary{color:var(--fg);font-size:15px}
     </div>
     <div id="mine-net" class="stack" hidden>
       <div class="card"><h2>Rede Bitcoin Cash <span class="tag">dado real</span></h2><div class="kv" id="n_kv"></div></div>
+      <div class="card" id="bl_next"></div>
       <div class="card" id="bl_card"><div class="row between"><h2 style="margin:0">Blocos</h2><span class="note" id="bl_src"></span></div>
         <p class="note" id="bl_msg" style="margin:6px 0 8px">Carregando…</p>
         <div id="bl_list"></div><div class="scroll" id="bl_fallback"><table id="n_blocks"></table></div>

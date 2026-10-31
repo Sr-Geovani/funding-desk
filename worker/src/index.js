@@ -16,6 +16,7 @@ import { FUND_MODEL } from './fundmodel.js';
 import { updateHistory, pickCoins, scorePairs, stablePairs, pairStatsOf } from './fundai.js';
 import { blockRecord, blockSummary, poolOf } from './blocks.js';
 import { darrOf, retargetOf, momentumOf, windowMeter, weekAdd } from './signals.js';
+import { brainStep, analysis, levelOf, TYPES } from './brain.js';
 import FDI from '../../insights.js';
 import { withCreds, reloadCreds, saveCreds, credStatus, parseNiceHash, TG_TOKEN_RE, chatFromUpdates } from './creds.js';
 
@@ -106,7 +107,7 @@ export async function tick(env, opts = {}) {
   const hlUrl = env.HL_URL || 'https://api.hyperliquid.xyz/info';
   const predicted = fetchFn(hlUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ type: 'predictedFundings' }) })
     .then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
-  const [info, prices, bookR, unitsR, predR] = await Promise.all([chain.info(), chain.prices(), nh.orderBook(), nh.units(), predicted].map(settle));
+  const [info, prices, bookR, unitsR, predR, mpR] = await Promise.all([chain.info(), chain.prices(), nh.orderBook(), nh.units(), predicted, chain.mempool()].map(settle));
   if (!info.ok) errors.push('rede BCH: ' + info.e);
   if (!prices.ok) errors.push('cotações: ' + prices.e);
   if (!bookR.ok) errors.push('livro NiceHash: ' + bookR.e);
@@ -305,8 +306,19 @@ export async function tick(env, opts = {}) {
   }).filter(Boolean);
   const alertScore = alertScoreStep(state.alertScore, { rows: funding && funding.rows, entries, now, fees: FD.DEFAULT_FEES, holdDays: cfg.alertHold || 3 });
 
+  // Copiloto IA: analisa tudo e registra previsões conferíveis (XP e maturidade).
+  const snap = { now, edge: mkt.ok ? mkt.edgeAtBidPct : NaN, green: !!(mkt.ok && mkt.green), minEdge: cfg.minEdgePct, darr: darr ? darr.v : NaN,
+    D: info.ok ? info.v.difficulty : null, mom: msig.mom, ret: retargetOf(msig.adj, darr ? darr.v : NaN), win: windowMeter(recentBlocks, now),
+    fund: ((funding && funding.best) || []).map((b) => ({ key: b.key, coin: b.coin, netUsd: b.netUsd })), rows: funding ? funding.rows : null, stable24,
+    algos: algoPaper ? Object.entries(algoPaper.algos).map(([k, a]) => ({ k, label: a.label, edge: a.edgeNow, level: a.level })) : [],
+    scoreDone: (alertScore && alertScore.done) || [] };
+  const br = brainStep(state.ai, snap);
+  for (const ev of br.events.slice(0, 6)) log.push({ t: now, kind: 'ia', text: ev });
+  const aiAnalysis = analysis(snap, br.ai);
+  const mempool = mpR.ok ? Object.assign({ at: now }, mpR.v) : state.mempool || null;
+
   const next = Object.assign({}, dec.state, alertState, {
-    lastTick: now, stable24, pairStats, msig, darr, recentBlocks, nhWeek, paper, paperBurst, blockBuf, blockFlush, lastBlockT, real, fundPaper, alertScore, algoPaper, algoTs, aiScores, fundPaperAI, fhistHour, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig,
+    lastTick: now, ai: br.ai, aiAnalysis, mempool, stable24, pairStats, msig, darr, recentBlocks, nhWeek, paper, paperBurst, blockBuf, blockFlush, lastBlockT, real, fundPaper, alertScore, algoPaper, algoTs, aiScores, fundPaperAI, fhistHour, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig,
     market: mkt.ok ? { breakEvenEH: mkt.breakEvenEH, capEH: mkt.capEH, fillEH: mkt.fillEH, medianEH: mkt.medianEH, bidEH: mkt.bidEH,
       edgeAtBidPct: mkt.edgeAtBidPct, green: mkt.green, D: mkt.D, bchUsd: mkt.bchUsd, btcUsd: mkt.btcUsd, costPerBlockUsd: mkt.costPerBlockUsd,
       hashpriceNet: mkt.hashpriceNet, blockNetUsd: mkt.blockNetUsd, phDaysPerBlock: mkt.phDaysPerBlock, market: mkt.market } : { ok: false, reason: mkt.reason },
@@ -421,6 +433,8 @@ async function api(req, env, url, fetchFn) {
         algoPaper: state.algoPaper || null,
         fundPaperAI: state.fundPaperAI ? { summary: fundPaperSummary(state.fundPaperAI), open: state.fundPaperAI.open, closed: state.fundPaperAI.closed.slice(-100).reverse() } : null,
         aiScores: state.aiScores || {}, stable24: Object.keys(state.stable24 || {}), pairStats: state.pairStats || {},
+        ai: state.ai ? Object.assign({ xp: state.ai.xp, since: state.ai.since, stats: state.ai.stats, open: state.ai.open.slice(-30).reverse(), done: state.ai.done.slice(-60).reverse() }, levelOf(state.ai)) : null,
+        aiTypes: TYPES, aiAnalysis: state.aiAnalysis || null, mempool: state.mempool || null, lastBlockT: state.lastBlockT || null,
         darr: state.darr || null, retarget: state.msig && state.darr ? retargetOf(state.msig.adj, state.darr.v) : null, momentum: state.msig ? state.msig.mom : null,
         window: windowMeter(state.recentBlocks || [], Date.now()), nhWeek: state.nhWeek || null,
         model: FUND_MODEL ? { threshold: FUND_MODEL.threshold, report: FUND_MODEL.report } : null,

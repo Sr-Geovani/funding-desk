@@ -64,6 +64,7 @@ export function createMock() {
       ['ENA', [['BybitPerp', { fundingRate: '0.001', nextFundingTime: Date.now() + 3600e3, fundingIntervalHours: 8 }], ['HlPerp', { fundingRate: '0.0000125', nextFundingTime: Date.now() + 600e3, fundingIntervalHours: 1 }]]],
       ['BTC', [['BinPerp', { fundingRate: '0.0001', nextFundingTime: Date.now() + 3600e3, fundingIntervalHours: 8 }], ['HlPerp', { fundingRate: '0.0000125', nextFundingTime: Date.now() + 600e3, fundingIntervalHours: 1 }]]]
     ]);
+    if (p === '/bch/blockchain/getMempoolInfo') return send(200, { size: 57, bytes: 30891 });
     if (p === '/bch/blockchain/getBlockchainInfo') return send(200, { blocks: s.height, difficulty: s.difficulty });
     let m = /^\/bch\/block\/detailsByHeight\/(\d+)$/.exec(p);
     if (m) return send(200, { height: +m[1], hash: (s.hashes && s.hashes[m[1]]) || crypto.createHash('sha256').update('bloco' + m[1]).digest('hex'), time: Math.floor(Date.now() / 1000), difficulty: s.difficulty, size: 20000 + (+m[1] % 1000), nTx: 40, tx: ['cb' + m[1]] });

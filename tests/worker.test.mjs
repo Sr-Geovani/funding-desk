@@ -844,3 +844,43 @@ test('integração: DARR, reajuste do BTC, BCH/BTC contra a média e medidor no 
     assert.ok(st.edgeHist.length && st.edgeHist[0].length >= 4);
   } finally { t.server.close(); }
 });
+
+/* ---------- copiloto IA: previsões conferíveis, XP e maturidade ---------- */
+import { brainStep, analysis, levelOf, reliability } from '../worker/src/brain.js';
+test('IA: cria previsões dos sinais, confere no prazo e ganha XP', () => {
+  const T0 = Date.UTC(2026, 9, 31, 12), H = 36e5;
+  const base = { now: T0, edge: 1.5, green: false, minEdge: 3, darr: 1.05, D: 5e11, mom: { vsEmaPct: 3 }, ret: null, win: { last6h: 30, bigShare6h: 0.5, bigShare24h: 0.5 }, fund: [], rows: {}, stable24: {}, algos: [{ k: 'SCRYPT', label: 'Scrypt', edge: 8, level: 'go' }], scoreDone: [] };
+  let r = brainStep(null, base);
+  assert.deepEqual(r.ai.open.map((o) => o.type).sort(), ['algo_go', 'mine_wait']);
+  assert.match(r.events[0], /IA prevê/);
+  // margem passa do mínimo antes de 6 h → acerto; Scrypt segue positivo em 6 h → acerto
+  r = brainStep(r.ai, Object.assign({}, base, { now: T0 + 2 * H, edge: 3.5, green: true }));
+  r = brainStep(r.ai, Object.assign({}, base, { now: T0 + 6 * H + 1, edge: 1, green: false }));
+  const done = r.ai.done.filter((d) => d.hit !== null);
+  assert.ok(done.some((d) => d.type === 'mine_wait' && d.hit) && done.some((d) => d.type === 'algo_go' && d.hit), JSON.stringify(done));
+  assert.ok(r.ai.xp > 0);
+  // a compra feita às 2 h (mine_buy) é conferida 1 h depois: margem 1% ≥ 0 → acerto
+  assert.ok(r.ai.done.some((d) => d.type === 'mine_buy' && d.hit));
+  const L = levelOf(r.ai); assert.equal(L.level.name, 'Aprendiz'); assert.ok(L.progress > 0 && L.progress < 1);
+  const a = analysis(Object.assign({}, base, { green: true, edge: 4 }), r.ai);
+  assert.match(a.lines[0], /janela aberta/); assert.ok(a.recs.some((x) => x.area === 'outras'));
+  // confiança aprende com o histórico do tipo
+  const ai = { stats: { mine_avoid: { n: 30, hits: 27 } } };
+  assert.ok(reliability(ai, 'mine_avoid').trusted && reliability(ai, 'mine_avoid').conf > 0.75);
+});
+
+test('IA: nível sobe com previsões conferidas e acerto', () => {
+  assert.equal(levelOf({ stats: { a: { n: 35, hits: 10 } } }).level.name, 'Analista');
+  assert.equal(levelOf({ stats: { a: { n: 120, hits: 50 } } }).level.name, 'Analista', 'acerto abaixo de 55% não vira Estrategista');
+  assert.equal(levelOf({ stats: { a: { n: 120, hits: 70 } } }).level.name, 'Estrategista');
+});
+
+test('integração: copiloto IA e mempool aparecem no status', async () => {
+  const t = await setup();
+  try {
+    await t.call('POST', '/api/tick');
+    const st = (await t.call('GET', '/api/status')).body.state;
+    assert.ok(st.ai && st.ai.level.name === 'Aprendiz'); assert.ok(st.aiAnalysis.lines.length >= 2);
+    assert.deepEqual([st.mempool.tx, st.mempool.bytes], [57, 30891]); assert.ok(st.aiTypes.mine_wait);
+  } finally { t.server.close(); }
+});

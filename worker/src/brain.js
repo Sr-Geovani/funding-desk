@@ -1,0 +1,126 @@
+// Copiloto IA: junta todos os sinais (mineração, funding, outras moedas) numa análise e transforma cada sinal numa
+// PREVISÃO conferível ("a janela abre em até 6 h", "esse pico some em 24 h"...). Quando o prazo vence, o servidor confere
+// com os dados reais: acerto dá XP. A confiança de cada tipo de previsão aprende com o próprio histórico de acertos,
+// e a maturidade (nível) sobe com o número de previsões conferidas e a taxa de acerto. Ninguém precisa executar a dica.
+export const LEVELS = [
+  { n: 1, name: 'Aprendiz', min: 0, hit: 0 }, { n: 2, name: 'Analista', min: 30, hit: 0 },
+  { n: 3, name: 'Estrategista', min: 100, hit: 0.55 }, { n: 4, name: 'Mestre', min: 300, hit: 0.6 }
+];
+export const TYPES = {
+  mine_buy: { label: 'Compra de hash (BCH) segue boa por 1 h', h: 1, cool: 3, base: 0.6 },
+  mine_wait: { label: 'Janela do BCH abre em até 6 h', h: 6, cool: 6, base: 0.4 },
+  mine_close: { label: 'Dificuldade do BCH sobe em 3 h (hash chegando)', h: 3, cool: 6, base: 0.55 },
+  mine_avoid: { label: 'Alugar não compensa nas próximas 12 h', h: 12, cool: 12, base: 0.7 },
+  btc_retarget: { label: 'DARR depois do reajuste do BTC', h: null, cool: 24 * 12, base: 0.6 },
+  fund_go: { label: 'Entrada de funding paga as taxas em 3 dias', h: 72, cool: 24, base: 0.4 },
+  fund_spike: { label: 'Pico de funding some em 24 h', h: 24, cool: 24, base: 0.7 },
+  algo_go: { label: 'Outra moeda segue compensando por 6 h', h: 6, cool: 12, base: 0.5 }
+};
+const H = 3600e3;
+
+export function levelOf(ai) {
+  const st = Object.values(ai.stats || {}), n = st.reduce((a, s) => a + s.n, 0), hits = st.reduce((a, s) => a + s.hits, 0);
+  const rate = n ? hits / n : 0;
+  let cur = LEVELS[0];
+  for (const L of LEVELS) if (n >= L.min && rate >= L.hit) cur = L;
+  const next = LEVELS.find((L) => L.n === cur.n + 1) || null;
+  const progress = next ? Math.min(1, n / next.min) * (next.hit ? Math.min(1, rate / next.hit) : 1) : 1;
+  return { level: cur, next, resolved: n, hits, rate, progress };
+}
+export function reliability(ai, type) {
+  const s = (ai.stats || {})[type] || { n: 0, hits: 0 };
+  const rel = (s.hits + 1) / (s.n + 2), base = TYPES[type].base;
+  return { n: s.n, rel, conf: s.n >= 5 ? (base + rel) / 2 : base, trusted: s.n >= 20 && rel >= 0.6 };
+}
+const spreadOf = (rows, key) => { const [c, s, l] = key.split('|'), r = rows && rows[c]; return r && r[s] && r[l] ? r[s].apr - r[l].apr : null; };
+
+// snap: { now, edge, green, minEdge, darr, D, mom, ret, win, fund:[{key,coin,netUsd}], rows, stable24, algos:[{k,label,edge,level}], scoreDone:[...] }
+export function brainStep(prev, snap) {
+  const ai = prev && prev.since ? JSON.parse(JSON.stringify(prev)) : { since: snap.now, xp: 0, open: [], done: [], stats: {}, last: {} };
+  const events = [], now = snap.now;
+  // 1) conferir previsões abertas
+  const still = [];
+  for (const o of ai.open) {
+    if (o.type === 'mine_wait' || o.type === 'mine_avoid') o.maxEdge = Math.max(o.maxEdge === undefined ? -1e9 : o.maxEdge, isFinite(snap.edge) ? snap.edge : -1e9);
+    if (now < o.due) { still.push(o); continue; }
+    let hit = null, value = null;
+    if (o.type === 'mine_buy') { if (isFinite(snap.edge)) { hit = snap.edge >= 0; value = snap.edge; } }
+    else if (o.type === 'mine_wait') { hit = o.maxEdge >= o.minEdge; value = o.maxEdge; }
+    else if (o.type === 'mine_avoid') { hit = o.maxEdge < o.minEdge; value = o.maxEdge; }
+    else if (o.type === 'mine_close') { if (snap.D) { hit = snap.D > o.D0 * 1.005; value = (snap.D / o.D0 - 1) * 100; } }
+    else if (o.type === 'btc_retarget') { if (isFinite(snap.darr)) { hit = Math.abs(snap.darr / o.pred - 1) <= 0.03; value = snap.darr; } }
+    else if (o.type === 'algo_go') { const a = (snap.algos || []).find((x) => x.k === o.key); if (a && isFinite(a.edge)) { hit = a.edge > 0; value = a.edge; } }
+    else if (o.type === 'fund_spike') { const sp = spreadOf(snap.rows, o.key); if (sp !== null) { hit = sp < o.s0 / 2; value = sp; } }
+    else if (o.type === 'fund_go') {
+      const d = (snap.scoreDone || []).find((x) => x.key === o.key && Math.abs(x.t - o.t) <= 6 * H);
+      if (d) { hit = d.hit; value = d.netUsd; } else if (now < o.due + 12 * H) { still.push(o); continue; }
+    }
+    const r = Object.assign({}, o, { hit, value, resolvedAt: now });
+    if (hit !== null) {
+      const s = ai.stats[o.type] || (ai.stats[o.type] = { n: 0, hits: 0 });
+      s.n++; if (hit) s.hits++;
+      r.xp = hit ? Math.round(10 * o.conf) + (o.trusted ? 5 : 0) : 1;
+      ai.xp += r.xp;
+      events.push(`IA ${hit ? 'acertou' : 'errou'}: ${o.text} (+${r.xp} XP)`);
+    }
+    ai.done.push(r);
+  }
+  ai.open = still; ai.done = ai.done.slice(-200);
+
+  // 2) novas previsões a partir dos sinais de agora
+  const add = (type, key, text, extra) => {
+    const k = type + '|' + key;
+    if (ai.last[k] && now - ai.last[k] < TYPES[type].cool * H) return;
+    if (ai.open.some((o) => o.type === type && o.key === key)) return;
+    const rel = reliability(ai, type);
+    ai.last[k] = now;
+    ai.open.push(Object.assign({ type, key, text, t: now, due: now + (TYPES[type].h || 24) * H, conf: +rel.conf.toFixed(2), trusted: rel.trusted }, extra));
+    events.push(`IA prevê: ${text}`);
+  };
+  const e = snap.edge, mom = snap.mom ? snap.mom.vsEmaPct : 0;
+  if (snap.green) add('mine_buy', 'bch', `comprar hash para o BCH agora (margem ${f(e, 1)}%) continua no positivo daqui a 1 h`);
+  else if (isFinite(e) && (snap.darr >= 1 || mom >= 2) && e > snap.minEdge - 3) add('mine_wait', 'bch', `a margem do BCH passa de ${snap.minEdge}% em até 6 h (agora ${f(e, 1)}%, DARR ${f((snap.darr || 0), 3)})`, { minEdge: snap.minEdge, maxEdge: e });
+  if (isFinite(snap.darr) && snap.darr < 0.97 && mom <= 0 && !snap.green) add('mine_avoid', 'bch', `alugar para o BCH não compensa nas próximas 12 h (DARR ${f(snap.darr, 3)})`, { minEdge: snap.minEdge, maxEdge: e });
+  const w = snap.win;
+  if (w && snap.D && (w.last6h >= 42 || (w.bigShare6h !== null && w.bigShare24h !== null && w.bigShare6h - w.bigShare24h >= 0.1 && w.last6h >= 30)))
+    add('mine_close', 'bch', `a dificuldade do BCH sobe mais de 0,5% em 3 h (${w.last6h} blocos em 6 h; pools grandes chegando)`, { D0: snap.D });
+  const R = snap.ret;
+  if (R && R.at && R.remainingBlocks <= 288 && isFinite(R.darrAfter))
+    add('btc_retarget', String(Math.round(R.at / 864e5)), `depois do reajuste do BTC (${pctTxt(R.changePct)}), o DARR fica em ~${f(R.darrAfter, 3)} (±3%)`, { pred: R.darrAfter, due: R.at + 2 * H });
+  for (const f of (snap.fund || []).slice(0, 3)) add('fund_go', f.key, `${f.coin} (${f.key.split('|').slice(1).join(' × ')}) paga as taxas em 3 dias`, {});
+  const spikes = [];
+  for (const [c, r] of Object.entries(snap.rows || {})) {
+    const v = Object.entries(r).filter(([, x]) => isFinite(x.apr)).sort((a, b) => b[1].apr - a[1].apr);
+    if (v.length < 2) continue;
+    const key = c + '|' + v[0][0] + '|' + v[v.length - 1][0], sp = v[0][1].apr - v[v.length - 1][1].apr;
+    if (sp >= 60 && !(snap.stable24 || {})[key]) spikes.push([key, sp]);
+  }
+  for (const [key, sp] of spikes.sort((a, b) => b[1] - a[1]).slice(0, 2)) add('fund_spike', key, `o pico de ${key.split('|')[0]} (${f(sp, 0)}% a.a. entre ${key.split('|').slice(1).join(' e ')}) cai pela metade em 24 h`, { s0: sp });
+  for (const a of (snap.algos || []).filter((x) => x.level === 'go' && isFinite(x.edge))) add('algo_go', a.k, `${a.label} segue com margem positiva daqui a 6 h (agora ${f(a.edge, 1)}%)`, {});
+  for (const k of Object.keys(ai.last)) if (now - ai.last[k] > 30 * 24 * H) delete ai.last[k];
+  return { ai, events };
+}
+function pctTxt(x) { return (x >= 0 ? '+' : '') + f(x, 1) + '%'; }
+function f(x, d) { return Number(x).toFixed(d).replace('.', ','); } // número em pt-BR
+
+// Análise em texto: o que está acontecendo agora e o que fazer, juntando tudo.
+export function analysis(snap, ai) {
+  const L = levelOf(ai), out = [], recs = [];
+  const e = snap.edge, d = snap.darr;
+  if (isFinite(e)) {
+    out.push(snap.green
+      ? `Mineração BCH: janela aberta. Margem de ${f(e, 1)}% no lance (DARR ${d ? f(d, 3) : '—'}). O robô compraria agora.`
+      : `Mineração BCH: o robô está pausado. Margem de ${f(e, 1)}% no lance, abaixo do seu mínimo de ${snap.minEdge}%${d ? ` (DARR ${f(d, 3)})` : ''}.`);
+    if (snap.green) recs.push({ area: 'mineracao', text: 'Janela aberta: com o robô em Ativo, ele compraria agora e pararia no bloco.', type: 'mine_buy' });
+  }
+  if (snap.mom && snap.mom.vsEmaPct >= 2) out.push(`BCH subiu ${f(snap.mom.vsEmaPct, 1)}% acima da média de 2 dias contra o BTC: a dificuldade ainda não reagiu, o que costuma melhorar a margem nas próximas horas.`);
+  if (snap.ret && isFinite(snap.ret.darrAfter)) out.push(`Reajuste do BTC em ${snap.ret.remainingBlocks} blocos (${pctTxt(snap.ret.changePct)}): o DARR deve ir para ~${f(snap.ret.darrAfter, 3)}.`);
+  if (snap.win && snap.win.last6h >= 42) out.push(`Hash grande chegando ao BCH (${snap.win.last6h} blocos em 6 h): a janela tende a fechar em horas.`);
+  const nf = (snap.fund || []).length;
+  out.push(nf ? `Funding: ${nf} oportunidade${nf > 1 ? 's' : ''} passa${nf > 1 ? 'm' : ''} na regra validada (24 h estável, ordem limite).` : 'Funding: nenhuma oportunidade passa na regra validada agora (24 h estável + ordem limite + meia-vida).');
+  for (const fo of (snap.fund || []).slice(0, 2)) recs.push({ area: 'funding', text: `${fo.coin}: short ${fo.key.split('|')[1]}, long ${fo.key.split('|')[2]} com ordem limite (~US$${f((fo.netUsd || 0), 2)} projetado em 3 dias).`, type: 'fund_go' });
+  const ag = (snap.algos || []).filter((x) => x.level === 'go');
+  if (ag.length) { out.push(`Outras moedas: ${ag.map((a) => a.label + ' ' + f(a.edge, 1) + '%').join(', ')} compensam em pool PPS (ordem manual).`); for (const a of ag.slice(0, 2)) recs.push({ area: 'outras', text: `${a.label}: ordem manual na NiceHash para pool PPS enquanto a margem ficar positiva.`, type: 'algo_go' }); }
+  for (const r of recs) { const rel = reliability(ai, r.type); r.conf = rel.conf; r.trusted = rel.trusted; r.n = rel.n; }
+  return { level: L, lines: out, recs };
+}

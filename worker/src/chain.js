@@ -43,6 +43,7 @@ export function createChain({ base = DEFAULT_BCH_REST, priceUrl = DEFAULT_PRICE_
       const d = await get(base + '/blockchain/getBlockchainInfo');
       return { height: d.blocks, difficulty: d.difficulty };
     },
+    mempool: async () => { const d = await get(base + '/blockchain/getMempoolInfo'); return { tx: d.size, bytes: d.bytes }; },
     // Quem recebeu a recompensa do bloco: saídas da transação coinbase.
     coinbase: async (height) => {
       const b = await get(base + '/block/detailsByHeight/' + height);

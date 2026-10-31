@@ -64,7 +64,7 @@ function ago(ms){
 function hhmm(ms){return new Date(ms).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}
 // Relógio do cabeçalho: hora local do aparelho e UTC.
 var TZ=(function(){try{var z=Intl.DateTimeFormat().resolvedOptions().timeZone||'';return z==='America/Sao_Paulo'?'Brasília':z.split('/').pop().replace(/_/g,' ')}catch(e){return 'local'}})();
-function tickClock(){var el=document.getElementById('clock');if(el){var n=Date.now();el.textContent='Agora: '+hhmm(n)+' ('+TZ+') · '+utcHM(n)+' UTC'}}
+function tickClock(){var el=document.getElementById('clock');if(el){var n=Date.now();el.textContent='Agora: '+hhmm(n)+' ('+TZ+') · '+utcHM(n)+' UTC'}if(typeof renderNext==='function'&&document.getElementById('mine-net')&&!document.getElementById('mine-net').hidden)renderNext()}
 function tick(){
   document.querySelectorAll('[data-next]').forEach(function(e){e.textContent=cd(+e.dataset.next)});
   document.querySelectorAll('[data-ago]').forEach(function(e){e.textContent=ago(+e.dataset.ago)});
@@ -683,7 +683,7 @@ function loadOps(){
     if(r[2].ok)ops.bal=r[2].v;else ops.err.bal=r[2].e.message;
     if(r[3].ok)ops.pools=r[3].v.list||[];else ops.err.pools=r[3].e.message;
     if(r[4].ok)ops.log=r[4].v.log||[];
-    renderOps();renderHome();renderMine();renderAcct();renderRadar();renderRobo();renderWindow();renderHeat();
+    renderOps();renderHome();renderMine();renderAcct();renderRadar();renderRobo();renderWindow();renderHeat();renderAI();renderNext();
   });
 }
 setInterval(function(){if(document.visibilityState==='visible'&&!$('mine-ops').hidden&&!$('tab-mine').hidden)loadOps()},30000);
@@ -873,6 +873,40 @@ document.addEventListener('click',function(e){
   if(!confirm('Zerar as operações simuladas de '+({funding:'funding',algos:'outras moedas'}[r.dataset.roboreset]||'mineração')+' e começar de agora?'))return;
   apiCall('POST','/paper/reset',{what:r.dataset.roboreset}).then(function(){loadOps()},function(err){alert('Erro: '+err.message)});
 });
+/* ---------- copiloto IA: análise, previsões conferíveis, XP e maturidade ---------- */
+function renderAI(){
+  var st=ops.status&&ops.status.state,A=st&&st.ai,an=st&&st.aiAnalysis,T=(st&&st.aiTypes)||{};
+  var bar=$('aibar'),card=$('h_ai');
+  if(!A){bar.style.display='none';card.hidden=true;return}
+  bar.style.display='block';card.hidden=false;
+  var nx=A.next;
+  $('aibar_t').innerHTML='<b>IA copiloto</b> · Nível '+A.level.n+' '+esc(A.level.name)+' · '+A.xp+' XP';
+  $('aibar_r').textContent=A.resolved?('acerto '+pctp(A.rate*100,0)+' ('+A.hits+'/'+A.resolved+')'):'aprendendo';
+  $('aibar_p').style.width=Math.round((A.progress||0)*100)+'%';
+  var conf=function(r){return r.trusted?'<span class="chip ok">confiável · '+r.n+' conferidas</span>':'<span class="chip">em teste · '+(r.n||0)+' conferidas</span>'};
+  var dueTxt=function(o){var ms=o.due-Date.now();return ms>0?'confere em '+FDI.dur(ms):'conferindo'};
+  var h='<div class="row between"><div class="eyebrow">Copiloto IA</div><span class="chip">Nível '+A.level.n+' · '+esc(A.level.name)+'</span></div>'+
+    '<div class="lead">O que está acontecendo agora</div>'+(an?'<ul class="note" style="margin:6px 0 0;padding-left:18px">'+an.lines.map(function(l){return '<li>'+esc(l)+'</li>'}).join('')+'</ul>':'');
+  if(an&&an.recs.length)h+='<div class="eyebrow" style="margin:12px 0 6px">Sugestões</div><div class="stack" style="gap:6px">'+an.recs.map(function(r){return '<div class="box" style="margin:0">'+esc(r.text)+' '+conf(r)+'</div>'}).join('')+'</div>';
+  h+='<div class="eyebrow" style="margin:12px 0 6px">Previsões em aberto ('+A.open.length+')</div>'+(A.open.length?'<div class="stack" style="gap:4px">'+A.open.slice(0,8).map(function(o){return '<div class="trow"><div class="note">'+esc(o.text)+'</div><div class="note">'+dueTxt(o)+' · confiança '+pctp(o.conf*100,0)+(o.trusted?' · confiável':'')+'</div></div>'}).join('')+'</div>':'<p class="note" style="margin:0">Nenhuma agora: ela prevê quando algum sinal aparece.</p>');
+  var dn=A.done.filter(function(d){return d.hit!==null&&d.hit!==undefined});
+  h+='<div class="eyebrow" style="margin:12px 0 6px">Conferidas</div>'+(dn.length?'<div class="stack" style="gap:4px">'+dn.slice(0,8).map(function(d){return '<div class="trow"><div class="note">'+(d.hit?'<span class="chip ok">acertou +'+d.xp+' XP</span>':'<span class="chip bad">errou +1 XP</span>')+' '+esc(d.text)+'</div><div class="note">'+dt2(d.resolvedAt)+'</div></div>'}).join('')+'</div>':'<p class="note" style="margin:0">As primeiras são conferidas em 1 a 6 h; as de funding, em 3 dias.</p>');
+  var ks=Object.keys(T);
+  h+='<details style="margin-top:10px"><summary>O que ela aprendeu por tipo de previsão</summary><div class="scroll"><table><tr><th>Previsão</th><th>Conferidas</th><th>Acerto</th></tr>'+ks.map(function(k){var s=(A.stats||{})[k]||{n:0,hits:0};return '<tr><td>'+esc(T[k].label)+'</td><td>'+s.n+'</td><td>'+(s.n?pctp(s.hits/s.n*100,0):'—')+'</td></tr>'}).join('')+'</table></div></details>'+
+    '<details style="margin-top:6px"><summary>Como a IA aprende e ganha XP</summary><p class="note" style="margin:6px 0 0">A cada 3 min o servidor junta todos os sinais (DARR, margem, reajuste do BTC, BCH contra o BTC, blocos chegando, funding com 24 h estável e meia-vida, outras moedas) e transforma cada sinal numa previsão com prazo. Quando o prazo vence, ele confere com os dados reais: acerto vale até 15 XP (mais confiança, mais XP); erro vale 1. Não precisa que você execute: conta se a dica era boa. A confiança de cada tipo de previsão vem do histórico de acertos dele; tipos com 20+ conferidas e 60%+ de acerto viram "confiáveis" e as sugestões deles ficam mais assertivas. Níveis: Aprendiz → Analista (30 conferidas) → Estrategista (100, acerto ≥ 55%) → Mestre (300, acerto ≥ 60%).'+(nx?' Próximo nível: '+esc(nx.name)+' ('+A.resolved+' de '+nx.min+' conferidas'+(nx.hit?', acerto ≥ '+pctp(nx.hit*100,0):'')+').':'')+'</p></details>';
+  card.innerHTML=h;
+}
+// Próximo bloco: tempo desde o último, média, mempool, dificuldade exata do próximo (ASERT). Sem "previsão de quando sai".
+function renderNext(){
+  var el=$('bl_next');if(!el)return;
+  var st=ops.status&&ops.status.state;if(!st||!st.lastBlockT){el.innerHTML='<h2>Próximo bloco</h2><p class="note">'+(settings.apiUrl?'Aguardando o servidor ver o próximo bloco.':'Precisa do backend conectado.')+'</p>';return}
+  var el2=Date.now()-st.lastBlockT,mp=st.mempool,D=(st.market||{}).D,avg=blk.sum&&blk.sum.dt?blk.sum.dt*1000:600e3;
+  var dNext=D?D*Math.pow(2,(600-el2/1000)/172800):null;
+  el.innerHTML='<div class="row between"><h2 style="margin:0">Próximo bloco</h2><span class="chip'+(el2>1800e3?' warn':'')+'">#'+((st.lastHeight||0)+1)+'</span></div>'+
+    '<div class="kv" style="margin-top:8px"><div><small>Desde o último</small><span>'+(el2<60e3?'<1 min':FDI.dur(el2))+'</span></div><div><small>Média recente</small><span>'+FDI.dur(avg)+'</span></div><div><small>Pendentes</small><span>'+(mp?mp.tx+' tx · '+nf(mp.bytes/1000,1)+' KB':'—')+'</span></div>'+
+    '<div><small>Dificuldade do próximo</small><span>'+(dNext?nf(dNext/1e9,2)+' G':'—')+'</span></div><div><small>Hash da rede</small><span>'+(D?nf(D*4294967296/600/1e18,2)+' EH/s':'—')+'</span></div><div><small>Blocos solo (registro)</small><span>'+(blk.sum&&blk.sum.n?Math.round(blk.sum.solo.n/blk.sum.n*100)+'%':'—')+'</span></div></div>'+
+    '<p class="note" style="margin:8px 0 0">"Atrasado" não existe: o próximo bloco não fica mais provável com o tempo (sorteio sem memória). O que muda é a dificuldade: no BCH ela cai devagar quando os blocos atrasam (−0,48% depois de 30 min).</p>';
+}
 /* ---------- janela do BCH: DARR e sinais além da sorte (docs/pesquisa-mineracao.md) ---------- */
 function renderWindow(){
   var el=$('m_window');if(!el)return;
@@ -931,7 +965,7 @@ function renderBlocksLog(){
       b.nhPH?'NiceHash: '+nf(b.nhPH,0)+' PH/s alugados; lance '+(b.nhBid||0).toFixed(4)+', empate '+(b.be||0).toFixed(4)+' BTC/EH/dia':'',
       b.realPH?'Suas ordens: '+nf(b.realPH,2)+' PH/s (chance de ser seu: '+pctp(b.realProb*100,2)+')':'',
       b.simPH?'Simulação: '+nf(b.simPH,0)+' PH/s, chance '+pctp(b.simProb*100,2)+', '+(b.simWon?'seria seu':'não saiu'):'',
-      'Assinatura: '+esc(b.tag||'—'),b.backfill?'Buscado depois: sem dados de mercado do momento.':''].filter(Boolean);
+      'Assinatura: '+esc(b.tag||'—'),(ops.status&&ops.status.state&&ops.status.state.lastHeight?'Confirmações: '+Math.max(1,ops.status.state.lastHeight-b.h+1):''),b.backfill?'Buscado depois: sem dados de mercado do momento.':''].filter(Boolean);
     return '<details class="trow"><summary style="list-style:none;cursor:pointer"><div>'+head+'</div><div class="note">'+line+'</div></summary><div class="note" style="margin-top:4px">'+det.join('<br>')+'</div></details>'}).join('')+'</div>'+
     (L.length>40?'<p class="note">Mostrando 40 de '+L.length+'. O CSV tem todos.</p>':'');
   renderAudit(L);
@@ -1529,7 +1563,7 @@ function subTab(t,sub){
   var cfg=SUBS[t];
   if(t==='mine'&&sub==='algos'){loadMarketMap();renderAlgos()}
   if(t==='mine'&&sub==='ops')loadOps();
-  if(t==='mine'&&sub==='net'){loadBlocksLog();renderHeat()}
+  if(t==='mine'&&sub==='net'){loadBlocksLog();renderHeat();renderNext()}
   if(t==='mine'&&sub==='now')renderWindow();
   if(t==='diary'&&sub==='robo'){renderRobo();if(settings.apiUrl&&Date.now()-(ops.at||0)>60000)loadOps()}
   cfg[1].forEach(function(x){$(t+'-'+x).hidden=x!==sub});
