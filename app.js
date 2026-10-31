@@ -681,7 +681,7 @@ function loadOps(){
     if(r[2].ok)ops.bal=r[2].v;else ops.err.bal=r[2].e.message;
     if(r[3].ok)ops.pools=r[3].v.list||[];else ops.err.pools=r[3].e.message;
     if(r[4].ok)ops.log=r[4].v.log||[];
-    renderOps();renderHome();renderMine();renderAcct();renderRadar();renderRobo();renderWindow();renderHeat();renderAI();renderNext();
+    renderOps();renderHome();renderMine();renderAcct();renderRadar();renderRobo();renderWindow();renderHeat();renderAI();renderNext();renderAct();
   });
 }
 setInterval(function(){if(document.visibilityState==='visible'&&!$('mine-ops').hidden&&!$('tab-mine').hidden)loadOps()},30000);
@@ -870,6 +870,48 @@ document.addEventListener('click',function(e){
   var r=e.target.closest('[data-roboreset]');if(!r)return;
   if(!confirm('Zerar as operações simuladas de '+({funding:'funding',algos:'outras moedas'}[r.dataset.roboreset]||'mineração')+' e começar de agora?'))return;
   apiCall('POST','/paper/reset',{what:r.dataset.roboreset}).then(function(){loadOps()},function(err){alert('Erro: '+err.message)});
+});
+/* ---------- copiloto: o que fazer agora (plano de ação com números e travas) ---------- */
+function renderAct(){
+  ['h_act','m_act'].forEach(function(id){var el=$(id);if(!el)return;
+    var P=ops.status&&ops.status.state&&ops.status.state.plan;
+    if(!P){el.hidden=true;return}
+    el.hidden=false;var M=P.mining,cfg=(ops.status||{}).config||{};
+    el.className='card sig '+(M&&M.action==='alugar'?'favoravel':'neutro');
+    var h='<div class="row between"><div class="eyebrow">O que fazer agora</div><span class="chip">copiloto</span></div>';
+    if(M){
+      h+='<div class="lead">'+esc(M.title)+'</div><p class="note" style="margin:4px 0 8px">'+esc(M.text)+'</p>'+
+        '<div class="kv judged">'+
+        kvJ('Potência',M.ph+' PH/s','',null,'~'+usd(M.costPerHourUsd,0)+' por hora')+
+        kvJ('Preço',M.price.toFixed(4),M.price<=M.maxPrice?'good':'bad',M.price<=M.maxPrice?'↓ abaixo do máximo':'↑ acima do máximo','máximo que compensa: '+M.maxPrice.toFixed(4))+
+        kvJ('Orçamento por sessão',usd(M.budgetUsd,0),'',null,'= '+M.amountBtc.toString().replace('.',',')+' BTC na ordem; stop-loss')+
+        kvJ('Duração',nf(M.durationH,1)+' h','',null,'janelas costumam durar ~2 h')+
+        kvJ('Chance de bloco',pctp(M.chance*100,0),M.chance>=0.25?'good':'neutral',M.chance>=0.25?'↑ boa por sessão':'→ baixa por sessão','sem bloco: perde o orçamento')+
+        kvJ('Bloco vale',usd(M.blockUsd||0,0),'',null,'recompensa já sem a taxa do pool')+'</div>'+
+        '<div class="row" style="margin-top:10px"><button class="sm pri" data-plan="apply">Aplicar plano no robô</button></div>';
+    }
+    if(P.blockers&&P.blockers.length)h+='<div class="eyebrow" style="margin:12px 0 6px">O que trava para operar ('+P.blockers.length+')</div><div class="stack" style="gap:6px">'+P.blockers.map(function(b,i){
+      var btn=b.id==='pool'&&b.poolId?'<button class="sm" data-plan="pool" data-pool="'+esc(b.poolId)+'">'+esc(b.fix)+'</button>':
+        b.id==='auto'?'<button class="sm" data-plan="apply">Aplicar o plano</button>':
+        b.id==='mode'?'<button class="sm" data-plan="active">Ativar o robô</button>':
+        b.id==='balance'?'<a class="sm" href="https://www.nicehash.com/my/wallet" target="_blank" rel="noopener">Abrir carteira da NiceHash</a>':'';
+      return '<div class="trow"><div class="note"><b>'+(i+1)+'.</b> '+esc(b.text)+' <span class="note">'+esc(b.id==='pool'&&b.poolId?'':b.fix)+'</span></div>'+(btn?'<div style="margin-top:4px">'+btn+'</div>':'')+'</div>'}).join('')+'</div>';
+    else if(M)h+='<p class="note" style="margin:10px 0 0"><b class="good">Nada travando:</b> o robô está pronto e opera sozinho conforme o plano.</p>';
+    if(P.funding)h+='<div class="box" style="margin-top:10px"><b>'+esc(P.funding.title)+'</b>'+esc(P.funding.text)+'</div>';
+    if(P.others&&P.others.length)h+='<div class="box" style="margin-top:8px"><b>Outras moedas (pool PPS, ordem manual)</b>'+P.others.map(function(o){return '<div style="margin-top:4px"><strong>'+esc(o.title)+'.</strong> '+esc(o.text)+'</div>'}).join('')+'</div>';
+    h+='<details style="margin-top:8px"><summary>Solo × PPS: qual depende de sorte?</summary><p class="note" style="margin:6px 0 0"><b>Solo</b> (BCH no BlockSniper): você só recebe se o SEU hash achar um bloco. Ou ganha o bloco inteiro (~US$900), ou não ganha nada: é sorte, com chance proporcional à sua potência. <b>PPS</b> (pay per share): o pool paga cada "share" (prova de trabalho) que você entrega, pelo valor médio, ache o pool bloco ou não. O pool fica com o risco da sorte e cobra uma taxa por isso. Por isso, em PPS o resultado já é o esperado: receita por hash − aluguel − taxas, todo dia, sem loteria. As outras moedas são simuladas assim.</p></details>';
+    el.innerHTML=h;
+  });
+}
+document.addEventListener('click',function(e){
+  var b=e.target.closest('[data-plan]');if(!b)return;
+  var P=ops.status&&ops.status.state&&ops.status.state.plan,M=P&&P.mining,act=b.dataset.plan,body=null,msg='';
+  if(act==='apply'&&M){body=M.apply;msg='Aplicar no robô: '+M.apply.targetPh+' PH/s, orçamento de US$'+M.apply.sessionBudgetUsd+' por sessão ('+M.apply.orderAmountBtc+' BTC por ordem), parar no bloco e criar ordem sozinho quando a janela abrir? O modo atual não muda.'}
+  if(act==='pool'){body={poolId:b.dataset.pool};msg='Usar este pool nas ordens do robô?'}
+  if(act==='active'){body={mode:'active'};msg='Ativar o robô? Ele vai criar, alterar e cancelar ordens reais na NiceHash (produção) com o seu saldo, seguindo o plano. Confira o saldo e o pool antes.'}
+  if(!body||!confirm(msg))return;
+  b.disabled=true;
+  apiCall('PUT','/config',body).then(function(){loadOps()},function(err){alert('Não deu: '+err.message);b.disabled=false});
 });
 /* ---------- copiloto IA: análise, previsões conferíveis, XP e maturidade ---------- */
 function renderAI(){

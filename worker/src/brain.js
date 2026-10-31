@@ -124,3 +124,52 @@ export function analysis(snap, ai) {
   for (const r of recs) { const rel = reliability(ai, r.type); r.conf = rel.conf; r.trusted = rel.trusted; r.n = rel.n; }
   return { level: L, lines: out, recs };
 }
+
+// Plano de ação do copiloto: o que fazer agora, com números (potência, preço, orçamento, duração, quando parar)
+// e as travas que impedem de operar. ctx: { cfg, limits, mkt, acct:{balanceBtc,pools}, fund:[...], algoMap:[...], capital, pools:{algo:[[nome,url]]} }
+export function actionPlan(ctx) {
+  const { cfg, limits, mkt, acct } = ctx, out = { mining: null, funding: null, others: [], blockers: [] };
+  const n = (x, d) => Number(x).toFixed(d).replace('.', ',');
+  // --- mineração BCH (solo) ---
+  if (mkt && mkt.ok) {
+    const budget = cfg.sessionBudgetUsd > 0 ? cfg.sessionBudgetUsd : 300;
+    const perPhDay = mkt.bidEH / 1000 * mkt.btcUsd * (1 + cfg.rentFeePct / 100); // US$ por PH/s por dia no lance
+    const hours = 2; // janelas costumam durar ~2 h (pesquisa): gastar o orçamento da sessão nesse tempo
+    const book = mkt.bookTotalPH || 0;
+    let ph = Math.floor(budget / (perPhDay * hours / 24));
+    ph = Math.max(1, Math.min(ph, limits.maxLimitPh, book ? Math.floor(book * 0.05) : ph)); // até 5% do hash alugado no mercado
+    const costH = ph * perPhDay / 24, dur = Math.min(24, budget / costH);
+    const lam = ph / mkt.phDaysPerBlock * dur / 24, chance = 1 - Math.exp(-lam);
+    const amountBtc = Math.max(0.001, Math.min(limits.maxOrderBtc, budget / mkt.btcUsd));
+    const green = mkt.green;
+    out.mining = {
+      action: green ? 'alugar' : 'esperar', edge: mkt.edgeAtBidPct, price: mkt.bidEH, maxPrice: mkt.capEH, ph, budgetUsd: budget, durationH: dur,
+      amountBtc: +amountBtc.toFixed(4), chance, expBlocks: lam, costPerHourUsd: costH, blockUsd: mkt.blockNetUsd,
+      title: green ? `Alugar agora: ${ph} PH/s a até ${n(mkt.capEH, 4)}` : `Esperar: o aluguel está acima do preço que compensa`,
+      text: green
+        ? `Margem de ${n(mkt.edgeAtBidPct, 1)}% no lance. Com ${ph} PH/s (~US$${n(costH, 0)}/h), o orçamento de US$${n(budget, 0)} dura ~${n(dur, 1)} h e dá ${n(chance * 100, 0)}% de chance de achar um bloco (~US$${n(mkt.blockNetUsd, 0)}). Parar no bloco; stop-loss em US$${n(budget, 0)}.`
+        : `O robô compra sozinho quando o lance ficar em ${n(mkt.capEH, 4)} ou menos (hoje ${n(mkt.bidEH, 4)}, margem ${n(mkt.edgeAtBidPct, 1)}%). Deixe o plano pronto: ${ph} PH/s, orçamento de US$${n(budget, 0)} por sessão, parar no bloco.`,
+      apply: { targetPh: ph, sessionBudgetUsd: budget, orderAmountBtc: +amountBtc.toFixed(4), onBlock: 'cancel', autoCreate: true }
+    };
+    // travas da mineração, com o que fazer
+    if (!cfg.payoutAddress) out.blockers.push({ id: 'address', text: 'Falta o seu endereço BCH (onde cai a recompensa).', fix: 'Mineração → Operar → Endereço BCH.' });
+    const sha = (acct && acct.pools || []).filter((p) => !p.algorithm || /SHA256/.test(p.algorithm));
+    if (!cfg.poolId) out.blockers.push({ id: 'pool', text: 'Nenhum pool escolhido para as ordens do robô.', fix: sha.length ? `Usar "${sha[0].name}"` : 'Cadastre o pool BlockSniper em Operar.', poolId: sha.length ? sha[0].id : null });
+    if (acct && isFinite(acct.balanceBtc) && acct.balanceBtc < amountBtc) out.blockers.push({ id: 'balance', text: `Saldo na NiceHash: ${n(acct.balanceBtc, 6)} BTC; o plano precisa de ${n(amountBtc, 4)} BTC (~US$${n(amountBtc * mkt.btcUsd, 0)}).`, fix: 'Depositar BTC na carteira da NiceHash (Carteira → Depositar → BTC).' });
+    if (!cfg.autoCreate) out.blockers.push({ id: 'auto', text: 'O robô não cria ordem sozinho: ele só mexe em ordens que você abrir.', fix: 'Aplicar o plano (liga "criar ordem sozinho").' });
+    if (cfg.mode !== 'active') out.blockers.push({ id: 'mode', text: cfg.mode === 'observe' ? 'O robô está em Observar: só simula.' : 'O robô está desligado.', fix: 'Ativar depois de resolver as travas acima.' });
+  }
+  // --- funding ---
+  const f = (ctx.fund || [])[0];
+  const leg = (ctx.capital || 1000) / 2 * 2;
+  out.funding = f
+    ? { action: 'entrar', title: `Abrir ${f.coin}: short ${f.s}, long ${f.l}`, text: `US$${n(leg, 0)} por perna (2x, US$${n(ctx.capital || 1000, 0)} de capital), ordem limite nas duas; esperado ~US$${n(f.netUsd || 0, 2)} em 3 dias. Sair quando a diferença ficar ≤ 0 (o painel avisa). Funding é manual: abra nas exchanges e registre no Diário.` }
+    : { action: 'esperar', title: 'Funding: nenhuma entrada agora', text: 'Nenhuma diferença passou na regra validada (24 h acima do empate, ordem limite, meia-vida que paga as taxas). Não force: nos últimos 90 dias, fora dessa regra, a média foi prejuízo.' };
+  // --- outras moedas (pool PPS: resultado sem sorte) ---
+  for (const a of (ctx.algoMap || []).filter((x) => x.level === 'go' && x.edgePct > 0 && x.edgePct <= 100).slice(0, 3)) {
+    const pools = (ctx.pools || {})[a.algo] || [];
+    out.others.push({ algo: a.algo, title: `${a.label} (${(a.coins || []).join('+')}): margem ${n(a.edgePct, 1)}%`,
+      text: `Ordem manual na NiceHash (${a.algo}) apontada para um pool PPS${pools.length ? ' como ' + pools.slice(0, 2).map((p) => p[0]).join(' ou ') : ''}; preço até ${a.capBtcPerUnit ? n(a.capBtcPerUnit, 6) + ' BTC/' + (a.unit || 'unid.') + '/dia' : 'o máximo do mapa'}; orçamento sugerido US$100/dia; parar se a margem ficar abaixo de 0.` });
+  }
+  return out;
+}

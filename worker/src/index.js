@@ -16,7 +16,7 @@ import { FUND_MODEL } from './fundmodel.js';
 import { updateHistory, pickCoins, scorePairs, stablePairs, pairStatsOf } from './fundai.js';
 import { blockRecord, blockSummary, poolOf } from './blocks.js';
 import { darrOf, retargetOf, momentumOf, windowMeter, weekAdd } from './signals.js';
-import { brainStep, analysis, levelOf, TYPES } from './brain.js';
+import { brainStep, analysis, levelOf, TYPES, actionPlan } from './brain.js';
 import FDI from '../../insights.js';
 import { withCreds, reloadCreds, saveCreds, credStatus, parseNiceHash, TG_TOKEN_RE, chatFromUpdates } from './creds.js';
 
@@ -282,7 +282,7 @@ export async function tick(env, opts = {}) {
   }
 
   // Outras moedas (simulado, pool PPS): a cada 15 min, com o mapa de mineração (a mesma conta do painel).
-  let algoPaper = state.algoPaper || null, algoTs = state.algoTs || 0;
+  let algoPaper = state.algoPaper || null, algoTs = state.algoTs || 0, algoMap = state.algoMap || [];
   if (cfg.algoPaper !== false && prices.ok && now - algoTs >= 15 * 60e3) {
     const pub = (env.NH_BASE || 'https://api2.nicehash.com').replace(/\/$/, '');
     const getJ = (u) => fetchFn(u, { headers: { accept: 'application/json', 'user-agent': 'funding-desk/1.0' } }).then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
@@ -293,6 +293,7 @@ export async function tick(env, opts = {}) {
       const books = {};
       algos.forEach((a, i) => { if (res[i + 1].ok) books[a] = res[i + 1].v; });
       const map = FDR.miningMap(res[0].v, books, { btcUsd: prices.v.btcUsd, minEdgePct: cfg.minEdgePct, rentFeePct: cfg.rentFeePct, poolFeePct: cfg.poolFeePct });
+      algoMap = map.map((m) => ({ algo: m.algo, label: m.label, coins: m.coins, edgePct: m.edgePct, level: m.level, capBtcPerUnit: m.capBtcPerUnit, unit: m.unit }));
       const ap = algoPaperStep(algoPaper, { map, now });
       algoPaper = ap.pa; algoTs = now;
       for (const e of ap.events) log.push({ t: now, kind: 'simulado', text: e });
@@ -315,10 +316,19 @@ export async function tick(env, opts = {}) {
   const br = brainStep(state.ai, snap);
   for (const ev of br.events.slice(0, 6)) log.push({ t: now, kind: 'ia', text: ev });
   const aiAnalysis = analysis(snap, br.ai);
+  // Conta da NiceHash (saldo e pools) a cada 15 min, para o plano de ação saber o que trava.
+  let acct = state.acct || null;
+  if (hasKeys(env) && (!acct || now - (acct.at || 0) >= 15 * 60e3)) {
+    const [bal, pl] = await Promise.all([nh.balance(), nh.pools()].map(settle));
+    acct = { at: now, balanceBtc: bal.ok ? +(bal.v.available || 0) : (acct ? acct.balanceBtc : null),
+      pools: pl.ok ? ((pl.v && pl.v.list) || []).map((p) => ({ id: p.id, name: p.name, algorithm: p.algorithm })) : (acct ? acct.pools : []) };
+  }
+  const plan = actionPlan({ cfg, limits, mkt: mkt.ok ? Object.assign({}, mkt, { bookTotalPH: book ? book.totalPH : 0 }) : mkt, acct,
+    fund: ((funding && funding.best) || []), algoMap, capital: cfg.alertCapital || 1000, pools: FDR.POOLS });
   const mempool = mpR.ok ? Object.assign({ at: now }, mpR.v) : state.mempool || null;
 
   const next = Object.assign({}, dec.state, alertState, {
-    lastTick: now, ai: br.ai, aiAnalysis, mempool, stable24, pairStats, msig, darr, recentBlocks, nhWeek, paper, paperBurst, blockBuf, blockFlush, lastBlockT, real, fundPaper, alertScore, algoPaper, algoTs, aiScores, fundPaperAI, fhistHour, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig,
+    lastTick: now, ai: br.ai, aiAnalysis, plan, acct, algoMap, mempool, stable24, pairStats, msig, darr, recentBlocks, nhWeek, paper, paperBurst, blockBuf, blockFlush, lastBlockT, real, fundPaper, alertScore, algoPaper, algoTs, aiScores, fundPaperAI, fhistHour, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig,
     market: mkt.ok ? { breakEvenEH: mkt.breakEvenEH, capEH: mkt.capEH, fillEH: mkt.fillEH, medianEH: mkt.medianEH, bidEH: mkt.bidEH,
       edgeAtBidPct: mkt.edgeAtBidPct, green: mkt.green, D: mkt.D, bchUsd: mkt.bchUsd, btcUsd: mkt.btcUsd, costPerBlockUsd: mkt.costPerBlockUsd,
       hashpriceNet: mkt.hashpriceNet, blockNetUsd: mkt.blockNetUsd, phDaysPerBlock: mkt.phDaysPerBlock, market: mkt.market } : { ok: false, reason: mkt.reason },
@@ -434,7 +444,7 @@ async function api(req, env, url, fetchFn) {
         fundPaperAI: state.fundPaperAI ? { summary: fundPaperSummary(state.fundPaperAI), open: state.fundPaperAI.open, closed: state.fundPaperAI.closed.slice(-100).reverse() } : null,
         aiScores: state.aiScores || {}, stable24: Object.keys(state.stable24 || {}), pairStats: state.pairStats || {},
         ai: state.ai ? Object.assign({ xp: state.ai.xp, since: state.ai.since, stats: state.ai.stats, open: state.ai.open.slice(-30).reverse(), done: state.ai.done.slice(-60).reverse() }, levelOf(state.ai)) : null,
-        aiTypes: TYPES, aiAnalysis: state.aiAnalysis || null, mempool: state.mempool || null, lastBlockT: state.lastBlockT || null,
+        aiTypes: TYPES, aiAnalysis: state.aiAnalysis || null, plan: state.plan || null, mempool: state.mempool || null, lastBlockT: state.lastBlockT || null,
         darr: state.darr || null, retarget: state.msig && state.darr ? retargetOf(state.msig.adj, state.darr.v) : null, momentum: state.msig ? state.msig.mom : null,
         window: windowMeter(state.recentBlocks || [], Date.now()), nhWeek: state.nhWeek || null,
         model: FUND_MODEL ? { threshold: FUND_MODEL.threshold, report: FUND_MODEL.report } : null,

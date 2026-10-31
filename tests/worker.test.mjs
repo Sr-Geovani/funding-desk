@@ -846,7 +846,7 @@ test('integração: DARR, reajuste do BTC, BCH/BTC contra a média e medidor no 
 });
 
 /* ---------- copiloto IA: previsões conferíveis, XP e maturidade ---------- */
-import { brainStep, analysis, levelOf, reliability } from '../worker/src/brain.js';
+import { brainStep, analysis, levelOf, reliability, actionPlan } from '../worker/src/brain.js';
 test('IA: cria previsões dos sinais, confere no prazo e ganha XP', () => {
   const T0 = Date.UTC(2026, 9, 31, 12), H = 36e5;
   const base = { now: T0, edge: 1.5, green: false, minEdge: 3, darr: 1.05, D: 5e11, mom: { vsEmaPct: 3 }, ret: null, win: { last6h: 30, bigShare6h: 0.5, bigShare24h: 0.5 }, fund: [], rows: {}, stable24: {}, algos: [{ k: 'SCRYPT', label: 'Scrypt', edge: 8, level: 'go' }], scoreDone: [] };
@@ -883,4 +883,16 @@ test('integração: copiloto IA e mempool aparecem no status', async () => {
     assert.ok(st.ai && st.ai.level.name === 'Aprendiz'); assert.ok(st.aiAnalysis.lines.length >= 2);
     assert.deepEqual([st.mempool.tx, st.mempool.bytes], [57, 30891]); assert.ok(st.aiTypes.mine_wait);
   } finally { t.server.close(); }
+});
+
+test('plano de ação: potência, preço, orçamento, duração e travas', () => {
+  const cfg = Object.assign({}, DEFAULT_CONFIG, { sessionBudgetUsd: 300, mode: 'observe', poolId: '', autoCreate: false, payoutAddress: ADDR });
+  const mkt = { ok: true, green: true, bidEH: 0.42, capEH: 0.43, edgeAtBidPct: 5, btcUsd: 77000, phDaysPerBlock: 26.2, blockNetUsd: 900, bookTotalPH: 19000 };
+  const p = actionPlan({ cfg, limits: { maxLimitPh: 100, maxOrderBtc: 0.01 }, mkt, acct: { balanceBtc: 0.00002, pools: [{ id: 'p1', name: 'Blocksniper Solo', algorithm: 'SHA256ASICBOOST' }] }, fund: [], algoMap: [{ algo: 'SCRYPT', label: 'Scrypt', coins: ['LTC'], edgePct: 12, level: 'go', capBtcPerUnit: 0.0001, unit: 'TH' }], capital: 1000, pools: { SCRYPT: [['LiteSolo', 'x']] } });
+  assert.equal(p.mining.action, 'alugar'); assert.equal(p.mining.ph, 100, 'limitado ao teto do servidor');
+  assert.ok(p.mining.durationH > 1 && p.mining.chance > 0.2 && p.mining.chance < 0.5);
+  assert.deepEqual(p.blockers.map((b) => b.id), ['pool', 'balance', 'auto', 'mode']);
+  assert.equal(p.blockers[0].poolId, 'p1');
+  assert.equal(p.mining.apply.autoCreate, true);
+  assert.equal(p.funding.action, 'esperar'); assert.match(p.others[0].text, /LiteSolo/);
 });
