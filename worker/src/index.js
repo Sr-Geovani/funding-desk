@@ -17,7 +17,7 @@ import { macroOf, marketPanorama } from './panorama.js';
 import { bitfinexOf, deribitBasisOf, ethenaOf, hlpOf, zpoolOf, brlOf, cdiOf, lighterTable, lighterRows, lighterOi, lighterPairs, streakStep, frontsPaperStep, asicOf, gpuOf, premiumsOf, spotSpreadOf, polymarketOf, llamaOf, LLAMA_POOLS, LT_FEES } from './fronts.js';
 import { FUND_MODEL } from './fundmodel.js';
 import { updateHistory, pickCoins, scorePairs, stablePairs, pairStatsOf } from './fundai.js';
-import { blockRecord, blockSummary, poolOf } from './blocks.js';
+import { blockRecord, blockSummary, poolOf, luckBoard } from './blocks.js';
 import { darrOf, retargetOf, momentumOf, windowMeter, weekAdd } from './signals.js';
 import { brainStep, analysis, levelOf, TYPES, actionPlan } from './brain.js';
 import FDI from '../../insights.js';
@@ -636,7 +636,9 @@ async function api(req, env, url, fetchFn) {
   if (p === '/blocks' && m === 'GET') {
     const st = await kvGet(env, 'state', {});
     const list = (await kvGet(env, 'blocks', [])).concat(st.blockBuf || []).map((b) => Object.assign(b, poolOf(b.tag))); // nomes sempre com a regra atual
-    return json({ blocks: list.slice(-300).reverse(), summary: blockSummary(list) });
+    const mk = st.market || {};
+    return json({ blocks: list.slice(-300).reverse(), summary: blockSummary(list),
+      luck: luckBoard(list, { now: Date.now(), priceEH: mk.bidEH, btcUsd: mk.btcUsd, blockUsd: mk.blockNetUsd, rentFeePct: 3 }) });
   }
   if (p === '/pool/check' && m === 'POST') {
     // Compatibilidade do pool com a Braiins Hashpower (extranonce2_size ≥ 7). Só abre o Stratum e lê a resposta.

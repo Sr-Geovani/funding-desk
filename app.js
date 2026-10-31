@@ -1130,9 +1130,34 @@ var blk={list:[],sum:null,at:0,err:null};
 function loadBlocksLog(force){
   if(!settings.apiUrl){renderBlocksLog();return}
   if(!force&&Date.now()-blk.at<120000){renderBlocksLog();return}
-  apiCall('GET','/blocks').then(function(r){blk.list=r.blocks||[];blk.sum=r.summary;blk.at=Date.now();blk.err=null;renderBlocksLog()},function(e){blk.err=e.message;renderBlocksLog()});
+  apiCall('GET','/blocks').then(function(r){blk.list=r.blocks||[];blk.sum=r.summary;blk.luck=r.luck||null;renderLuck();blk.at=Date.now();blk.err=null;renderBlocksLog()},function(e){blk.err=e.message;renderBlocksLog()});
 }
 function hhU(t){return hhmm(t)+' ('+utcHM(t)+' UTC)'}
+// Placar da sorte: quem estivesse ligado o tempo todo com X PH/s, quantos blocos teria achado e com qual resultado;
+// e os testes que mostram se existe padrão (não existe: cada hash é independente).
+var luckWin=24;
+function renderLuck(){
+  var el=$('bl_luck');if(!el)return;
+  var L=blk.luck,head='<h2 style="margin:0 0 4px">Placar da sorte</h2><p class="note" style="margin:0 0 8px">Se alguém estivesse ligado o tempo todo com cada potência, no preço de cada momento: quantos blocos teria achado, quanto gastou e o resultado. Mostra a sorte; não prevê o próximo bloco.</p>';
+  if(!L||!L.windows||!L.windows.length){el.innerHTML=head+'<p class="note">'+(settings.apiUrl?'Juntando blocos no registro do servidor…':'Precisa do backend conectado.')+'</p>';return}
+  var W=L.windows.filter(function(w){return w.hours===luckWin})[0]||L.windows[L.windows.length-1];
+  var lab=function(h){return h>=48?(h/24)+' dias':h+' h'};
+  var h=head+'<div class="seg" style="margin-bottom:6px">'+L.windows.map(function(w){return '<button class="sm" data-luckw="'+w.hours+'" aria-pressed="'+(w===W)+'">'+lab(w.hours)+'</button>'}).join('')+'</div>'+
+    '<p class="note" style="margin:0 0 6px">'+W.blocks+' blocos da rede (esperado '+W.expectedBlocks+'). O bloco mais "fácil" teria saído com '+nf(W.minNeedPH,0)+' PH/s.</p>'+
+    '<div class="scroll"><table style="font-size:12px"><tr><th>PH/s</th><th>Blocos seus</th><th>Custo</th><th>Receita</th><th>Lucro (com sorte)</th><th>Média (sem sorte)</th></tr>'+
+    W.rows.map(function(r){return '<tr><td>'+r.ph+'</td><td>'+r.won+'<div class="note">esperado '+nf(r.expected,2)+'</div></td><td>'+usd(r.costUsd,0)+'</td><td>'+usd(r.revUsd,0)+'</td><td>'+money(r.profitUsd,r.costUsd)+'</td><td>'+(r.expPct===null?'—':'<span class="'+(r.expPct>=0?'good':'bad')+'">'+pct(r.expPct,1)+'</span>')+'</td></tr>'}).join('')+'</table></div>';
+  var T=L.tests;
+  if(T)h+='<div class="box" style="margin-top:8px"><b>Existe padrão? '+(T.pattern?'<span class="warn">algo fora do acaso: acompanhar</span>':'<span class="good">não: dentro do acaso</span>')+'</b>'+
+    '<ul class="note" style="margin:4px 0 0;padding-left:18px">'+
+    '<li>Um bloco "fácil" puxa outro? Correlação entre um bloco e o seguinte: '+nf(T.autocorr,3)+' (acaso: até ±'+nf(T.autocorrLimit,3)+').</li>'+
+    (T.easyAfterEasy!==null?'<li>Blocos que sairiam com até 100 PH/s: '+pctp(T.easyBase*100,1)+' de todos; logo depois de outro assim: '+pctp(T.easyAfterEasy*100,1)+' ('+T.easyAfterN+' casos).</li>':'')+
+    '<li>Hora do dia (UTC): '+T.hours.map(function(x){return x.from+'–'+(x.from+6)+'h '+(x.z===null?'—':(Math.abs(x.z)<2?'normal':'desvio '+nf(x.z,1)+'σ'))}).join(' · ')+'.</li>'+
+    '<li>Distribuição dos sorteios: qui² '+nf(T.chi2,1)+' (acaso: até 16,9 em 95% das vezes) em '+T.n+' blocos.</li></ul>'+
+    '<p class="note" style="margin:4px 0 0">Conclusão: o que aconteceu nas últimas horas não muda a chance do próximo bloco. O que decide o resultado de longo prazo é a margem (preço do aluguel × quanto o bloco paga); a potência só muda o tamanho do ganho e da sorte.</p></div>';
+  if(L.recent&&L.recent.length)h+='<details style="margin-top:8px"><summary>Últimos blocos: potência mínima para ser seu</summary><div class="stack" style="gap:2px;margin-top:6px">'+L.recent.map(function(b){return '<div class="note">'+b.h+' · '+hhmm(new Date(b.t))+' · '+esc(b.pool||'')+' · seria seu com ≥ <b>'+nf(b.needPH,0)+' PH/s</b></div>'}).join('')+'</div></details>';
+  el.innerHTML=h;
+}
+document.addEventListener('click',function(e){var b=e.target.closest('#bl_luck [data-luckw]');if(!b)return;luckWin=+b.dataset.luckw;renderLuck()});
 function renderBlocksLog(){
   var L=blk.list,S=blk.sum,fb=$('bl_fallback');
   if(!settings.apiUrl){fb.hidden=false;$('bl_src').textContent='Blockchair';$('bl_msg').textContent='Últimos blocos (Blockchair). Com o backend conectado, cada bloco ganha o contexto do momento (hash alugado, margem, simulação).';return}
@@ -1144,7 +1169,7 @@ function renderBlocksLog(){
     var gap=b.dt===null||b.dt===undefined?'':(b.dt<60?'<1 min':FDI.dur(b.dt*1000));
     var head='<b class="mono">'+b.h+'</b> <span class="note">'+hhmm(b.t)+'</span> · <b>'+esc(b.pool)+'</b>'+(b.solo?' <span class="chip ok">solo</span>':'')+(b.mine?' <span class="chip ok">seu</span>':'')+(b.simWon?' <span class="chip ok">seria seu</span>':'')+
       (gap?' <span class="note">· '+gap+(b.dt>1800?' <span class="warn">(lento)</span>':'')+'</span>':'');
-    var line=(b.txs?b.txs+' tx · ':'')+(b.size?nf(b.size/1000,1)+' KB · ':'')+b.reward.toFixed(4)+' BCH'+(b.usd?' ('+usd(b.usd,0)+')':'')+(b.edge!==undefined&&b.edge!==null?' · margem '+pct(b.edge,1):'');
+    var line=(b.txs?b.txs+' tx · ':'')+(b.size?nf(b.size/1000,1)+' KB · ':'')+(isFinite(b.reward)?b.reward.toFixed(4)+' BCH':'—')+(b.usd?' ('+usd(b.usd,0)+')':'')+(b.edge!==undefined&&b.edge!==null?' · margem '+pct(b.edge,1):'');
     var det=['Hora: '+dt2(b.t),'Taxas das transações: '+b.fees.toFixed(5)+' BCH'+(b.poolFeePct!==null&&b.poolFeePct!==undefined?' · fatia do pool: '+nf(b.poolFeePct,1)+'%':''),
       b.netPH?'Potência da rede: '+nf(b.netPH,0)+' PH/s (dificuldade '+nf(b.D/1e9,1)+' G)':'',
       b.nhPH?'NiceHash: '+nf(b.nhPH,0)+' PH/s alugados; lance '+(b.nhBid||0).toFixed(4)+', empate '+(b.be||0).toFixed(4)+' BTC/EH/dia':'',

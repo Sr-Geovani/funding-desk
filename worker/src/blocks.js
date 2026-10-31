@@ -55,3 +55,52 @@ export function blockSummary(list) {
     dt: avg((b) => b.dt), fees: avg((b) => b.fees), size: avg((b) => b.size), txs: avg((b) => b.txs), edge: avg((b) => b.edge),
     slow: list.filter((b) => b.dt > 1800).length, fast: list.filter((b) => b.dt !== null && b.dt < 120).length };
 }
+
+/* ---------- placar da sorte: quem estava com X PH/s ligado o tempo todo ---------- */
+// Potência mínima (PH/s) para o bloco ter sido seu no sorteio da simulação: número tirado do hash (últimos 8 hex ÷ 2³²)
+// × hash da rede (D·2³²/600). Não prevê o próximo bloco (cada hash é independente): serve de placar e de prova de acaso.
+export const LUCK_PH = [10, 30, 50, 100, 200, 500];
+export function needPH(r) {
+  if (!r || !r.hash || !(r.D > 0)) return null;
+  const u = parseInt(String(r.hash).slice(-8), 16) / TWO32;
+  return isFinite(u) ? u * r.D * TWO32 / 600 / 1e15 : null;
+}
+// list: registro de blocos; priceEH/btcUsd/blockUsd: valores de agora (usados quando o bloco não tem os do momento).
+export function luckBoard(list, { now, priceEH, btcUsd, blockUsd, rentFeePct = 3, poolFeePct = 2, windows = [6, 24, 72] }) {
+  const L = (list || []).filter((r) => r && r.t && needPH(r) !== null).sort((a, b) => a.t - b.t);
+  const out = { windows: [], tests: null, recent: L.slice(-12).reverse().map((r) => ({ h: r.h, t: r.t, needPH: needPH(r), pool: r.pool || '' })) };
+  if (!L.length || !(btcUsd > 0)) return out;
+  for (const hrs of windows) {
+    const sel = L.filter((r) => r.t >= now - hrs * 3600e3);
+    if (sel.length < 3) continue;
+    const val = (r) => (r.usd > 0 ? r.usd * (1 - poolFeePct / 100) : blockUsd || 0);
+    const secs = (r) => (r.dt > 0 && r.dt < 4 * 3600 ? r.dt : 600);
+    const rows = LUCK_PH.map((ph) => {
+      let won = 0, rev = 0, lam = 0, expRev = 0, cost = 0;
+      for (const r of sel) {
+        const p = ph * 1e15 * 600 / (r.D * TWO32); // chance deste bloco ser seu (= potência ÷ rede)
+        lam += p; expRev += p * val(r);
+        if (needPH(r) <= ph) { won++; rev += val(r); }
+        cost += ph / 1000 * (r.nhMedian || priceEH || 0) * btcUsd * (1 + rentFeePct / 100) * secs(r) / 86400;
+      }
+      return { ph, won, expected: lam, costUsd: cost, revUsd: rev, profitUsd: rev - cost, pct: cost > 0 ? (rev / cost - 1) * 100 : null, expPct: cost > 0 ? (expRev / cost - 1) * 100 : null };
+    });
+    out.windows.push({ hours: hrs, blocks: sel.length, expectedBlocks: hrs * 6, minNeedPH: Math.min(...sel.map(needPH)), rows });
+  }
+  // testes de padrão em todo o registro: o sorteio de um bloco ajuda a prever o próximo? a hora do dia importa?
+  const u = L.map((r) => needPH(r) / (r.D * TWO32 / 600 / 1e15)), n = u.length;
+  if (n >= 30) {
+    const m = u.reduce((a, x) => a + x, 0) / n, sd = Math.sqrt(u.reduce((a, x) => a + (x - m) ** 2, 0));
+    let cov = 0; for (let i = 1; i < n; i++) cov += (u[i - 1] - m) * (u[i] - m);
+    const ac = sd > 0 ? cov / (sd * sd) : 0;
+    const easy = (r) => needPH(r) <= 100, base = L.filter(easy).length / n;
+    const after = []; for (let i = 0; i + 1 < n; i++) if (easy(L[i])) after.push(easy(L[i + 1]));
+    const hours = [0, 6, 12, 18].map((a) => { const g = L.filter((r) => { const h = new Date(r.t).getUTCHours(); return h >= a && h < a + 6; }).map((r) => needPH(r) / (r.D * TWO32 / 600 / 1e15));
+      const mean = g.length ? g.reduce((x, y) => x + y, 0) / g.length : null; return { from: a, n: g.length, mean, z: g.length ? (mean - 0.5) / (1 / Math.sqrt(12 * g.length)) : null }; });
+    const dec = Array(10).fill(0); u.forEach((x) => { dec[Math.min(9, Math.floor(x * 10))]++; });
+    const chi2 = dec.reduce((a, d) => a + (d - n / 10) ** 2 / (n / 10), 0);
+    const pattern = Math.abs(ac) > 3 / Math.sqrt(n) || hours.some((h) => h.z !== null && Math.abs(h.z) > 3) || chi2 > 21.67;
+    out.tests = { n, autocorr: ac, autocorrLimit: 2 / Math.sqrt(n), easyBase: base, easyAfterEasy: after.length ? after.filter(Boolean).length / after.length : null, easyAfterN: after.length, hours, chi2, pattern };
+  }
+  return out;
+}

@@ -138,6 +138,11 @@ sempre identificado; nada de prometer previsão de sorte (Poisson é sem memóri
   e recomeçadas. Potência ideal (IA, `powerPlan`): lucro esperado por dia em cada potência com lance pela profundidade
   do livro (`book.depth`), sorte de 1 dia e capital mínimo pelo critério de Kelly (bloco ÷ 2 × margem); o plano nunca
   passa da potência que mais lucra e mostra 0 PH/s quando nenhuma tem lucro esperado.
+- Placar da sorte (31/10, `luckBoard` em `worker/src/blocks.js`, `/api/blocks` → `luck`): para 6 h, 24 h e 3 dias, quem
+  estivesse ligado o tempo todo com 10–500 PH/s: blocos que seriam seus (potência mínima de cada bloco = sorteio × hash da
+  rede), esperado, custo no preço de cada momento (mediana registrada do livro), receita, lucro e %. Testes de padrão
+  em todo o registro (correlação entre blocos seguidos, "fácil depois de fácil", hora do dia, qui² dos sorteios): com
+  1.039 blocos reais de 7 dias, tudo dentro do acaso. Tela: Mineração → Rede.
 - Ciclo do servidor: 3 min. Mínimo do Cloudflare é 1 min, mas o KV grátis aceita 1.000 gravações/dia e propaga em até
   60 s; abaixo de 3 min exige plano pago + Durable Objects. Atraso de 3 min custa < US$1 com 10 PH/s.
 

@@ -1021,6 +1021,23 @@ test('potência ideal (IA): lucro esperado por potência pela profundidade do li
   assert.ok(pos.curve.some((r) => r.overCap), 'mostra acima do teto marcado');
 });
 
+test('placar da sorte: blocos que seriam seus por potência, custo e testes de padrão (acaso)', async () => {
+  const { luckBoard, needPH } = await import('../worker/src/blocks.js');
+  const reg = JSON.parse(readFileSync(new URL('./fixtures/bch-blocks-registry.real.json', import.meta.url)));
+  const now = reg[reg.length - 1].t + 60e3;
+  const L = luckBoard(reg, { now, priceEH: 0.4259, btcUsd: 77400, blockUsd: 885 });
+  const w24 = L.windows.find((w) => w.hours === 24);
+  assert.ok(w24.blocks > 120 && w24.blocks < 170);
+  const r100 = w24.rows.find((r) => r.ph === 100), sel = reg.filter((r) => r.t >= now - 24 * 3600e3);
+  assert.equal(r100.won, sel.filter((r) => needPH(r) <= 100).length);
+  assert.ok(r100.expected > 3 && r100.expected < 4.5 && r100.costUsd > 3000 && r100.costUsd < 3800, JSON.stringify(r100));
+  close(r100.profitUsd, r100.revUsd - r100.costUsd, 1e-6);
+  assert.ok(w24.rows.every((r, i, a) => !i || r.won >= a[i - 1].won), 'mais potência nunca acha menos blocos');
+  assert.equal(L.tests.pattern, false, 'blocos reais: sorteio sem padrão');
+  assert.ok(Math.abs(L.tests.autocorr) < 3 / Math.sqrt(L.tests.n) && L.tests.chi2 < 21.67);
+  assert.equal(L.recent.length, 12);
+});
+
 test('auditoria IA: mesma régua do robô, reajuste real, funding acompanhado e grupo de controle', () => {
   const T0 = Date.UTC(2026, 9, 31, 12), H = 36e5;
   const base = { now: T0, edge: 1.5, green: false, minEdge: 3, darr: 1.05, D: 5e11, mom: { vsEmaPct: 3 }, ret: null, win: null, fund: [], rows: {}, stable24: {}, algos: [] };
