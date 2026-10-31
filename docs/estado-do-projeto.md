@@ -64,6 +64,11 @@ sempre identificado; nada de prometer previsão de sorte (Poisson é sem memóri
   (solo ou não), intervalo, tamanho, transações, recompensa, taxas, taxa do pool solo, hash da rede e, ao vivo, hash
   alugado na NiceHash, preço, empate, margem e a simulação (potência, chance, sorteio). `/api/blocks` + resumo de
   padrões; `/api/blocks/backfill` busca blocos anteriores (só blockchain). Tela: Mineração → Rede, com CSV.
+- Funding (regra validada, 31/10): "Compensa" exige diferença acima do empate nas últimas 24 h seguidas; execução padrão
+  maker (ordem limite). Painel: histórico pago de 72 h (`stable24` em `ensureStability`). Servidor: `stablePairs` sobre o
+  histórico horário próprio (`fhist`), precisa de 24 h; `fundStable24` na config desliga. Simulações e placar com taxa maker.
+- Mineração: abas em grade 3 × 2; Rede com uma lista só de blocos (servidor; Blockchair sem backend) e cartão de padrões.
+- iPhone: barra inferior reancorada pelo visualViewport ao voltar do segundo plano.
 - Ciclo do servidor: 3 min. Mínimo do Cloudflare é 1 min, mas o KV grátis aceita 1.000 gravações/dia e propaga em até
   60 s; abaixo de 3 min exige plano pago + Durable Objects. Atraso de 3 min custa < US$1 com 10 PH/s.
 

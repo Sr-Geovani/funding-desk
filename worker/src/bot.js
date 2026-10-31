@@ -19,6 +19,7 @@ export const DEFAULT_CONFIG = {
   orderAmountBtc: 0.002,
   managed: [],              // ids das ordens que o robô pode alterar ou cancelar
   alerts: true,             // alertas de entrada/saída/risco (funding e mineração) a cada ciclo, com Telegram
+  fundStable24: true,       // funding: só "Compensa" com 24 h seguidas acima do empate (regra validada em 90 dias)
   alertCapital: 1000,       // capital usado para calcular os alertas de funding
   alertHold: 3              // ciclo (dias) usado nos alertas de funding
 };
@@ -58,6 +59,7 @@ export function sanitizeConfig(input = {}, prev = DEFAULT_CONFIG, limits = limit
   num('orderAmountBtc', 0, limits.maxOrderBtc);
   if (input.autoCreate !== undefined) c.autoCreate = !!input.autoCreate;
   if (input.alerts !== undefined) c.alerts = !!input.alerts;
+  if (input.fundStable24 !== undefined) c.fundStable24 = !!input.fundStable24;
   num('alertCapital', 10, 1e7); num('alertHold', 1, 30);
   if (input.managed !== undefined) {
     if (Array.isArray(input.managed)) c.managed = input.managed.map(String).slice(0, 50); else errors.push('managed deve ser lista');

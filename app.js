@@ -19,6 +19,8 @@ var settings=ls('fd_set')||{};
   if(settings.apiUrl!==u)ls('fd_set',settings)})();
 var SCAN_INPUTS=['cap','lev','hold','minvol','exS','exL','rebal','slip','minoi','acap','newdays','sort','f_target'];
 var PLAN_INPUTS=['mp_ph','mp_h','mp_rfee','mp_pfee','mp_ofee','mp_rw','iv_total','iv_sess','iv_edge'];
+// Regra nova (validada em 90 dias): execução padrão com ordem limite (maker). Migra uma vez quem tinha o padrão antigo.
+if(!settings.makerV1){settings.exS='maker';settings.exL='maker';settings.makerV1=true;ls('fd_set',settings)}
 SCAN_INPUTS.concat(PLAN_INPUTS).forEach(function(id){if(settings[id]!==undefined)$(id).value=settings[id]});
 $('proxy').value=settings.proxy||'';
 $('f_crypto').checked=settings.cryptoOnly!==false;
@@ -345,7 +347,7 @@ function stabOf(o){var x=stabMap[oppKey(o)];return x?x.stab:null}
 function fundFor(mode){
   var p=scanParams();p.mode=mode;
   var ops=FD.opportunities(state.rows,p),c=verdictCtx(p);
-  var vs=ops.map(function(o){return FDC.fundingVerdict(o,Object.assign({stab:stabOf(o)},c))});
+  var vs=ops.map(function(o){var x=stabMap[oppKey(o)];return FDC.fundingVerdict(o,Object.assign({stab:stabOf(o),requireStable24:true,stable24:x?x.stable24:undefined},c))});
   return {ops:ops,vs:vs,sum:FDC.fundingSummary(ops,vs,{hold:p.hold})};
 }
 // Nota da IA do servidor para o par (se ele acompanha esse par há pelo menos 6 h).
@@ -409,7 +411,7 @@ function renderScan(){
     if(!o){delete openHist[key];return}
     openHist[key].o=o;drawHist(key);
   });
-  ensureStability(ops.slice(0,5));
+  ensureStability(ops.slice(0,8));
 }
 // Selo de estabilidade: busca o histórico pago (72 h) das melhores oportunidades.
 var stabMap={},stabPending=false;
@@ -422,7 +424,10 @@ function ensureStability(list){
     return Promise.all([loadHist(o.s,o.rs.sym,o.rs.hours),o.rl?loadHist(o.l,o.rl.sym,o.rl.hours):Promise.resolve(null)]).then(function(r){
       var full=FD.spreadSeries(r[0],r[1]),since=Date.now()-3*864e5,sp=full.filter(function(x){return x.t>=since});
       var bt=FDI.backtestFunding(full,{holdDays:hold(),beApr:o.m.beApr,notional:o.m.notional,costPct:o.m.costPct});
-      stabMap[oppKey(o)]={at:Date.now(),stab:FDC.stability(FD.seriesStats(sp,o.m.beApr)),bt:bt};
+      // 24 h seguidas acima do empate (regra validada no histórico)
+      var d24=full.filter(function(x){return x.t>=Date.now()-24*36e5});
+      var s24=d24.length>=3&&d24[0].t<=Date.now()-20*36e5?d24.every(function(x){return x.apr>=o.m.beApr}):false;
+      stabMap[oppKey(o)]={at:Date.now(),stab:FDC.stability(FD.seriesStats(sp,o.m.beApr)),bt:bt,stable24:s24};
     }).catch(function(){stabMap[oppKey(o)]={at:Date.now(),stab:null}});
   })).then(function(){stabPending=false;renderScan();renderHome()});
 }
@@ -867,33 +872,42 @@ document.addEventListener('click',function(e){
 /* ---------- registro dos blocos da rede (servidor) ---------- */
 var blk={list:[],sum:null,at:0,err:null};
 function loadBlocksLog(force){
-  if(!settings.apiUrl){$('bl_msg').textContent='Conecte o backend (Ajustes) para ver o registro: ele roda no servidor 24 h.';return}
+  if(!settings.apiUrl){renderBlocksLog();return}
   if(!force&&Date.now()-blk.at<120000){renderBlocksLog();return}
   apiCall('GET','/blocks').then(function(r){blk.list=r.blocks||[];blk.sum=r.summary;blk.at=Date.now();blk.err=null;renderBlocksLog()},function(e){blk.err=e.message;renderBlocksLog()});
 }
 function hhU(t){return hhmm(t)+' ('+utcHM(t)+' UTC)'}
 function renderBlocksLog(){
-  var L=blk.list,S=blk.sum;
-  if(blk.err){$('bl_msg').textContent='Falhou: '+blk.err;return}
-  if(!L.length){$('bl_msg').textContent='O registro começa no próximo bloco. Toque em "Buscar blocos anteriores" para trazer as últimas horas.';$('bl_sum').innerHTML='';$('bl_list').innerHTML='';return}
-  $('bl_msg').textContent=L.length+' blocos registrados, de '+dt2(S.from)+' a '+dt2(S.to)+'. Mais novo primeiro.';
+  var L=blk.list,S=blk.sum,fb=$('bl_fallback');
+  if(!settings.apiUrl){fb.hidden=false;$('bl_src').textContent='Blockchair';$('bl_msg').textContent='Últimos blocos (Blockchair). Com o backend conectado, cada bloco ganha o contexto do momento (hash alugado, margem, simulação).';return}
+  if(blk.err){fb.hidden=false;$('bl_msg').textContent='Registro do servidor indisponível ('+blk.err+'); mostrando a Blockchair.';return}
+  if(!L.length){fb.hidden=false;$('bl_msg').textContent='O registro do servidor começa no próximo bloco. Toque em "Buscar blocos anteriores" para trazer as últimas horas.';return}
+  fb.hidden=true;$('bl_src').textContent=L.length+' blocos · servidor';
+  $('bl_msg').textContent='Mais novo primeiro. Toque num bloco para ver o contexto daquele momento.';
+  $('bl_list').innerHTML='<div class="stack" style="gap:0">'+L.slice(0,40).map(function(b){
+    var gap=b.dt===null||b.dt===undefined?'':(b.dt<60?'<1 min':FDI.dur(b.dt*1000));
+    var head='<b class="mono">'+b.h+'</b> <span class="note">'+hhmm(b.t)+'</span> · <b>'+esc(b.pool)+'</b>'+(b.solo?' <span class="chip ok">solo</span>':'')+(b.mine?' <span class="chip ok">seu</span>':'')+(b.simWon?' <span class="chip ok">seria seu</span>':'')+
+      (gap?' <span class="note">· '+gap+(b.dt>1800?' <span class="warn">(lento)</span>':'')+'</span>':'');
+    var line=(b.txs?b.txs+' tx · ':'')+(b.size?nf(b.size/1000,1)+' KB · ':'')+b.reward.toFixed(4)+' BCH'+(b.usd?' ('+usd(b.usd,0)+')':'')+(b.edge!==undefined&&b.edge!==null?' · margem '+pct(b.edge,1):'');
+    var det=['Hora: '+dt2(b.t),'Taxas das transações: '+b.fees.toFixed(5)+' BCH'+(b.poolFeePct!==null&&b.poolFeePct!==undefined?' · fatia do pool: '+nf(b.poolFeePct,1)+'%':''),
+      b.netPH?'Potência da rede: '+nf(b.netPH,0)+' PH/s (dificuldade '+nf(b.D/1e9,1)+' G)':'',
+      b.nhPH?'NiceHash: '+nf(b.nhPH,0)+' PH/s alugados; lance '+(b.nhBid||0).toFixed(4)+', empate '+(b.be||0).toFixed(4)+' BTC/EH/dia':'',
+      b.realPH?'Suas ordens: '+nf(b.realPH,2)+' PH/s (chance de ser seu: '+pctp(b.realProb*100,2)+')':'',
+      b.simPH?'Simulação: '+nf(b.simPH,0)+' PH/s, chance '+pctp(b.simProb*100,2)+', '+(b.simWon?'seria seu':'não saiu'):'',
+      'Assinatura: '+esc(b.tag||'—'),b.backfill?'Buscado depois: sem dados de mercado do momento.':''].filter(Boolean);
+    return '<details class="trow"><summary style="list-style:none;cursor:pointer"><div>'+head+'</div><div class="note">'+line+'</div></summary><div class="note" style="margin-top:4px">'+det.join('<br>')+'</div></details>'}).join('')+'</div>'+
+    (L.length>40?'<p class="note">Mostrando 40 de '+L.length+'. O CSV tem todos.</p>':'');
+  if(!S){$('bl_sum').innerHTML='';return}
   var lh=new Array(24).fill(0);S.solo.hoursUtc.forEach(function(n,h){var d=new Date(Date.UTC(2026,0,1,h));lh[d.getHours()]+=n});
   var top=lh.map(function(n,h){return [h,n]}).filter(function(x){return x[1]>0}).sort(function(a,b){return b[1]-a[1]}).slice(0,4);
-  $('bl_sum').innerHTML='<div class="kv"><div><small>Intervalo médio</small><span>'+(S.dt?FDI.dur(S.dt*1000):'—')+'</span></div><div><small>Transações (média)</small><span>'+(S.txs?nf(S.txs,0):'—')+'</span></div><div><small>Tamanho (média)</small><span>'+(S.size?nf(S.size/1000,1)+' KB':'—')+'</span></div>'+
-    '<div><small>Taxas (média)</small><span>'+(S.fees!==null?S.fees.toFixed(4)+' BCH':'—')+'</span></div><div><small>Blocos lentos (&gt;30 min)</small><span>'+S.slow+'</span></div><div><small>Rápidos (&lt;2 min)</small><span>'+S.fast+'</span></div></div>'+
-    '<div class="eyebrow" style="margin:10px 0 4px">Quem achou</div><div class="row" style="gap:6px">'+S.byPool.map(function(p){return '<span class="chip'+(p.solo?' ok':'')+'">'+esc(p.pool)+' '+p.n+(p.solo?' · solo':'')+'</span>'}).join('')+'</div>'+
-    '<div class="box" style="margin-top:8px"><b>Padrões dos blocos solo (onde vai o hash alugado)</b>'+S.solo.n+' de '+S.n+' blocos ('+pctp(S.n?S.solo.n/S.n*100:0,0)+'). '+
-    (S.solo.edge!==null?'Margem média do aluguel quando saíram: '+pct(S.solo.edge,1)+' (nos outros blocos: '+(S.other.edge!==null?pct(S.other.edge,1):'—')+'). ':'')+
+  $('bl_sum').innerHTML='<p class="note" style="margin:0 0 8px">'+S.n+' blocos, de '+dt2(S.from)+' a '+dt2(S.to)+'.</p>'+
+    '<div class="kv"><div><small>Intervalo médio</small><span>'+(S.dt?FDI.dur(S.dt*1000):'—')+'</span></div><div><small>Lentos (&gt;30 min)</small><span>'+S.slow+'</span></div><div><small>Rápidos (&lt;2 min)</small><span>'+S.fast+'</span></div>'+
+    '<div><small>Transações</small><span>'+(S.txs?nf(S.txs,0):'—')+'</span></div><div><small>Tamanho</small><span>'+(S.size?nf(S.size/1000,1)+' KB':'—')+'</span></div><div><small>Taxas</small><span>'+(S.fees!==null?S.fees.toFixed(4):'—')+'</span></div></div>'+
+    '<div class="eyebrow" style="margin:10px 0 4px">Quem achou</div><div class="row" style="gap:6px">'+S.byPool.slice(0,12).map(function(p){return '<span class="chip'+(p.solo?' ok':'')+'">'+esc(p.pool)+' '+p.n+'</span>'}).join('')+(S.byPool.length>12?'<span class="note">+'+(S.byPool.length-12)+'</span>':'')+'</div>'+
+    '<div class="box" style="margin-top:8px"><b>Blocos solo (onde vai o hash alugado)</b>'+S.solo.n+' de '+S.n+' ('+pctp(S.n?S.solo.n/S.n*100:0,0)+'). '+
+    (S.solo.edge!==null?'Margem média do aluguel quando saíram: '+pct(S.solo.edge,1)+' (outros blocos: '+(S.other.edge!==null?pct(S.other.edge,1):'—')+'). ':'')+
     (top.length?'Horários (local) com mais blocos solo: '+top.map(function(x){return ('0'+x[0]).slice(-2)+'h ('+x[1]+')'}).join(', ')+'. ':'')+
-    'Com poucos blocos, isso ainda é coincidência; vira padrão com semanas de registro.</div>';
-  $('bl_list').innerHTML='<div class="stack" style="gap:6px;margin-top:10px">'+L.slice(0,40).map(function(b){
-    var ctx=b.netPH?'Rede '+nf(b.netPH,0)+' PH/s':'';
-    if(b.nhPH)ctx+=' · NiceHash '+nf(b.nhPH,0)+' PH/s alugados'+(b.nhBid?' a '+b.nhBid.toFixed(4):'')+(b.be?' (empate '+b.be.toFixed(4)+', margem '+pct(b.edge,1)+')':'');
-    if(b.realPH)ctx+=' · <b>Suas ordens: '+nf(b.realPH,2)+' PH/s (chance '+pctp(b.realProb*100,2)+')</b>';
-    var sim=b.simPH?' · Simulação: '+nf(b.simPH,0)+' PH/s, chance '+pctp(b.simProb*100,2)+', '+(b.simWon?'<b class="good">seria seu</b>':'não saiu'):'';
-    return '<div class="trow"><div><b>'+b.h+'</b> <span class="note">'+hhU(b.t)+'</span> · <b>'+esc(b.pool)+'</b>'+(b.solo?' <span class="chip ok">solo</span>':'')+(b.mine?' <span class="chip ok">seu bloco</span>':'')+(b.dt!==null&&b.dt!==undefined?' <span class="note">'+(b.dt<60?'menos de 1 min':FDI.dur(b.dt*1000))+' após o anterior</span>':'')+'</div>'+
-      '<div class="note">'+(b.txs?b.txs+' transações · ':'')+(b.size?nf(b.size/1000,1)+' KB · ':'')+'recompensa '+b.reward.toFixed(4)+' BCH'+(b.usd?' ('+usd(b.usd,0)+')':'')+' · taxas '+b.fees.toFixed(4)+(b.poolFeePct!==null&&b.poolFeePct!==undefined?' · pool '+nf(b.poolFeePct,1)+'%':'')+'</div>'+
-      (ctx||sim?'<div class="note">'+ctx+sim+'</div>':'')+(b.backfill?'<div class="note">Buscado depois: sem dados de mercado do momento.</div>':'')+'</div>'}).join('')+'</div>'+(L.length>40?'<p class="note">Mostrando 40 de '+L.length+'. O CSV tem todos.</p>':'');
+    'Intervalos: '+pctp(S.n?S.fast/S.n*100:0,0)+' abaixo de 2 min e '+pctp(S.n?S.slow/S.n*100:0,0)+' acima de 30 min (sorteio puro daria ~18% e ~5%).</div>';
 }
 $('bl_csv').addEventListener('click',function(){
   if(!blk.list.length)return;
@@ -1717,6 +1731,16 @@ renderCalc();renderLiq();renderFees();renderPositions();renderSessions();renderP
 state.rows=FD.demoData(Date.now());renderScan();renderHome();
 tab(TABS.indexOf(settings.tab)>=0?settings.tab:'home');
 tickClock();setInterval(tickClock,20000);
+// iPhone (atalho na tela de início): ao voltar do segundo plano ou depois de muito tempo aberto, a barra fixa de baixo
+// às vezes fica "flutuando". Reancora pela área visível real (visualViewport) e força o recálculo do layout.
+(function(){
+  var nav=document.querySelector('nav'),vv=window.visualViewport;if(!nav)return;
+  function fix(){var gap=vv?(vv.height+vv.offsetTop)-window.innerHeight:0;nav.style.transform=Math.abs(gap)>1&&Math.abs(gap)<160?'translateY('+gap+'px)':''}
+  function kick(){fix();requestAnimationFrame(function(){window.scrollTo(window.scrollX,window.scrollY);fix()});setTimeout(fix,350);setTimeout(fix,1200)}
+  if(vv){vv.addEventListener('resize',fix);vv.addEventListener('scroll',fix)}
+  ['pageshow','focus','orientationchange','resize'].forEach(function(ev){window.addEventListener(ev,kick)});
+  document.addEventListener('visibilitychange',function(){if(document.visibilityState==='visible')kick()});
+})();
 load();loadMining();if(settings.apiUrl)loadOps();
 renderAcct();
 if(linkConnect){tab('set');opsMsg('api_msg',linkConnect.ok?'Backend conectado pelo link. Agora conecte NiceHash e Telegram logo abaixo.':linkConnect.error,!linkConnect.ok);

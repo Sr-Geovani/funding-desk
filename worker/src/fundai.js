@@ -29,8 +29,27 @@ export function updateHistory(fh, { rows, selected, hour }) {
 // Moedas para acompanhar: as oportunidades boas, as posições abertas e as de maior diferença entre exchanges.
 export function pickCoins(rows, extra) {
   const spread = Object.entries(rows).map(([c, r]) => { const a = Object.values(r).map((x) => x.apr).filter(isFinite); return [c, a.length > 1 ? Math.max(...a) - Math.min(...a) : 0]; });
-  const top = spread.filter((x) => x[1] >= 20).sort((a, b) => b[1] - a[1]).slice(0, 40).map((x) => x[0]);
+  // diferença ≥ 12% a.a.: perto do empate com ordem limite (~13% a.a.)
+  const top = spread.filter((x) => x[1] >= 12).sort((a, b) => b[1] - a[1]).slice(0, 40).map((x) => x[0]);
   return [...new Set((extra || []).concat(top))].slice(0, MAX_COINS);
+}
+
+// Pares cuja diferença ficou acima do empate (ordem limite) nas últimas 24 h seguidas: a regra validada em 90 dias.
+export function stablePairs(fh, { fees, slipPct = 0.03, hours = 24 }) {
+  const out = {};
+  if (!fh || !fh.coins) return out;
+  const mk = (v) => (fees[v] && isFinite(fees[v].maker) ? fees[v].maker : 0.02);
+  for (const [c, e] of Object.entries(fh.coins)) {
+    const vs = Object.keys(e.v);
+    for (const A of vs) for (const B of vs) {
+      if (A === B) continue;
+      const a = e.v[A].slice(-hours), b = e.v[B].slice(-hours);
+      if (a.length < hours || b.length < hours) continue;
+      const be = beApr(2 * (mk(A) + mk(B)) + slipPct, 3);
+      if (a.every((x, i) => x !== null && b[i] !== null && x - b[i] >= be)) out[c + '|' + A + '|' + B] = true;
+    }
+  }
+  return out;
 }
 
 // Nota de cada par (short A, long B) com spread acima do empate agora. fees: % taker por exchange.

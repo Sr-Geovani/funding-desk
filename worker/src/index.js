@@ -13,7 +13,7 @@ import FD from '../../core.js';
 import FDR from '../../radar.js';
 import { algoPaperStep } from './paperalgo.js';
 import { FUND_MODEL } from './fundmodel.js';
-import { updateHistory, pickCoins, scorePairs } from './fundai.js';
+import { updateHistory, pickCoins, scorePairs, stablePairs } from './fundai.js';
 import { blockRecord, blockSummary, poolOf } from './blocks.js';
 import { withCreds, reloadCreds, saveCreds, credStatus, parseNiceHash, TG_TOKEN_RE, chatFromUpdates } from './creds.js';
 
@@ -214,7 +214,7 @@ export async function tick(env, opts = {}) {
 
   // Alertas (entrada/saída/risco) com aviso no Telegram; não dependem do modo do robô.
   let newAlerts = [], alertState = { alertPrev: state.alertPrev, alertMem: state.alertMem, alerts: state.alerts };
-  const funding = predR.ok ? fundingSnapshot(predR.v, cfg, now) : null;
+  const funding = predR.ok ? fundingSnapshot(predR.v, cfg, now, cfg.fundStable24 !== false ? (state.stable24 || {}) : null) : null;
   if (!predR.ok) errors.push('funding (Hyperliquid): ' + predR.e);
   // Operações simuladas de funding: rodam sempre (o funding ainda é manual; isto mostra o que um robô com regras fixas faria).
   let fundPaper = state.fundPaper || null;
@@ -224,7 +224,7 @@ export async function tick(env, opts = {}) {
     for (const e of fp.events) log.push({ t: now, kind: 'simulado', text: e });
   }
   // IA (modo sombra): histórico horário próprio + nota dos pares; robô "Regras + IA" ao lado do "Regras".
-  let aiScores = state.aiScores || {}, fundPaperAI = state.fundPaperAI || null, fhistHour = state.fhistHour;
+  let aiScores = state.aiScores || {}, fundPaperAI = state.fundPaperAI || null, fhistHour = state.fhistHour, stable24 = state.stable24 || {};
   if (funding && FUND_MODEL) {
     const hour = Math.floor(now / 3600e3);
     if (hour !== fhistHour) {
@@ -232,6 +232,7 @@ export async function tick(env, opts = {}) {
       const fh = updateHistory(await kvGet(env, 'fhist', null), { rows: funding.rows, selected: pickCoins(funding.rows, extra), hour });
       await kvPut(env, 'fhist', fh);
       aiScores = scorePairs(fh, { model: FUND_MODEL, fees: FD.DEFAULT_FEES });
+      stable24 = stablePairs(fh, { fees: FD.DEFAULT_FEES });
       fhistHour = hour;
     }
     const okBest = (funding.best || []).filter((b) => aiScores[b.key] && aiScores[b.key].p >= FUND_MODEL.threshold);
@@ -281,7 +282,7 @@ export async function tick(env, opts = {}) {
   const alertScore = alertScoreStep(state.alertScore, { rows: funding && funding.rows, entries, now, fees: FD.DEFAULT_FEES, holdDays: cfg.alertHold || 3 });
 
   const next = Object.assign({}, dec.state, alertState, {
-    lastTick: now, paper, paperBurst, blockBuf, blockFlush, lastBlockT, real, fundPaper, alertScore, algoPaper, algoTs, aiScores, fundPaperAI, fhistHour, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig,
+    lastTick: now, stable24, paper, paperBurst, blockBuf, blockFlush, lastBlockT, real, fundPaper, alertScore, algoPaper, algoTs, aiScores, fundPaperAI, fhistHour, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig,
     market: mkt.ok ? { breakEvenEH: mkt.breakEvenEH, capEH: mkt.capEH, fillEH: mkt.fillEH, medianEH: mkt.medianEH, bidEH: mkt.bidEH,
       edgeAtBidPct: mkt.edgeAtBidPct, green: mkt.green, D: mkt.D, bchUsd: mkt.bchUsd, btcUsd: mkt.btcUsd, costPerBlockUsd: mkt.costPerBlockUsd,
       hashpriceNet: mkt.hashpriceNet, blockNetUsd: mkt.blockNetUsd, phDaysPerBlock: mkt.phDaysPerBlock, market: mkt.market } : { ok: false, reason: mkt.reason },
@@ -395,7 +396,7 @@ async function api(req, env, url, fetchFn) {
         fundPaper: state.fundPaper ? { summary: fundPaperSummary(state.fundPaper), open: state.fundPaper.open, closed: state.fundPaper.closed.slice(-100).reverse() } : null,
         algoPaper: state.algoPaper || null,
         fundPaperAI: state.fundPaperAI ? { summary: fundPaperSummary(state.fundPaperAI), open: state.fundPaperAI.open, closed: state.fundPaperAI.closed.slice(-100).reverse() } : null,
-        aiScores: state.aiScores || {},
+        aiScores: state.aiScores || {}, stable24: Object.keys(state.stable24 || {}),
         model: FUND_MODEL ? { threshold: FUND_MODEL.threshold, report: FUND_MODEL.report } : null,
         alertScore: state.alertScore ? { summary: alertScoreSummary(state.alertScore, FUND_MODEL ? FUND_MODEL.threshold : 0.5), open: state.alertScore.open.map((o) => Object.assign({}, o, { legs: undefined })), done: state.alertScore.done.slice(-100).reverse() } : null } });
   }
@@ -432,7 +433,7 @@ async function api(req, env, url, fetchFn) {
   }
   if (p === '/paper/reset' && m === 'POST') {
     const st = await kvGet(env, 'state', {});
-    if (body.what === 'funding') { st.fundPaper = null; st.fundPaperAI = null; }
+    if (body.what === 'funding') { st.fundPaper = null; st.fundPaperAI = null; st.alertScore = null; }
     else if (body.what === 'mining') { st.paper = null; st.paperBurst = null; } else if (body.what === 'algos') { st.algoPaper = null; st.algoTs = 0; }
     else if (body.what === 'all') { st.paper = null; st.paperBurst = null; st.fundPaper = null; st.fundPaperAI = null; st.algoPaper = null; st.algoTs = 0; } else st.paper = null;
     await kvPut(env, 'state', st);

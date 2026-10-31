@@ -4,14 +4,16 @@ import FD from '../../core.js';
 import FDR from '../../radar.js';
 import FDC from '../../copilot.js';
 
-export function fundingSnapshot(predicted, cfg, now) {
+// stable24: { 'MOEDA|SHORT|LONG': true } para pares com 24 h seguidas acima do empate (regra validada); sem histórico = ainda não.
+export function fundingSnapshot(predicted, cfg, now, stable24) {
   const p = FD.parsePredicted(predicted), rows = {};
   for (const v of Object.keys(p)) for (const c of Object.keys(p[v])) (rows[c] = rows[c] || {})[v] = p[v][c];
   const hold = cfg.alertHold || 3;
   const params = { capital: cfg.alertCapital || 1000, lev: 2, hold, minVol: 0, minOi: 0, aprCap: 150, mode: 'pp', fees: FD.DEFAULT_FEES,
-    execShort: 'taker', execLong: 'taker', slipPct: 0.03, rebalUsd: 1, sort: 'net', now };
+    execShort: 'maker', execLong: 'maker', slipPct: 0.03, rebalUsd: 1, sort: 'net', now };
   const best = FD.opportunities(rows, params).slice(0, 20).map((o) => {
-    const v = FDC.fundingVerdict(o, { hold, aprCap: 150 });
+    const key = o.coin + '|' + o.s + '|' + o.l;
+    const v = FDC.fundingVerdict(o, { hold, aprCap: 150, requireStable24: !!stable24, stable24: stable24 ? stable24[key] === true : undefined });
     return { key: o.coin + '|' + o.s + '|' + o.l, coin: o.coin, s: o.s, l: o.l, spread: o.spread, netUsd: o.m.netUsd, title: 'short ' + o.s + ', long ' + o.l, level: v.level,
       netTxt: '~' + FDC.money(o.m.netUsd) + ' em ' + hold + ' dias com ' + FDC.money(o.m.notional, 0) + ' por perna' };
   }).filter((b) => b.level === 'go').slice(0, 5);

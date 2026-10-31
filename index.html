@@ -75,9 +75,13 @@ button.icon{padding:5px 9px;font-size:12px;font-family:var(--f-mono)}
 .seg{display:flex;gap:6px;flex-wrap:wrap}
 .seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
 /* abas internas: uma linha só; se não couber, rola dentro da própria faixa */
-#fundSeg,#mineSeg,#diarySeg{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+#fundSeg,#diarySeg{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+/* Mineração: 6 abas em grade 3 × 2, sem rolagem lateral */
+#mineSeg{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+#mineSeg button{padding:9px 4px;font-size:14px;text-align:center}
+@media (min-width:640px){#mineSeg{grid-template-columns:repeat(6,1fr)}}
 #fundSeg::-webkit-scrollbar,#mineSeg::-webkit-scrollbar,#diarySeg::-webkit-scrollbar{display:none}
-#fundSeg button,#mineSeg button,#diarySeg button{flex:0 0 auto;padding:8px 9px;font-size:14px}
+#fundSeg button,#diarySeg button{flex:0 0 auto;padding:8px 9px;font-size:14px}
 details>summary{cursor:pointer;color:var(--mute);font-size:13px;font-weight:600;padding:4px 0;list-style-position:inside}
 details[open]>summary{margin-bottom:8px}
 .opp{display:grid;gap:8px;border-left:3px solid var(--line)}
@@ -267,8 +271,8 @@ details.card>summary{color:var(--fg);font-size:15px}
         <details style="margin-top:10px">
           <summary>Custos, execução e filtros</summary>
           <div class="grid2">
-            <label>Perna short<select id="exS"><option value="taker">taker</option><option value="maker">maker</option></select></label>
-            <label>Perna long<select id="exL"><option value="taker">taker</option><option value="maker">maker</option></select></label>
+            <label>Perna short<select id="exS"><option value="maker" selected>maker (ordem limite)</option><option value="taker">taker (a mercado)</option></select></label>
+            <label>Perna long<select id="exL"><option value="maker" selected>maker (ordem limite)</option><option value="taker">taker (a mercado)</option></select></label>
             <label>Rebalanceamento (US$/ciclo)<input id="rebal" type="number" inputmode="decimal" value="1" step="0.5"></label>
             <label>Slippage/basis (% notional)<input id="slip" type="number" inputmode="decimal" value="0.03" step="0.01"></label>
             <label>Open interest mín. (US$ mi)<input id="minoi" type="number" inputmode="decimal" value="0"></label>
@@ -459,7 +463,10 @@ details.card>summary{color:var(--fg);font-size:15px}
       <div class="card"><button id="o_kill" style="width:100%;background:var(--bad);border-color:var(--bad);color:#fff">Emergência: desligar robô e cancelar ordens gerenciadas</button></div>
     </div>
     <div id="mine-net" class="stack" hidden>
-      <div class="card" id="bl_card"><h2>Blocos da rede, um a um</h2><p class="note" id="bl_msg">Carregando o registro do servidor…</p><div id="bl_sum"></div><div id="bl_list"></div>
+      <div class="card"><h2>Rede Bitcoin Cash <span class="tag">dado real</span></h2><div class="kv" id="n_kv"></div></div>
+      <div class="card" id="bl_card"><div class="row between"><h2 style="margin:0">Blocos</h2><span class="note" id="bl_src"></span></div>
+        <p class="note" id="bl_msg" style="margin:6px 0 8px">Carregando…</p>
+        <div id="bl_list"></div><div class="scroll" id="bl_fallback"><table id="n_blocks"></table></div>
         <details style="margin-top:10px"><summary>O que é cada campo</summary><dl class="gloss" style="margin-top:6px">
           <dt>Transações</dt><dd>Pagamentos de pessoas incluídos no bloco. Cada uma paga uma pequena taxa, que vai para quem achou o bloco.</dd>
           <dt>Tamanho</dt><dd>Quanto o bloco ocupa (KB). Mais transações, bloco maior.</dd>
@@ -473,10 +480,9 @@ details.card>summary{color:var(--fg);font-size:15px}
         </dl></details>
         <div class="row" style="margin-top:10px"><button class="sm" id="bl_csv">Exportar CSV</button><button class="sm" id="bl_more">Buscar blocos anteriores</button></div>
       </div>
-      <div class="card"><h2>Rede Bitcoin Cash <span class="tag">dado real</span></h2><div class="kv" id="n_kv"></div></div>
+      <div class="card" id="bl_sumcard"><h2>Padrões dos blocos</h2><div id="bl_sum"><p class="note">Precisa do backend conectado.</p></div></div>
       <div class="card"><h3 style="margin-bottom:8px">Dificuldade nos últimos blocos (G)</h3><div class="chart" id="n_chart"></div>
         <p class="note" style="margin:6px 0 0">O BCH reajusta a dificuldade a cada bloco (ASERT, meia-vida de 2 dias). Blocos atrasados baixam a dificuldade do próximo; isso deixa o hash um pouco mais rentável, não "mais perto" de achar.</p></div>
-      <div class="card"><h3 style="margin-bottom:8px">Últimos blocos</h3><div class="scroll"><table id="n_blocks"></table></div></div>
     </div>
   </section>
 
@@ -517,8 +523,8 @@ details.card>summary{color:var(--fg);font-size:15px}
         <p class="note" style="margin:8px 0 4px"><b>Sem viés:</b> cada operação é registrada no ciclo em que a decisão acontece (a cada 3 min), só com os dados daquele momento. Toda oportunidade que passa nas regras entra; nada é escolhido ou apagado depois. Nenhum dinheiro é usado.</p>
         <p class="note" style="margin:8px 0 4px"><b>Funding (Perp × Perp)</b></p>
         <ul class="note" style="margin:0;padding-left:18px">
-          <li>Entra quando a oportunidade fica em "Compensa" em 2 leituras seguidas. Até 3 abertas, uma por moeda, pela ordem do maior líquido projetado.</li>
-          <li>US$1.000 por operação, 2x: US$1.000 por perna. Taxa taker nas 4 execuções + 0,03% de deslize.</li>
+          <li>Entra quando a oportunidade fica em "Compensa" em 2 leituras seguidas. "Compensa" exige a diferença acima do empate nas últimas 24 h seguidas (regra validada em 90 dias de dados; o servidor precisa de 24 h de histórico próprio). Até 3 abertas, uma por moeda.</li>
+          <li>US$1.000 por operação, 2x: US$1.000 por perna. Taxa maker (ordem limite) nas 4 execuções + 0,03% de deslize.</li>
           <li>Recebe ou paga no horário de cada exchange, com a taxa prevista na última leitura antes do horário (short recebe, long paga).</li>
           <li>Sai quando a diferença de funding fica ≤ 0 em 2 leituras seguidas (ou a moeda some dos dados). Não há prazo fixo.</li>
           <li>Exchanges: Binance, Bybit e Hyperliquid (o que o servidor lê de qualquer região).</li>

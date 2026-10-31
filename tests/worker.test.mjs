@@ -12,7 +12,8 @@ import { memoryKV } from '../worker/dev/server.mjs';
 import { seal, unseal, chatFromUpdates, parseNiceHash } from '../worker/src/creds.js';
 import { paperStep, realStep } from '../worker/src/paper.js';
 import { algoPaperStep } from '../worker/src/paperalgo.js';
-import { fundPaperStep, fundPaperSummary, alertScoreStep, alertScoreSummary } from '../worker/src/paperfund.js';
+import { fundPaperStep, fundPaperSummary, alertScoreStep, alertScoreSummary, FUND_RULES } from '../worker/src/paperfund.js';
+const TAKER = Object.assign({}, FUND_RULES, { exec: 'taker' });
 const FDM = createRequire(import.meta.url)('../mining.js');
 
 const close = (a, b, eps = 1e-9, msg = '') => assert.ok(Math.abs(a - b) <= eps, `${msg} esperado ${b}, veio ${a}`);
@@ -134,6 +135,8 @@ async function setup() {
     const r = await worker.fetch(new Request('https://api.example' + path, { method, headers: { Authorization: 'Bearer ' + token, Origin: 'https://sr-geovani.github.io', 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined }), env, {});
     return { status: r.status, body: await r.json(), headers: r.headers };
   };
+  // Os testes antigos de funding exercitam a regra sem a exigência de 24 h (o mock não tem histórico horário).
+  await env.FD_KV.put('config', JSON.stringify({ fundStable24: false }));
   return { server, state, env, call, base };
 }
 
@@ -507,21 +510,21 @@ test('funding simulado: entra após 2 leituras, recebe nos horários de cada exc
   const fees = { Bybit: { taker: 0.055 }, Hyperliquid: { taker: 0.045 } };
   const rows = (sBy, nBy, sHl, nHl) => ({ ENA: { Bybit: { rate: sBy, apr: sBy * 3 * 365, hours: 8, next: nBy }, Hyperliquid: { rate: sHl, apr: sHl * 24 * 365, hours: 1, next: nHl } } });
   const best = [{ key: 'ENA|Bybit|Hyperliquid', coin: 'ENA', s: 'Bybit', l: 'Hyperliquid' }];
-  let r = fundPaperStep(null, { rows: rows(0.1, T0 + 60 * M, 0.00125, T0 + 10 * M), best, now: T0, fees });
+  let r = fundPaperStep(null, { rows: rows(0.1, T0 + 60 * M, 0.00125, T0 + 10 * M), best, now: T0, fees, rules: TAKER });
   assert.equal(r.pf.open.length, 0, 'uma leitura só não entra');
-  r = fundPaperStep(r.pf, { rows: rows(0.1, T0 + 60 * M, 0.00125, T0 + 10 * M), best, now: T0 + 3 * M, fees });
+  r = fundPaperStep(r.pf, { rows: rows(0.1, T0 + 60 * M, 0.00125, T0 + 10 * M), best, now: T0 + 3 * M, fees, rules: TAKER });
   assert.equal(r.pf.open.length, 1); assert.match(r.events[0], /entrou em ENA \(short Bybit, long Hyperliquid\)/);
   close(r.pf.open[0].feesUsd, 1000 * (0.055 + 0.045 + 0.015) / 100);
-  r = fundPaperStep(r.pf, { rows: rows(0.1, T0 + 60 * M, 0.00125, T0 + 70 * M), best, now: T0 + 15 * M, fees });
+  r = fundPaperStep(r.pf, { rows: rows(0.1, T0 + 60 * M, 0.00125, T0 + 70 * M), best, now: T0 + 15 * M, fees, rules: TAKER });
   close(r.pf.open[0].fundingUsd, -0.0125, 1e-12, 'long na HL paga a taxa');
-  r = fundPaperStep(r.pf, { rows: rows(0.1, T0 + 60 * M, 0.00125, T0 + 70 * M), best, now: T0 + 18 * M, fees });
+  r = fundPaperStep(r.pf, { rows: rows(0.1, T0 + 60 * M, 0.00125, T0 + 70 * M), best, now: T0 + 18 * M, fees, rules: TAKER });
   assert.equal(r.pf.open[0].payments, 1, 'não paga duas vezes o mesmo horário');
-  r = fundPaperStep(r.pf, { rows: rows(0.1, T0 + 540 * M, 0.00125, T0 + 70 * M), best, now: T0 + 61 * M, fees });
+  r = fundPaperStep(r.pf, { rows: rows(0.1, T0 + 540 * M, 0.00125, T0 + 70 * M), best, now: T0 + 61 * M, fees, rules: TAKER });
   close(r.pf.open[0].fundingUsd, 1 - 0.0125, 1e-12, 'short na Bybit recebe 0,1%');
   // diferença vira negativa duas vezes: sai
-  r = fundPaperStep(r.pf, { rows: rows(-0.01, T0 + 540 * M, 0.00125, T0 + 130 * M), best: [], now: T0 + 64 * M, fees });
+  r = fundPaperStep(r.pf, { rows: rows(-0.01, T0 + 540 * M, 0.00125, T0 + 130 * M), best: [], now: T0 + 64 * M, fees, rules: TAKER });
   assert.equal(r.pf.open.length, 1, 'uma leitura negativa ainda não sai');
-  r = fundPaperStep(r.pf, { rows: rows(-0.01, T0 + 540 * M, 0.00125, T0 + 130 * M), best: [], now: T0 + 67 * M, fees });
+  r = fundPaperStep(r.pf, { rows: rows(-0.01, T0 + 540 * M, 0.00125, T0 + 130 * M), best: [], now: T0 + 67 * M, fees, rules: TAKER });
   assert.equal(r.pf.open.length, 0); assert.equal(r.pf.closed.length, 1);
   const c = r.pf.closed[0];
   close(c.netUsd, 1 - 0.0125 - 2 * 1.15, 1e-9); assert.match(c.reason, /virou contra/); assert.match(r.events[0], /saiu de ENA .* −US\$1\.31/);
@@ -572,11 +575,11 @@ test('placar dos alertas: acompanha o prazo projetado e compara com o que pagou'
   const T0 = Date.UTC(2026, 9, 31, 12), H = 36e5, fees = { Bybit: { taker: 0.055 }, Hyperliquid: { taker: 0.045 } };
   const rows = (next) => ({ ENA: { Bybit: { rate: 0.05, apr: 54.75, hours: 8, next }, Hyperliquid: { rate: 0, apr: 0, hours: 1, next: T0 + 999 * H } } });
   const e = [{ key: 'ENA|Bybit|Hyperliquid', coin: 'ENA', s: 'Bybit', l: 'Hyperliquid', projUsd: 2.2 }];
-  let sc = alertScoreStep(null, { rows: rows(T0 + 8 * H), entries: e, now: T0, fees, holdDays: 1 });
+  let sc = alertScoreStep(null, { rows: rows(T0 + 8 * H), entries: e, now: T0, fees, holdDays: 1, rules: TAKER });
   assert.equal(sc.open.length, 1);
-  sc = alertScoreStep(sc, { rows: rows(T0 + 16 * H), entries: [], now: T0 + 8 * H + 60e3, fees, holdDays: 1 });
-  sc = alertScoreStep(sc, { rows: rows(T0 + 24 * H), entries: [], now: T0 + 16 * H + 60e3, fees, holdDays: 1 });
-  sc = alertScoreStep(sc, { rows: rows(T0 + 32 * H), entries: [], now: T0 + 24 * H + 60e3, fees, holdDays: 1 });
+  sc = alertScoreStep(sc, { rows: rows(T0 + 16 * H), entries: [], now: T0 + 8 * H + 60e3, fees, holdDays: 1, rules: TAKER });
+  sc = alertScoreStep(sc, { rows: rows(T0 + 24 * H), entries: [], now: T0 + 16 * H + 60e3, fees, holdDays: 1, rules: TAKER });
+  sc = alertScoreStep(sc, { rows: rows(T0 + 32 * H), entries: [], now: T0 + 24 * H + 60e3, fees, holdDays: 1, rules: TAKER });
   assert.equal(sc.open.length, 0); assert.equal(sc.done.length, 1);
   const d = sc.done[0];
   assert.equal(d.payments, 3); close(d.fundingUsd, 1.5, 1e-9);
@@ -788,4 +791,21 @@ test('blocos: nomes de pool agrupados mesmo com assinatura suja', () => {
   assert.equal(poolOf('/JCBCH/Z').pool, 'JCBCH'); assert.equal(poolOf('LXBG LSoftware DMCC 9810').pool, 'LSoftware DMCC');
   assert.equal(poolOf('/luckyfastblocks/').pool, 'luckyfastblocks'); assert.equal(poolOf('000d5fce KardanPool').pool, 'KardanPool');
   assert.equal(poolOf('themule.online').pool, 'themule.online'); assert.deepEqual(poolOf(''), { pool: 'desconhecido', solo: false });
+});
+
+test('funding: regra validada exige 24 h seguidas acima do empate (ordem limite)', async () => {
+  const { stablePairs } = await import('../worker/src/fundai.js');
+  const fees = { Bybit: { maker: 0.02 }, Hyperliquid: { maker: 0.015 } };
+  const mk = (n, x) => ({ coins: { ENA: { lastSel: 1, v: { Bybit: new Array(n).fill(x), Hyperliquid: new Array(n).fill(0) } } } });
+  assert.deepEqual(stablePairs(mk(24, 40), { fees }), { 'ENA|Bybit|Hyperliquid': true });
+  assert.deepEqual(stablePairs(mk(23, 40), { fees }), {}, 'menos de 24 h: ainda não');
+  const dip = mk(24, 40); dip.coins.ENA.v.Bybit[10] = 5;
+  assert.deepEqual(stablePairs(dip, { fees }), {}, 'uma hora abaixo do empate quebra');
+  // no servidor: sem 24 h de histórico, a oportunidade fica "no limite" e não gera alerta de entrada
+  const t = await setup();
+  try {
+    await t.call('PUT', '/api/config', { fundStable24: true });
+    await t.call('POST', '/api/tick'); const r = await t.call('POST', '/api/tick');
+    assert.equal(r.body.alerts.filter((a) => a.kind === 'entrada' && a.area === 'funding').length, 0);
+  } finally { t.server.close(); }
 });

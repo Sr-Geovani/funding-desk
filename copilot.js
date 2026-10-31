@@ -68,6 +68,20 @@ function fundingVerdict(o, ctx) {
       ? (sp ? 'Pode entrar: compre o spot e abra o short no perpétuo, mesmo tamanho, ao mesmo tempo.' : 'Pode entrar: abra as duas pernas juntas, mesmo tamanho, margem isolada.') + ' Registre no Diário.'
       : (slow ? 'Margem apertada: os custos levam mais da metade do ciclo para se pagar. ' : '') + 'Entre só com tamanho menor ou espere o histórico confirmar.';
   }
+  // Regra validada em 90 dias de dados: só "Compensa" se a diferença ficou acima do empate nas últimas 24 h seguidas.
+  // ctx.stable24: true (ficou), false (não ficou) ou undefined (ainda conferindo). Spot + Perp não tem par para comparar.
+  if (level === 'go' && !sp && ctx.requireStable24) {
+    if (ctx.stable24 !== true) {
+      level = 'maybe';
+      why += ctx.stable24 === false
+        ? ' Mas a diferença não ficou acima do empate nas últimas 24 h seguidas: nos últimos 90 dias, entrar assim perdeu dinheiro na maioria das vezes.'
+        : ' Conferindo se a diferença ficou acima do empate nas últimas 24 h seguidas.';
+      action = 'Espere 24 h de diferença estável acima do empate; entre com ordem limite (maker) nas duas pernas.';
+    } else {
+      action = action.replace(' Registre no Diário.', ' Use ordem limite (maker) nas duas pernas. Registre no Diário.');
+      why += ' Ficou acima do empate nas últimas 24 h seguidas.';
+    }
+  }
   return { level: level, title: title, why: why, action: action, risks: risks };
 }
 

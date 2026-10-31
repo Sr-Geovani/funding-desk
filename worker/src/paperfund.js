@@ -6,10 +6,10 @@
 //    (short recebe a taxa; long paga a taxa). Fonte: previsto da Hyperliquid (Binance, Bybit, Hyperliquid).
 //  - Saída: diferença de funding ≤ 0 em 2 leituras seguidas, ou a moeda sumir dos dados por 2 leituras.
 //  - Custos: taxa taker nas 4 execuções + 0,03% de deslize (metade na entrada, metade na saída).
-export const FUND_RULES = { confirm: 2, exitConfirm: 2, maxOpen: 3, capital: 1000, lev: 2, slipPct: 0.03, keepClosed: 200 };
+export const FUND_RULES = { confirm: 2, exitConfirm: 2, maxOpen: 3, capital: 1000, lev: 2, slipPct: 0.03, keepClosed: 200, exec: 'maker' };
 
-function legsFeePct(fees, s, l) {
-  const t = (v) => (fees[v] && isFinite(fees[v].taker) ? fees[v].taker : 0.05);
+function legsFeePct(fees, s, l, exec = 'maker') {
+  const t = (v) => (fees[v] && isFinite(fees[v][exec]) ? fees[v][exec] : (exec === 'maker' ? 0.02 : 0.05));
   return t(s) + t(l); // % do tamanho, numa ponta (entrada ou saída)
 }
 
@@ -47,7 +47,7 @@ export function fundPaperStep(pf, { rows, best, now, fees, rules = FUND_RULES, l
     const why = o.neg >= rules.exitConfirm ? 'funding virou contra (diferença ≤ 0 em 2 leituras)'
       : o.missing >= rules.exitConfirm ? 'moeda saiu dos dados' : null;
     if (!why) { still.push(o); continue; }
-    const exitFee = notional * (legsFeePct(fees, o.s, o.l) + rules.slipPct / 2) / 100;
+    const exitFee = notional * (legsFeePct(fees, o.s, o.l, rules.exec) + rules.slipPct / 2) / 100;
     const c = Object.assign({}, o, { closedAt: now, reason: why, feesUsd: o.feesUsd + exitFee });
     c.netUsd = c.fundingUsd - c.feesUsd; c.retPct = c.netUsd / rules.capital * 100;
     delete c.legs; delete c.neg; delete c.missing;
@@ -65,7 +65,7 @@ export function fundPaperStep(pf, { rows, best, now, fees, rules = FUND_RULES, l
     if (seen[b.key] < rules.confirm || p.open.some((o) => o.coin === b.coin)) continue;
     const cr = rows[b.coin] || {}, rs = cr[b.s], rl = cr[b.l];
     if (!rs || !rl) continue;
-    const entryFee = notional * (legsFeePct(fees, b.s, b.l) + rules.slipPct / 2) / 100;
+    const entryFee = notional * (legsFeePct(fees, b.s, b.l, rules.exec) + rules.slipPct / 2) / 100;
     p.open.push({ id: p.nextId++, key: b.key, coin: b.coin, s: b.s, l: b.l, openedAt: now, notional, entrySpread: rs.apr - rl.apr, spreadNow: rs.apr - rl.apr,
       feesUsd: entryFee, fundingUsd: 0, payments: 0, neg: 0, missing: 0,
       legs: newLegs(rs, rl, b.s, b.l) });
@@ -95,7 +95,7 @@ export function alertScoreStep(sc, { rows, entries, now, fees, holdDays = 3, rul
   for (const o of p.open) {
     if (rows) creditLegs(o, rows[o.coin] || {}, notional, now);
     if (now < o.t + H) { still.push(o); continue; }
-    const costs = notional * (2 * legsFeePct(fees, o.s, o.l) + rules.slipPct) / 100;
+    const costs = notional * (2 * legsFeePct(fees, o.s, o.l, rules.exec) + rules.slipPct) / 100;
     const d = Object.assign({}, o, { endedAt: now, costsUsd: costs, netUsd: o.fundingUsd - costs });
     d.hit = d.netUsd > 0; delete d.legs;
     p.done.push(d);
