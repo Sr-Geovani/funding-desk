@@ -13,6 +13,10 @@ var FEES=cloneFees();
     if(typeof s[k]==='number')FEES[k].taker=s[k];          // formato antigo: uma taxa por exchange
     else for(var f in s[k])if(isFinite(s[k][f]))FEES[k][f]=s[k][f];}})();
 var settings=ls('fd_set')||{};
+// Conserta endereço salvo errado (uma versão antiga gravava o link de conexão inteiro como endereço).
+(function(){var u=settings.apiUrl;if(!u)return;var c=parseConnect(u);
+  if(c&&!c.error){settings.apiUrl=c.u;ls('fd_tok',c.t)}else if(!/^(https:\/\/[a-z0-9.-]+|http:\/\/(localhost|127\.0\.0\.1))(:\d+)?$/i.test(u))settings.apiUrl='';
+  if(settings.apiUrl!==u)ls('fd_set',settings)})();
 var SCAN_INPUTS=['cap','lev','hold','minvol','exS','exL','rebal','slip','minoi','acap','newdays','sort','f_target'];
 var PLAN_INPUTS=['mp_ph','mp_h','mp_rfee','mp_pfee','mp_ofee','mp_rw','iv_total','iv_sess','iv_edge'];
 SCAN_INPUTS.concat(PLAN_INPUTS).forEach(function(id){if(settings[id]!==undefined)$(id).value=settings[id]});
@@ -642,8 +646,12 @@ function apiCfg(){return {url:(settings.apiUrl||'').replace(/\/+$/,''),token:ls(
 function apiCall(method,path,body){
   var c=apiCfg();
   if(!c.url)return Promise.reject(new Error('backend não configurado (Ajustes)'));
-  return fetch(c.url+'/api'+path,{method:method,headers:{Authorization:'Bearer '+c.token,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined})
-    .then(function(r){return r.json().catch(function(){return {}}).then(function(j){if(!r.ok){var er=new Error(j.error||('HTTP '+r.status));er.data=j;throw er}return j})});
+  var ac=window.AbortController?new AbortController():null,tm=ac?setTimeout(function(){ac.abort()},20000):0;
+  return fetch(c.url+'/api'+path,{method:method,headers:{Authorization:'Bearer '+c.token,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined,signal:ac?ac.signal:undefined})
+    .then(function(r){clearTimeout(tm);return r.json().catch(function(){return null}).then(function(j){
+      if(j===null||typeof j!=='object')throw new Error('esse endereço não respondeu como o backend (HTTP '+r.status+'). Cole o link de conexão de novo.');
+      if(!r.ok){var er=new Error(j.error||('HTTP '+r.status));er.data=j;throw er}return j})},
+    function(e){clearTimeout(tm);throw new Error(e&&e.name==='AbortError'?'o backend não respondeu em 20 s; confira a internet e tente de novo':'sem conexão com o backend ('+(e&&e.message||e)+')')});
 }
 var opsLoading=false;
 function loadOps(){
@@ -651,7 +659,7 @@ function loadOps(){
   if(opsLoading)return;opsLoading=true;
   Promise.all([apiCall('GET','/status'),apiCall('GET','/orders'),apiCall('GET','/balance'),apiCall('GET','/pools'),apiCall('GET','/log')].map(settle)).then(function(r){
     opsLoading=false;ops.at=Date.now();ops.err={};
-    if(r[0].ok)ops.status=r[0].v;else{ops.status=null;ops.err.status=r[0].e.message}
+    if(r[0].ok&&r[0].v&&r[0].v.config)ops.status=r[0].v;else{ops.status=null;ops.err.status=r[0].ok?'resposta inesperada do backend':r[0].e.message}
     if(r[1].ok)ops.orders=r[1].v.orders||[];else ops.err.orders=r[1].e.message;
     if(r[2].ok)ops.bal=r[2].v;else ops.err.bal=r[2].e.message;
     if(r[3].ok)ops.pools=r[3].v.list||[];else ops.err.pools=r[3].e.message;
@@ -838,7 +846,13 @@ function opCard(eyebrow,level,title,text,btns,extra){
     '<div class="lead">'+esc(title)+'</div><p class="why">'+esc(text)+'</p>'+(extra||'')+
     '<div class="row">'+btns.map(function(b){return '<button class="sm'+(b[2]?' pri':'')+'" data-go="'+b[0]+'"'+(b[3]?' data-setmode="'+b[3]+'"':'')+'>'+b[1]+'</button>'}).join('')+'</div></div>';
 }
+function renderLink(){
+  var need=!settings.apiUrl||(!ops.status&&/token inválido|não respondeu como o backend/.test(ops.err.status||''));
+  $('h_link').hidden=!need;
+  if(need)$('h_link_txt').textContent=(STANDALONE?'Este atalho do iPhone tem memória separada do Safari. ':'')+(settings.apiUrl?'A conexão com o backend falhou. ':'')+'Copie o link de conexão (o que o Claude mandou) e toque no botão: fica salvo neste aparelho.';
+}
 function renderHome(){
+  renderLink();
   var rows=VENUES.map(function(v){
     var s=state.src[v];
     if(s)return srcRow(v,s==='via HL'?'parcial':'ok',SRC_NAME[s]+(state.updated?' · '+hhmm(state.updated):''),s==='via HL'?'warn':'good');
@@ -1335,29 +1349,36 @@ function useConnect(c){
   $('api_url').value=c.u;$('api_token').value='';$('api_token').placeholder='token salvo neste aparelho';
   testBackend(true);
 }
-$('api_paste').addEventListener('click',function(){
-  var manual='Não consegui ler a área de transferência. Toque e segure no campo "Endereço do backend", cole o link inteiro e toque em Salvar e testar.';
-  if(!navigator.clipboard||!navigator.clipboard.readText){opsMsg('api_msg',manual,true);return}
+function pasteConnect(msgId){
+  var manual='Não consegui ler o que foi copiado. Em Ajustes → Backend, toque e segure no campo "Endereço do backend", cole o link inteiro e toque em Salvar e testar.';
+  if(!navigator.clipboard||!navigator.clipboard.readText){opsMsg(msgId,manual,true);return}
   navigator.clipboard.readText().then(function(txt){
     var c=parseConnect(txt);
-    if(!c){opsMsg('api_msg','O que está copiado não é o link de conexão. Copie o link inteiro (começa com https://sr-geovani.github.io/funding-desk/#api=) e tente de novo.',true);return}
-    if(c.error){opsMsg('api_msg',c.error,true);return}
+    if(!c){opsMsg(msgId,'O que está copiado não é o link de conexão. Copie o link inteiro (começa com https://sr-geovani.github.io/funding-desk/#api=) e tente de novo.',true);return}
+    if(c.error){opsMsg(msgId,c.error,true);return}
     useConnect(c);
-  },function(){opsMsg('api_msg',manual,true)});
-});
+  },function(){opsMsg(msgId,manual,true)});
+}
+$('api_paste').addEventListener('click',function(){pasteConnect('api_msg')});
+$('h_paste').addEventListener('click',function(){pasteConnect('h_link_msg')});
 $('api_save').addEventListener('click',function(){
   var c=parseConnect($('api_url').value);
   if(c&&c.error){opsMsg('api_msg',c.error,true);return}
   if(c){useConnect(c);return}
-  settings.apiUrl=$('api_url').value.trim().replace(/\/+$/,'');ls('fd_set',settings);
+  var nu=$('api_url').value.trim().replace(/\/+$/,'');
+  if(nu&&!/^(https:\/\/[a-z0-9.-]+|http:\/\/(localhost|127\.0\.0\.1))(:\d+)?$/i.test(nu)){opsMsg('api_msg','Endereço inválido. Cole o link de conexão inteiro ou um endereço https://… do backend.',true);return}
+  settings.apiUrl=nu;ls('fd_set',settings);
   if($('api_token').value)ls('fd_tok',$('api_token').value.trim());
   $('api_token').value='';$('api_token').placeholder=ls('fd_tok')?'token salvo neste aparelho':'';
   if(!settings.apiUrl){opsMsg('api_msg','Endereço vazio: backend desligado.');renderOps();return}
   testBackend(false);
 });
 function testBackend(fromLink){
-  opsMsg('api_msg','Testando…');
-  apiCall('GET','/status').then(function(st){opsMsg('api_msg','Conectado'+(fromLink?' pelo link':'')+'. NiceHash: '+st.nhEnv+' · chaves '+(st.keys?'ok':'faltando')+' · Telegram '+(st.telegram?'ok':'—')+' · robô '+MODE_TXT[st.config.mode]+'.');cache={};loadOps();loadMining()},function(e){opsMsg('api_msg','Falhou: '+e.message,true)});
+  opsMsg('api_msg','Testando…');opsMsg('h_link_msg','Conectando…');
+  apiCall('GET','/status').then(function(st){
+    if(!st||!st.config)throw new Error('resposta inesperada do backend');
+    opsMsg('h_link_msg','Conectado. Tudo o que aparece no site agora aparece aqui.');$('h_link').hidden=true;
+    opsMsg('api_msg','Conectado'+(fromLink?' pelo link':'')+'. NiceHash: '+st.nhEnv+' · chaves '+(st.keys?'ok':'faltando')+' · Telegram '+(st.telegram?'ok':'—')+' · robô '+MODE_TXT[st.config.mode]+'.');cache={};loadOps();loadMining()},function(e){opsMsg('api_msg','Falhou: '+e.message,true);opsMsg('h_link_msg','Falhou: '+e.message,true)});
 }
 /* ---------- conectar contas (chaves vão direto para o backend, cifradas lá; nada fica no painel) ---------- */
 function acctBusy(id,on){$(id).disabled=on}
