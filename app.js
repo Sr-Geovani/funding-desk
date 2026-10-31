@@ -734,25 +734,37 @@ function simResultHTML(p){
     '<details style="margin-top:8px"><summary>Chance e média de longo prazo</summary>'+outcomesHTML(p.spendUsd,p.evUsd,p.lambda,p.blockNetUsd)+'</details>';
 }
 // Contínuo (sua configuração) × rajada de 50 PH/s parando no bloco (método do vídeo): mesmos blocos e sorteio.
+// Tabela de cenários: custo × receita × lucro (com e sem a sorte) e o % sobre o custo, lado a lado.
+function money(x,cost){var c=Math.abs(x)<0.005?'':(x>0?'good':'bad');return '<span class="'+c+'">'+signUsd(x)+'</span>'+(cost>0?'<div class="note '+c+'">'+pct(x/cost*100,1)+'</div>':'')}
+function scenTable(cols,rows){
+  return '<div class="scroll"><table style="font-size:12px"><tr><th></th>'+cols.map(function(k){return '<th>'+k[1]+'</th>'}).join('')+'</tr>'+
+    rows.map(function(r){return '<tr><td>'+r[0]+'</td>'+cols.map(function(k){return '<td>'+(k[0]?r[1](k[0]):'—')+'</td>'}).join('')+'</tr>'}).join('')+'</table></div>';
+}
+var SCEN_ROWS=[
+  ['Desde',function(x){return new Date(x.since).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}],
+  ['Horas comprando',function(x){return nf(x.hoursOn||0,1)+' h'}],
+  ['Custo',function(x){return usd(x.spendUsd||0)}],
+  ['Receita (blocos)',function(x){return usd(x.wonUsd||0)+'<div class="note">'+(x.blocks||0)+' de '+(x.draws||0)+'</div>'}],
+  ['<b>Lucro (com sorte)</b>',function(x){return '<b>'+money((x.wonUsd||0)-(x.spendUsd||0),x.spendUsd||0)+'</b>'}],
+  ['Média (sem sorte)',function(x){return money((x.evUsd||0)-(x.spendUsd||0),x.spendUsd||0)}]
+];
 function burstHTML(p,b,c,a){
   if(!b&&!c&&!a)return '';
-  var cols=[[p,'Sua: '+nf(p.ph||+((ops.status||{}).config||{}).targetPh||0,0)+' PH/s'],[c,'Copiloto'+(c&&c.ph?': '+nf(c.ph,0)+' PH/s':'')],[b,'Rajada 50'],[a,'Sempre ligado'+(a&&a.ph?': '+nf(a.ph,0)+' PH/s':'')]];
-  var rows=[['Desde',function(x){return dt2(x.since)}],['Horas comprando',function(x){return nf(x.hoursOn||0,1)+' h'}],['Pausas',function(x){return String((x.runs||[]).length)}],
-    ['Gasto',function(x){return usd(x.spendUsd)}],['Blocos seus (de cobertos)',function(x){return (x.blocks||0)+' de '+(x.draws||0)}],
-    ['Resultado (com a sorte)',function(x){var r=(x.wonUsd||0)-x.spendUsd;return '<span class="'+(r>=0?'good':'bad')+'">'+signUsd(r)+'</span>'}],
-    ['Média esperada (sem sorte)',function(x){var m=(x.evUsd||0)-x.spendUsd;return '<span class="'+(m>=0?'good':'bad')+'">'+signUsd(m)+'</span>'+(x.spendUsd>0?' ('+pct(m/x.spendUsd*100,1)+')':'')}],
-    ['Chance de ≥1 bloco',function(x){return pctp((1-Math.exp(-(x.lambda||0)))*100,1)}]];
-  return '<div class="eyebrow" style="margin:14px 0 6px">Cenários lado a lado (mesmos blocos, mesmo sorteio)</div><div class="scroll"><table><tr><th></th>'+cols.map(function(k){return '<th>'+k[1]+'</th>'}).join('')+'</tr>'+
-    rows.map(function(r){return '<tr><td>'+r[0]+'</td>'+cols.map(function(k){return '<td>'+(k[0]?r[1](k[0]):'—')+'</td>'}).join('')+'</tr>'}).join('')+'</table></div>'+
-    archiveHTML()+'<p class="note" style="margin:6px 0 0">"Sua", "Copiloto" e "Rajada" compram abaixo do teto e pausam acima. "Sempre ligado" usa a sua potência sem pausar e sem stop-loss: tem mais chance de bloco porque fica mais horas comprando, mas paga também as horas em que o aluguel passou do teto. Compare a linha <b>Média esperada</b> (em %): ela mostra se cada hora comprada rende ou perde, sem a sorte. Os cenários podem ter começado em horas diferentes (linha "Desde").</p>';
+  var cols=[[p,'Sua<div class="note">'+nf(p.ph||+((ops.status||{}).config||{}).targetPh||0,0)+' PH/s</div>'],[c,'Copiloto<div class="note">'+(c&&c.ph?nf(c.ph,0)+' PH/s':'—')+'</div>'],[b,'Rajada<div class="note">50 PH/s</div>'],[a,'Sempre ligado<div class="note">'+(a&&a.ph?nf(a.ph,0)+' PH/s':'—')+'</div>']];
+  var rows=SCEN_ROWS.concat([['Pausas',function(x){return String((x.runs||[]).length)}],['Chance de ≥1 bloco',function(x){return pctp((1-Math.exp(-(x.lambda||0)))*100,1)}]]);
+  return '<div class="eyebrow" style="margin:14px 0 6px">Cenários lado a lado (mesmos blocos, mesmo sorteio) · deslize →</div>'+scenTable(cols,rows)+
+    archiveHTML()+'<p class="note" style="margin:6px 0 0">Lucro = receita dos blocos − custo do aluguel; o % embaixo é sobre o custo (quanto cada dólar gasto voltou). "Com a sorte" é o que teria acontecido de fato; "sem sorte" é a média que se repetiria em muitas vezes. "Sua", "Copiloto" e "Rajada" compram abaixo do teto e pausam acima; "Sempre ligado" usa a sua potência sem pausar e sem stop-loss. Os cenários podem ter começado em horas diferentes (linha "Desde").</p>';
 }
-// Simulações arquivadas na correção do preço (31/10): compravam a ~0,402, preço que não recebe hash.
+// Simulações arquivadas na correção do preço (31/10): compravam a ~0,402, preço que não recebe hash. O custo no preço
+// real soma ~5,8% (0,4254 ÷ 0,402); os blocos sorteados continuam valendo (o sorteio não depende do preço).
 function archiveHTML(){
   var A=ops.status&&ops.status.state&&ops.status.state.paperArchive;if(!A)return '';
-  var row=function(lab,x){if(!x)return '';var res=(x.wonUsd||0)-x.spendUsd,fix=x.spendUsd*0.058;
-    return '<li>'+lab+(x.ph?' ('+nf(x.ph,0)+' PH/s)':'')+': '+(x.blocks||0)+' bloco(s) de '+(x.draws||0)+', gasto '+usd(x.spendUsd)+', resultado '+signUsd(res)+' · com o preço real o gasto seria ~'+usd(x.spendUsd+fix)+' → '+signUsd(res-fix)+'</li>'};
-  return '<details style="margin-top:8px"><summary>Antes da correção do preço (até '+dt2(A.at)+')</summary><p class="note" style="margin:6px 0 0">Essas simulações compravam a ~0,402, mas o hash de verdade só ia para lances a partir de ~0,4254 (~5,8% mais caro). Os blocos sorteados continuam valendo (o sorteio não depende do preço); o custo estava baixo.</p><ul class="note" style="margin:4px 0 0;padding-left:18px">'+
-    row('Sua',A.paper)+row('Copiloto',A.plan)+row('Rajada 50',A.burst)+row('Sempre ligado',A.always)+'</ul></details>';
+  var hd=function(lab,x){return lab+'<div class="note">'+(x&&x.ph?nf(x.ph,0)+' PH/s':'—')+'</div>'},F=1.058,cols=[[A.paper,hd('Sua',A.paper)],[A.plan,hd('Copiloto',A.plan)],[A.burst,hd('Rajada',A.burst)],[A.always,hd('Sempre ligado',A.always)]];
+  var rows=SCEN_ROWS.concat([
+    ['Custo no preço real (+5,8%)',function(x){return usd((x.spendUsd||0)*F)}],
+    ['<b>Lucro no preço real</b>',function(x){var c=(x.spendUsd||0)*F;return '<b>'+money((x.wonUsd||0)-c,c)+'</b>'}],
+    ['Média no preço real',function(x){var c=(x.spendUsd||0)*F;return money((x.evUsd||0)-c,c)}]]);
+  return '<details style="margin-top:8px"><summary>Antes da correção do preço (até '+dt2(A.at)+')</summary><p class="note" style="margin:6px 0">Essas simulações compravam a ~0,402, mas o hash de verdade só ia para lances a partir de ~0,4254 (~5,8% mais caro). As linhas "no preço real" refazem a conta com o custo certo.</p>'+scenTable(cols,rows)+'</details>';
 }
 // Desfechos honestos de um período de aluguel: sem bloco (o mais comum) perde o gasto; com bloco ganha o bloco menos o gasto.
 // A média de longo prazo (receita esperada − gasto) só aparece repetindo muitas vezes.
