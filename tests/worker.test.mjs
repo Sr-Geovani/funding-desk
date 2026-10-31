@@ -34,6 +34,11 @@ test('unidades: produção (EH) e teste (PH)', () => {
   close(t.priceToEH, 1000); close(t.limitToPH, 1); close(t.priceDownStepEH, 0.1); close(t.minLimitPH, 0.05);
 });
 
+test('unidades: SHA256ASICBOOST real (mínimo 1 PH/s, degrau 0,002)', () => {
+  const u = algoUnits({ algorithm: 'SHA256ASICBOOST', marketFactor: '1000000000000000000.00000000', displayMarketFactor: 'EH', priceFactor: '1000000000000000000.00000000', minSpeedLimit: '0.00100000', maxSpeedLimit: '100.00000000', priceDownStep: '-0.00200000', minimalOrderAmount: '0.00100000', enabledMarketsNewOrder: 'BTC' });
+  close(u.minLimitPH, 1); close(u.priceDownStepEH, 0.002); close(u.priceToEH, 1); close(u.minOrderBtc, 0.001);
+});
+
 test('coinbase: detecta pagamento ao endereço', () => {
   const cb = { outs: [{ value: 3.1, addrs: [normAddr(ADDR)] }, { value: 0.06, addrs: ['qpoolfee'] }] };
   close(paidTo(cb, ADDR), 3.1);

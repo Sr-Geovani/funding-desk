@@ -62,7 +62,7 @@ export function createMock() {
     if (m) { const b = s.blocks[+m[1]] || { addr: 'qx', value: 3.125 }; return send(200, { vin: [{ coinbase: '00' }], vout: [{ value: b.value, scriptPubKey: { cashAddrs: ['bitcoincash:' + b.addr] } }] }); }
     // ---- NiceHash público ----
     if (p === '/nh/api/v2/time') return send(200, { serverTime: Date.now() });
-    if (p === '/nh/main/api/v2/mining/algorithms') return send(200, { miningAlgorithms: [{ algorithm: 'SHA256', marketFactor: '1000000000000000000.00000000', displayMarketFactor: 'EH', priceFactor: '1000000000000000000.00000000', minSpeedLimit: '0.00010000', maxSpeedLimit: '50.00000000', priceDownStep: '-0.01000000', minimalOrderAmount: '0.00100000', enabledMarketsNewOrder: 'BTC' }] });
+    if (p === '/nh/main/api/v2/mining/algorithms') return send(200, { miningAlgorithms: ['SHA256', 'SHA256ASICBOOST'].map((algorithm) => ({ algorithm, marketFactor: '1000000000000000000.00000000', displayMarketFactor: 'EH', priceFactor: '1000000000000000000.00000000', minSpeedLimit: '0.00010000', maxSpeedLimit: '50.00000000', priceDownStep: '-0.01000000', minimalOrderAmount: '0.00100000', enabledMarketsNewOrder: 'BTC' })) });
     if (p === '/nh/main/api/v2/hashpower/orderBook') return send(200, { stats: { BTC: { priceFactor: '1000000000000000000', marketFactor: '1000000000000000000', totalSpeed: '0.0012',
       orders: s.book.map((o) => ({ price: String(o.price), acceptedSpeed: String(o.speed), type: 'STANDARD', alive: true, limit: '1', rigsCount: 10 })) } } });
     // ---- NiceHash privado (assinado) ----

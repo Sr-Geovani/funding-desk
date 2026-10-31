@@ -33,7 +33,8 @@ export function algoUnits(a) {
   };
 }
 
-export function createClient({ base, key, secret, org, fetchFn = fetch, now = () => Date.now(), uuid = () => crypto.randomUUID() }) {
+export const DEFAULT_ALGO = 'SHA256ASICBOOST'; // mercado SHA-256 líquido da NiceHash (o "SHA256" puro é quase vazio)
+export function createClient({ base, key, secret, org, algorithm = DEFAULT_ALGO, fetchFn = fetch, now = () => Date.now(), uuid = () => crypto.randomUUID() }) {
   let offset = null;
   async function serverOffset() {
     if (offset === null) {
@@ -70,8 +71,8 @@ export function createClient({ base, key, secret, org, fetchFn = fetch, now = ()
   async function units() {
     if (!algo) {
       const d = await publicGet('/main/api/v2/mining/algorithms');
-      const a = d.miningAlgorithms.find((x) => x.algorithm === 'SHA256');
-      if (!a) throw new Error('SHA256 não encontrado na NiceHash');
+      const a = d.miningAlgorithms.find((x) => x.algorithm === algorithm);
+      if (!a) throw new Error(algorithm + ' não encontrado na NiceHash');
       algo = algoUnits(a);
     }
     return algo;
@@ -90,24 +91,24 @@ export function createClient({ base, key, secret, org, fetchFn = fetch, now = ()
   }
   const fmt8 = (x) => (Math.round(x * 1e8) / 1e8).toFixed(8);
   return {
-    call, units, publicGet,
+    call, units, publicGet, algorithm,
     serverTime: async () => now() + (await serverOffset()),
-    orderBook: () => publicGet('/main/api/v2/hashpower/orderBook', 'algorithm=SHA256'),
+    orderBook: () => publicGet('/main/api/v2/hashpower/orderBook', 'algorithm=' + algorithm),
     balance: () => call('GET', '/main/api/v2/accounting/account2/BTC'),
     pools: () => call('GET', '/main/api/v2/pools', 'size=100&page=0'),
     createPool: (p) => call('POST', '/main/api/v2/pool', '', {
-      name: p.name, algorithm: 'SHA256', stratumHostname: p.host, stratumPort: +p.port, username: p.username, password: p.password || 'x'
+      name: p.name, algorithm, stratumHostname: p.host, stratumPort: +p.port, username: p.username, password: p.password || 'x'
     }),
     myOrders: async (market) => {
       const u = await units();
       const ts = now() + (await serverOffset());
-      const d = await call('GET', '/main/api/v2/hashpower/myOrders', 'algorithm=SHA256&market=' + encodeURIComponent(market) + '&ts=' + ts + '&op=LT&limit=100&active=true');
+      const d = await call('GET', '/main/api/v2/hashpower/myOrders', 'algorithm=' + algorithm + '&market=' + encodeURIComponent(market) + '&ts=' + ts + '&op=LT&limit=100&active=true');
       return ((d && d.list) || []).map((o) => normOrder(o, u));
     },
     createOrder: async ({ market, priceEH, limitPH, amountBtc, poolId }) => {
       const u = await units();
       const o = await call('POST', '/main/api/v2/hashpower/order', '', {
-        market, algorithm: 'SHA256', type: 'STANDARD', poolId,
+        market, algorithm, type: 'STANDARD', poolId,
         amount: fmt8(amountBtc), price: fmt8(priceEH / u.priceToEH), limit: fmt8(limitPH / u.limitToPH),
         marketFactor: u.marketFactor, displayMarketFactor: u.displayMarketFactor
       });

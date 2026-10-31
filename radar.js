@@ -47,7 +47,7 @@ function sentiment(rows, venues) {
 /* ---------- mapa de mineração por algoritmo ---------- */
 // nh: nome do algoritmo na NiceHash; wtm: nome na WhatToMine; merged: moedas mineradas juntas (merged mining).
 var ALGOS = [
-  { nh: 'SHA256', wtm: 'SHA-256', label: 'SHA-256', merged: null, where: 'BTC, BCH, BSV: pools solo por moeda' },
+  { nh: 'SHA256ASICBOOST', wtm: 'SHA-256', label: 'SHA-256', merged: null, where: 'BTC, BCH, BSV: pools solo por moeda (mercado SHA256ASICBOOST da NiceHash)' },
   { nh: 'SCRYPT', wtm: 'Scrypt', label: 'Scrypt', merged: ['LTC', 'DOGE'], where: 'LTC + DOGE juntos (merged mining), ex.: LiteSolo' },
   { nh: 'KHEAVYHASH', wtm: 'kHeavyHash', label: 'kHeavyHash', merged: null, where: 'Kaspa (blocos a cada 0,1 s: pouca variação)' },
   { nh: 'X11', wtm: 'X11', label: 'X11', merged: null, where: 'Dash' },
@@ -83,7 +83,7 @@ function bookPerHash(d) {
   paying.forEach(function (o) { if (med === null) { acc += o.v; if (acc >= tot / 2) med = o.p; } });
   return { unit: s.displayPriceFactor || '', factor: pf, fill: paying.length ? paying[0].p / pf : null, median: med !== null ? med / pf : null, paying: paying.length };
 }
-// books: { SHA256: <livro>, SCRYPT: <livro>, ... }; extra: moedas fora da WhatToMine (ex.: BSV).
+// books: { SHA256ASICBOOST: <livro>, SCRYPT: <livro>, ... }; extra: moedas fora da WhatToMine (ex.: BSV).
 // Só entram como opção principal moedas com liquidez (volume 24 h ≥ minVolBtc). Redes pequenas ficam em `small`:
 // a conta por hash engana nelas (o hash alugado derruba a dificuldade e não há onde vender).
 function miningMap(wtm, books, opts) {
@@ -306,7 +306,7 @@ var PLAYERS = [
 ];
 // Pools por algoritmo para minerar com hash alugado (em pool, o pagamento é proporcional: pouca variação).
 var POOLS = {
-  SHA256: [['BlockSniper (BCH solo)', 'https://blocksniper.ai'], ['2Miners Solo BCH', 'https://solo-bch.2miners.com'], ['CKPool Solo (BTC)', 'https://solo.ckpool.org']],
+  SHA256ASICBOOST: [['BlockSniper (BCH solo)', 'https://blocksniper.ai'], ['2Miners Solo BCH', 'https://solo-bch.2miners.com'], ['CKPool Solo (BTC)', 'https://solo.ckpool.org']],
   SCRYPT: [['LiteSolo (LTC + DOGE solo)', 'https://litesolo.org'], ['litecoinpool.org (LTC + DOGE)', 'https://www.litecoinpool.org'], ['ViaBTC', 'https://www.viabtc.com']],
   RANDOMXMONERO: [['P2Pool (sem taxa, descentralizado)', 'https://p2pool.io'], ['SupportXMR', 'https://supportxmr.com'], ['MoneroOcean', 'https://moneroocean.stream']],
   EQUIHASH: [['2Miners ZEC', 'https://zec.2miners.com'], ['F2Pool', 'https://www.f2pool.com']],

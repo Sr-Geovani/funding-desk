@@ -1,5 +1,5 @@
 // Fotos de mercado publicadas junto com o site (o navegador não lê NiceHash nem WhatToMine direto: CORS).
-// Uso: node scripts/snapshot-nicehash.js <pasta-de-saida>   → nicehash.json (SHA-256) e market.json (todos os algoritmos)
+// Uso: node scripts/snapshot-nicehash.js <pasta-de-saida>   → nicehash.json (SHA-256: mercado SHA256ASICBOOST) e market.json (todos os algoritmos)
 const fs = require('node:fs');
 const path = require('node:path');
 const FDM = require('../mining.js');
@@ -25,7 +25,7 @@ const slim = (d) => { for (const m of Object.values(d.stats || {})) m.orders = (
     wtm = { coins: {} };
     for (const [k, c] of Object.entries(w.coins || {})) wtm.coins[k] = Object.fromEntries(keep.map((f) => [f, c[f]]).concat([['name', k]]));
   } catch (e) { errors.push('whattomine: ' + e.message); }
-  const sha = books.SHA256 ? FDM.parseNiceHashBook(books.SHA256) : [];
+  const sha = books.SHA256ASICBOOST ? FDM.parseNiceHashBook(books.SHA256ASICBOOST) : [];
   fs.writeFileSync(path.join(outDir, 'nicehash.json'), JSON.stringify({ at, source: 'github-actions', markets: sha, error: sha.length ? undefined : errors.join('; ') }));
   fs.writeFileSync(path.join(outDir, 'market.json'), JSON.stringify({ at, source: 'github-actions', books, wtm, errors }));
   console.log(outDir, 'livros:', Object.keys(books).length, 'whattomine:', wtm ? Object.keys(wtm.coins).length : 0, errors.length ? 'erros: ' + errors.join('; ') : '');

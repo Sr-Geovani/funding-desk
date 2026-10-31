@@ -32,6 +32,11 @@ sempre identificado; nada de prometer previsão de sorte (Poisson é sem memóri
 - Alertas: "Agora" = condições ativas (somem sozinhas); histórico 7 dias com começo/fim; Telegram: saída/risco na hora,
   entradas em resumo de 30 min.
 
+- NiceHash: o mercado SHA-256 líquido é o **SHA256ASICBOOST** (≈ 19 EH/s, centenas de ordens). O "SHA256" puro
+  tem poucas ordens; painel, robô, radar e fotos usam ASICBOOST (`NH_ALGO` no Worker troca, se preciso).
+  Unidades: mínimo 1 PH/s, preço só desce 0,002 BTC/EH a cada ~10 min. Pools da ordem precisam ser do mesmo algoritmo.
+- Cotações no backend: CoinGecko → Kraken → Coinbase (a CoinGecko bloqueia o Cloudflare).
+
 ## Estado e pendências
 - [x] Painel publicado; dados ao vivo validados do Brasil (Binance/Bybit diretos no iPhone).
 - [x] **Backend no Cloudflare** publicado pelo workflow em `https://funding-desk-api.<subdomínio>.workers.dev` (KV e ENC_KEY criados).

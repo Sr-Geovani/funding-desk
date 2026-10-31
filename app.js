@@ -167,7 +167,7 @@ function load(){
 /* ---------- mineração: coleta ---------- */
 var mineLoading=false,mineAgain=false;
 function loadBook(){
-  var direct='https://api2.nicehash.com/main/api/v2/hashpower/orderBook?algorithm=SHA256';
+  var direct='https://api2.nicehash.com/main/api/v2/hashpower/orderBook?algorithm=SHA256ASICBOOST';
   var pu=proxied(direct);
   var snap=function(){return fetchJSON('data/nicehash.json?'+Math.floor(Date.now()/60000)).then(function(d){return {markets:d.markets,src:'foto GitHub',at:Date.parse(d.at)}})};
   if(pu)return fetchJSON(pu).then(function(d){return {markets:FDM.parseNiceHashBook(d),src:'proxy',at:Date.now()}}).catch(snap);
@@ -501,7 +501,7 @@ function renderCoins(L,V){
       '<div class="note">Com '+c.refPh+' PH/s: 1 bloco a cada ~'+FDC.hoursTxt(c.hoursPerBlock)+' em média (variação '+c.variance.label+') · o bloco vale '+usd(c.blockUsd,0)+(c.costPerBlock?' · custa em média '+usd(c.costPerBlock,0)+' de aluguel':'')+'</div>'+
       '<div class="note">'+esc(c.notes)+'</div></div>';
   }).join('')+'<p class="note" style="margin:8px 0 0">O robô e a aba Operar trabalham com BCH. Para outra moeda, a ordem aponta para um pool dela; a parada automática no bloco hoje só confere BCH.</p>'+
-    ((market.map||[]).filter(function(m){return m.algo!=='SHA256'&&m.level==='go'}).length?'<div class="box"><b>Outros algoritmos compensando agora</b>'+(market.map||[]).filter(function(m){return m.algo!=='SHA256'&&m.level==='go'}).map(function(m){return esc(m.label)+' ('+esc(m.coins.join('+'))+') '+pct(m.edgePct,1)}).join(' · ')+' <button class="sm" data-go="mine:algos">Ver como minerar</button></div>':'')
+    ((market.map||[]).filter(function(m){return m.algo!=='SHA256ASICBOOST'&&m.level==='go'}).length?'<div class="box"><b>Outros algoritmos compensando agora</b>'+(market.map||[]).filter(function(m){return m.algo!=='SHA256ASICBOOST'&&m.level==='go'}).map(function(m){return esc(m.label)+' ('+esc(m.coins.join('+'))+') '+pct(m.edgePct,1)}).join(' · ')+' <button class="sm" data-go="mine:algos">Ver como minerar</button></div>':'')
   :'<p class="note">Carregando dados das redes…</p>';
 }
 var SIG_TXT={favoravel:'Favorável',neutro:'Perto do empate',desfavoravel:'Desfavorável','sem-dado':'Sem dado'};
@@ -693,7 +693,9 @@ function renderOps(){
       '<div class="grid2"><label>Novo preço<input data-op="'+esc(o.id)+'" type="number" inputmode="decimal" step="0.0001" value="'+o.priceEH.toFixed(4)+'"></label><label>Nova potência (PH/s)<input data-ol="'+esc(o.id)+'" type="number" inputmode="decimal" value="'+o.limitPH.toFixed(2)+'"></label></div>'+
       '<div class="row"><button class="sm pri" data-oupd="'+esc(o.id)+'">Aplicar</button><button class="sm" data-orefill="'+esc(o.id)+'">Reabastecer</button><button class="sm" data-oman="'+esc(o.id)+'" data-v="'+(o.managed?0:1)+'">'+(o.managed?'Tirar do robô':'Robô gerencia')+'</button><button class="sm" data-ocancel="'+esc(o.id)+'">Cancelar</button></div></div>';
   }).join(''):'<p class="note">'+esc(ops.err.orders||'Nenhuma ordem ativa.')+'</p>';
-  var popts='<option value="">—</option>'+ops.pools.map(function(p){return '<option value="'+esc(p.id)+'">'+esc(p.name)+' ('+esc(p.stratumHostname)+')</option>'}).join('');
+  // Só pools do mesmo algoritmo do robô servem para as ordens dele (a NiceHash recusa pool de outro algoritmo).
+  var algo=(st&&st.algo)||'SHA256ASICBOOST',okPools=ops.pools.filter(function(p){return !p.algorithm||p.algorithm===algo});
+  var popts='<option value="">—</option>'+okPools.map(function(p){return '<option value="'+esc(p.id)+'">'+esc(p.name)+' ('+esc(p.stratumHostname)+')</option>'}).join('');
   $('b_poolId').innerHTML=popts;$('n_pool').innerHTML=popts;
   if(!ops.dirty)BOT_FIELDS.forEach(function(k){var el=$('b_'+k);if(el)el.value=cfg[k]===undefined?'':cfg[k]});
   $('b_autoCreate').checked=!!cfg.autoCreate;
@@ -1027,7 +1029,7 @@ var hist=ls('fd_hist')||[],amem=ls('fd_amem')||{},alerts=ls('fd_alerts')||[];
 function radarSnapshot(){
   var L=live(),V=mineVerdict(L),edges={},prices={};
   coinRows(L,V).forEach(function(c){if(c.edgePct!==null)edges[c.coin]=+c.edgePct.toFixed(2)});
-  (market.map||[]).forEach(function(m){if(m.edgePct!==null&&m.algo!=='SHA256')edges[m.label]=+m.edgePct.toFixed(2)});
+  (market.map||[]).forEach(function(m){if(m.edgePct!==null&&m.algo!=='SHA256ASICBOOST')edges[m.label]=+m.edgePct.toFixed(2)});
   if(L.bchUsd)prices.BCH=L.bchUsd;if(L.btcUsd)prices.BTC=L.btcUsd;if(L.bsvUsd)prices.BSV=L.bsvUsd;
   if(market.raw&&market.raw.wtm&&L.btcUsd)FDR.wtmCoins(market.raw.wtm).forEach(function(c){if(['LTC','DOGE','KAS'].indexOf(c.tag)>=0&&c.exchange_rate>0)prices[c.tag]=c.exchange_rate*L.btcUsd});
   var best=[];

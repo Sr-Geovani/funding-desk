@@ -3,7 +3,7 @@
 // - Rotas /api/*: exigem o token do painel. As chaves da NiceHash e do Telegram são cadastradas pelo painel
 //   e guardadas cifradas no KV (ENC_KEY), ou como segredos do Worker. Nunca voltam para o painel.
 // - Agendamento (cron): robô de mineração. Começa em modo "observe" (só registra o que faria).
-import { createClient, NH_HOSTS } from './nicehash.js';
+import { createClient, NH_HOSTS, DEFAULT_ALGO } from './nicehash.js';
 import { createChain, paidTo, DEFAULT_BCH_REST, DEFAULT_PRICE_URL } from './chain.js';
 import { DEFAULT_CONFIG, sanitizeConfig, parseBook, computeMarket, decide, limitsFromEnv } from './bot.js';
 import { fundingSnapshot, runAlerts } from './alerts.js';
@@ -65,7 +65,7 @@ async function appendLog(env, entries) {
 /* ---------- clientes ---------- */
 function nhClient(env, fetchFn) {
   const base = env.NH_BASE || NH_HOSTS[env.NH_ENV === 'prod' ? 'prod' : 'test'];
-  return createClient({ base, key: env.NH_API_KEY, secret: env.NH_API_SECRET, org: env.NH_ORG_ID, fetchFn: fetchFn || fetch });
+  return createClient({ base, key: env.NH_API_KEY, secret: env.NH_API_SECRET, org: env.NH_ORG_ID, algorithm: env.NH_ALGO || DEFAULT_ALGO, fetchFn: fetchFn || fetch });
 }
 function chainClient(env, fetchFn) {
   return createChain({ base: env.BCH_REST || DEFAULT_BCH_REST, priceUrl: env.PRICE_URL || DEFAULT_PRICE_URL, fetchFn: fetchFn || fetch });
@@ -102,7 +102,7 @@ export async function tick(env, opts = {}) {
   if (!bookR.ok) errors.push('livro NiceHash: ' + bookR.e);
   if (!unitsR.ok) errors.push('unidades NiceHash: ' + unitsR.e);
   const book = bookR.ok ? parseBook(bookR.v) : null;
-  const units = unitsR.ok ? unitsR.v : { minLimitPH: 0.1, priceDownStepEH: 0.01, minOrderBtc: 0.001 };
+  const units = unitsR.ok ? unitsR.v : { minLimitPH: 1, priceDownStepEH: 0.002, minOrderBtc: 0.001 }; // valores do SHA256ASICBOOST
 
   // Blocos novos: confere se a recompensa caiu no endereço configurado.
   let blockEvent = null;
@@ -296,7 +296,7 @@ async function api(req, env, url, fetchFn) {
 
   if (p === '/status' && m === 'GET') {
     const [cfg, state] = await Promise.all([getConfig(env), kvGet(env, 'state', {})]);
-    return json({ version: VERSION, nhEnv: env.NH_BASE ? 'personalizado' : (env.NH_ENV === 'prod' ? 'produção' : 'teste'), keys: hasKeys(env),
+    return json({ version: VERSION, algo: nh.algorithm, nhEnv: env.NH_BASE ? 'personalizado' : (env.NH_ENV === 'prod' ? 'produção' : 'teste'), keys: hasKeys(env),
       telegram: !!(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID), creds: credStatus(env), limits, config: cfg,
       state: { lastTick: state.lastTick, lastHeight: state.lastHeight, market: state.market, myBlocks: state.myBlocks || [], dailyUsd: state.dailyUsd || 0,
         errors: state.errors || [], edgeHist: state.edgeHist || [], alerts: (state.alerts || []).slice(-20).reverse() } });

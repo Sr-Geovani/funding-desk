@@ -55,7 +55,7 @@ test('livro de qualquer algoritmo em BTC por H/s por dia (Scrypt real, em TH)', 
 
 test('mapa de mineração: Scrypt soma LTC + DOGE (merged) e calcula a margem', () => {
   const w = fx('wtm-asic.real.json');
-  const books = { SHA256: fx('nicehash-book.real.json'), SCRYPT: fx('nicehash-book-scrypt.real.json') };
+  const books = { SHA256ASICBOOST: fx('nicehash-book.real.json'), SCRYPT: fx('nicehash-book-scrypt.real.json') };
   const m = R.miningMap(w, books, { poolFeePct: 2, rentFeePct: 3, minEdgePct: 3 });
   const sc = m.find((x) => x.algo === 'SCRYPT');
   assert.ok(sc.merged);
@@ -68,7 +68,7 @@ test('mapa de mineração: Scrypt soma LTC + DOGE (merged) e calcula a margem', 
   assert.ok(['go', 'maybe', 'no'].includes(sc.level));
   assert.equal(sc.unit, 'TH');
   assert.ok(sc.small.includes('QUAI'), 'QUAI rende mais por hash, mas tem pouca liquidez: fica fora da opção principal');
-  const sha = m.find((x) => x.algo === 'SHA256');
+  const sha = m.find((x) => x.algo === 'SHA256ASICBOOST');
   assert.equal(sha.merged, false);
   assert.ok(['BCH', 'BTC', 'XEC'].includes(sha.coins[0]) === false || sha.coins[0] !== 'QUAI');
   assert.ok(!sha.coins.includes('QUAI'));
@@ -151,8 +151,8 @@ test('mapa de players: categorias, links https e quem já está no painel', () =
 test('livro raso rebaixa "compensa" para "no limite"', () => {
   const w = { coins: { a: { tag: 'BCH', algorithm: 'SHA-256', block_time: 600, block_reward: 3.125, nethash: 4e18, exchange_rate: 0.0045, exchange_rate_vol: 300 } } };
   const book = (n) => ({ stats: { BTC: { priceFactor: '1e18', displayPriceFactor: 'EH', orders: Array.from({ length: n }, (_, i) => ({ price: '0.30', acceptedSpeed: '0.001', alive: true })) } } });
-  assert.equal(R.miningMap(w, { SHA256: book(10) }, { btcUsd: 77000 })[0].level, 'go');
-  const thin = R.miningMap(w, { SHA256: book(2) }, { btcUsd: 77000 })[0];
+  assert.equal(R.miningMap(w, { SHA256ASICBOOST: book(10) }, { btcUsd: 77000 })[0].level, 'go');
+  const thin = R.miningMap(w, { SHA256ASICBOOST: book(2) }, { btcUsd: 77000 })[0];
   assert.equal(thin.level, 'maybe'); assert.equal(thin.thin, true);
 });
 
