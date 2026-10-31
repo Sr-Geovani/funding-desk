@@ -15,3 +15,4 @@
   `frankfurter-usd.real.json`, `criptoya-dolar.real.json`, `polymarket-gamma.real.json` (6 mercados, campos usados),
   `defillama-steth.real.json`.
 - Fora de cripto (31/10/2026): `bcb-focus-ipca.real.json` (Focus, IPCA anual), `ust-tbill.real.csv` (T-bills, 3 linhas).
+- `nicehash-book-stale.real.json`: livro SHA256ASICBOOST de 31/10/2026 14:40 UTC (preços 0,40–0,4304) com ordens sem máquinas mas com velocidade média > 0 (o caso que enganava o "menor preço recebendo").

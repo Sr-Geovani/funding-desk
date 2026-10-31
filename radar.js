@@ -86,7 +86,10 @@ function bookPerHash(d) {
   var mk = Object.keys((d && d.stats) || {})[0];
   if (!mk) return null;
   var s = d.stats[mk], pf = parseFloat(s.priceFactor) || 1;
-  var paying = (s.orders || []).filter(function (o) { return o.alive !== false && parseFloat(o.acceptedSpeed) > 0; })
+  // recebendo agora = velocidade aceita e máquinas trabalhando (a velocidade é média e demora a zerar)
+  var live = function (o) { return o.alive !== false && parseFloat(o.acceptedSpeed) > 0; };
+  var withRigs = (s.orders || []).some(function (o) { return live(o) && +o.rigsCount > 0; });
+  var paying = (s.orders || []).filter(function (o) { return live(o) && (!withRigs || +o.rigsCount > 0); })
     .map(function (o) { return { p: parseFloat(o.price), v: parseFloat(o.acceptedSpeed) }; }).sort(function (a, b) { return a.p - b.p; });
   var tot = paying.reduce(function (a, o) { return a + o.v; }, 0), acc = 0, med = null;
   paying.forEach(function (o) { if (med === null) { acc += o.v; if (acc >= tot / 2) med = o.p; } });

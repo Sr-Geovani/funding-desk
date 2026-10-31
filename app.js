@@ -744,7 +744,15 @@ function burstHTML(p,b,c,a){
     ['Chance de ≥1 bloco',function(x){return pctp((1-Math.exp(-(x.lambda||0)))*100,1)}]];
   return '<div class="eyebrow" style="margin:14px 0 6px">Cenários lado a lado (mesmos blocos, mesmo sorteio)</div><div class="scroll"><table><tr><th></th>'+cols.map(function(k){return '<th>'+k[1]+'</th>'}).join('')+'</tr>'+
     rows.map(function(r){return '<tr><td>'+r[0]+'</td>'+cols.map(function(k){return '<td>'+(k[0]?r[1](k[0]):'—')+'</td>'}).join('')+'</tr>'}).join('')+'</table></div>'+
-    '<p class="note" style="margin:6px 0 0">"Sua", "Copiloto" e "Rajada" compram abaixo do teto e pausam acima. "Sempre ligado" usa a sua potência sem pausar e sem stop-loss: tem mais chance de bloco porque fica mais horas comprando, mas paga também as horas em que o aluguel passou do teto. Compare a linha <b>Média esperada</b> (em %): ela mostra se cada hora comprada rende ou perde, sem a sorte. Os cenários podem ter começado em horas diferentes (linha "Desde").</p>';
+    archiveHTML()+'<p class="note" style="margin:6px 0 0">"Sua", "Copiloto" e "Rajada" compram abaixo do teto e pausam acima. "Sempre ligado" usa a sua potência sem pausar e sem stop-loss: tem mais chance de bloco porque fica mais horas comprando, mas paga também as horas em que o aluguel passou do teto. Compare a linha <b>Média esperada</b> (em %): ela mostra se cada hora comprada rende ou perde, sem a sorte. Os cenários podem ter começado em horas diferentes (linha "Desde").</p>';
+}
+// Simulações arquivadas na correção do preço (31/10): compravam a ~0,402, preço que não recebe hash.
+function archiveHTML(){
+  var A=ops.status&&ops.status.state&&ops.status.state.paperArchive;if(!A)return '';
+  var row=function(lab,x){if(!x)return '';var res=(x.wonUsd||0)-x.spendUsd,fix=x.spendUsd*0.058;
+    return '<li>'+lab+(x.ph?' ('+nf(x.ph,0)+' PH/s)':'')+': '+(x.blocks||0)+' bloco(s) de '+(x.draws||0)+', gasto '+usd(x.spendUsd)+', resultado '+signUsd(res)+' · com o preço real o gasto seria ~'+usd(x.spendUsd+fix)+' → '+signUsd(res-fix)+'</li>'};
+  return '<details style="margin-top:8px"><summary>Antes da correção do preço (até '+dt2(A.at)+')</summary><p class="note" style="margin:6px 0 0">Essas simulações compravam a ~0,402, mas o hash de verdade só ia para lances a partir de ~0,4254 (~5,8% mais caro). Os blocos sorteados continuam valendo (o sorteio não depende do preço); o custo estava baixo.</p><ul class="note" style="margin:4px 0 0;padding-left:18px">'+
+    row('Sua',A.paper)+row('Copiloto',A.plan)+row('Rajada 50',A.burst)+row('Sempre ligado',A.always)+'</ul></details>';
 }
 // Desfechos honestos de um período de aluguel: sem bloco (o mais comum) perde o gasto; com bloco ganha o bloco menos o gasto.
 // A média de longo prazo (receita esperada − gasto) só aparece repetindo muitas vezes.
@@ -913,7 +921,7 @@ function renderAct(){
         kvJ('Bloco vale',usd(M.blockUsd||0,0),'',null,'recompensa já sem a taxa do pool')+'</div>'+
         (M.why?'<details style="margin-top:8px"><summary>Por que '+M.ph+' PH/s?</summary><ol class="note" style="margin:6px 0 0;padding-left:18px">'+M.why.map(function(w){return '<li>'+esc(w)+'</li>'}).join('')+'</ol>'+
           (M.alt?'<div class="scroll"><table style="margin-top:6px"><tr><th>Potência</th><th>Gasto em 2 h</th><th>Chance de bloco</th></tr>'+M.alt.map(function(a){return '<tr><td>'+a.ph+' PH/s</td><td>'+usd(a.costUsd,0)+'</td><td>'+pctp(a.chance*100,0)+'</td></tr>'}).join('')+'</table></div><p class="note" style="margin:4px 0 0">Chance e gasto crescem juntos: a média por dólar é igual. Se quiser arriscar menos por sessão, baixe o orçamento (Operar → Stop-loss por sessão) que a potência sugerida cai junto.</p>':'')+'</details>':'')+
-        mineVsPlan(M)+chanceCalc(M)+norteHTML()+
+        powerHTML(M.power)+mineVsPlan(M)+chanceCalc(M)+norteHTML()+
         '<div class="row" style="margin-top:10px"><button class="sm pri" data-plan="apply">Aplicar plano no robô</button></div>';
     }
     if(P.blockers&&P.blockers.length)h+='<div class="eyebrow" style="margin:12px 0 6px">O que trava para operar ('+P.blockers.length+')</div><div class="stack" style="gap:6px">'+P.blockers.map(function(b,i){
@@ -977,6 +985,20 @@ function rawTxt(m){
 }
 function thinTxt(m){
   return 'Livro raso: '+(m.paying<5?'só '+m.paying+' ordens recebendo hash':'o mercado inteiro gasta ~'+usd(m.marketUsdDay||0,0)+'/dia')+'; uma ordem de US$100/dia mudaria o preço. O "compensa" não vale para volume real.';
+}
+// Potência ideal calculada pela IA: lucro esperado por dia em cada potência (lance pela profundidade do livro), sorte e
+// capital mínimo pelo critério de Kelly.
+function powerHTML(P){
+  if(!P||!P.curve||!P.curve.length)return '';
+  var head=P.idealPh>0?'Potência ideal (IA): <b class="good">'+P.idealPh+' PH/s</b> · lucro esperado ~'+usd(P.idealProfitDay,0)+'/dia · margem real '+pct(P.edgePct,1)
+    :'Potência ideal (IA): <b class="bad">0 PH/s agora</b> · margem real '+pct(P.edgePct,1)+' no preço que de fato recebe hash: nenhuma potência tem lucro esperado';
+  return '<div class="box" style="margin-top:10px"><b>'+head+'</b>'+
+    '<div class="scroll"><table style="margin-top:6px"><tr><th>PH/s</th><th>Lance</th><th>Margem</th><th>Lucro esperado/dia</th><th>Blocos/dia</th><th>Sorte (±1 dia)</th></tr>'+
+    P.curve.filter(function(r){return [5,10,30,50,100,200,500].indexOf(r.ph)>=0||r.ph===P.idealPh}).map(function(r){
+      return '<tr'+(r.ph===P.idealPh?' style="font-weight:700"':'')+'><td>'+r.ph+(r.overCap?'*':'')+'</td><td>'+r.bidEH.toFixed(4)+'</td><td class="'+(r.edgePct>=0?'good':'bad')+'">'+pct(r.edgePct,1)+'</td><td class="'+(r.profitDay>=0?'good':'bad')+'">'+signUsd(r.profitDay)+'</td><td>'+nf(r.blocksDay,2)+'</td><td>±'+usd(r.luckDay,0)+'</td></tr>'}).join('')+'</table></div>'+
+    '<p class="note" style="margin:6px 0 0">O lucro esperado cresce junto com a potência enquanto o livro aguenta sem subir o lance: a potência não muda a margem, muda o tamanho do ganho <b>e</b> da sorte. '+
+    (P.bankrollMinUsd?'Para a sorte não quebrar o caixa antes de a média aparecer, o capital deveria ser de pelo menos ~'+usd(P.bankrollMinUsd,0)+' (critério de Kelly: bloco ÷ 2 × margem).':'Com margem negativa, mais potência só aumenta a perda esperada.')+
+    (P.curve.some(function(r){return r.overCap})?' * acima do teto de segurança do servidor ('+P.capPh+' PH/s).':'')+'</p></div>';
 }
 /* ---------- copiloto IA: análise, previsões conferíveis, XP e maturidade ---------- */
 // A IA bate o acaso? Compara o acerto COM sinal com o grupo de controle (mesma pergunta, sem sinal) e mostra a calibração.

@@ -216,6 +216,29 @@ export function analysis(snap, ai) {
   return { level: L, lines: out, recs };
 }
 
+// Potência ideal (IA): lucro esperado por dia em cada potência. Comprar mais pode exigir lance mais alto (profundidade do
+// livro: o lance precisa passar das ordens que já recebem). Mostra também a sorte (desvio de 1 dia: blocos ~ Poisson) e o
+// capital mínimo pelo critério de Kelly: com margem m e bloco de valor V, apostar em solo só faz o capital crescer no
+// longo prazo se o capital for maior que V ÷ (2m); abaixo disso a sorte quebra antes de a média aparecer.
+export const POWER_STEPS = [1, 5, 10, 20, 30, 50, 75, 100, 150, 200, 300, 500];
+export function powerPlan(mkt, cfg, limits) {
+  if (!(mkt && mkt.ok && mkt.phDaysPerBlock > 0 && mkt.btcUsd > 0 && mkt.blockNetUsd > 0 && mkt.breakEvenEH > 0 && mkt.fillEH > 0)) return null;
+  const prem = 1 + (cfg.bidPremiumPct || 0) / 100, fee = 1 + (cfg.rentFeePct || 0) / 100, V = mkt.blockNetUsd;
+  const depth = Array.isArray(mkt.depth) && mkt.depth.length ? mkt.depth : [[mkt.fillEH, Infinity]];
+  const ceil4 = (x) => Math.ceil(x * 1e4 - 1e-9) / 1e4;
+  const curve = POWER_STEPS.map((ph) => {
+    const lv = depth.find((d) => d[1] >= ph);
+    if (!lv) return null; // o livro inteiro não tem esse tamanho
+    const bid = ceil4(lv[0] * prem), cost = ph / 1000 * bid * mkt.btcUsd * fee, blocks = ph / mkt.phDaysPerBlock;
+    return { ph, bidEH: bid, edgePct: (blocks * V / cost - 1) * 100, costDay: cost, profitDay: blocks * V - cost, blocksDay: blocks,
+      luckDay: Math.sqrt(blocks) * V, chanceDay: 1 - Math.exp(-blocks), overCap: ph > limits.maxLimitPh };
+  }).filter(Boolean);
+  const inCap = curve.filter((r) => !r.overCap), best = inCap.reduce((a, r) => (r.profitDay > a.profitDay ? r : a), { ph: 0, profitDay: 0 });
+  const edge = best.ph ? best.edgePct / 100 : (curve[0] ? curve[0].edgePct / 100 : 0);
+  return { curve, idealPh: best.profitDay > 0 ? best.ph : 0, idealProfitDay: best.profitDay > 0 ? best.profitDay : 0, edgePct: edge * 100,
+    bankrollMinUsd: edge > 0 ? V / (2 * edge) : null, blockUsd: V, capPh: limits.maxLimitPh };
+}
+
 // Plano de ação do copiloto: o que fazer agora, com números (potência, preço, orçamento, duração, quando parar)
 // e as travas que impedem de operar. ctx: { cfg, limits, mkt, acct:{balanceBtc,pools}, fund:[...], algoMap:[...], capital, pools:{algo:[[nome,url]]} }
 export function actionPlan(ctx) {
@@ -228,7 +251,9 @@ export function actionPlan(ctx) {
     const hours = 2; // janelas costumam durar ~2 h (pesquisa): gastar o orçamento da sessão nesse tempo
     const book = mkt.bookTotalPH || 0;
     const rawPh = Math.floor(budget / (perPhDay * hours / 24)), liq = book ? Math.floor(book * 0.05) : Infinity;
+    const power = powerPlan(mkt, cfg, limits);
     let ph = Math.max(1, Math.min(rawPh, limits.maxLimitPh, liq)); // até o teto do servidor e 5% do hash alugado no mercado
+    if (power && power.idealPh > 0) ph = Math.max(1, Math.min(ph, power.idealPh)); // nunca acima da potência que mais lucra
     const capBy = ph < rawPh ? (ph === limits.maxLimitPh ? `teto de segurança do servidor (${limits.maxLimitPh} PH/s)` : 'liquidez: 5% do hash alugado no mercado') : null;
     // comparação: o que cada potência faz numa janela típica de ~2 h (mesma média por dólar; muda chance e gasto)
     const alt = [10, 30, ph].filter((x, i, a) => a.indexOf(x) === i).map((x) => { const c = x * perPhDay / 24 * hours, l = x / mkt.phDaysPerBlock * hours / 24; return { ph: x, costUsd: c, chance: 1 - Math.exp(-l) }; });
@@ -242,12 +267,15 @@ export function actionPlan(ctx) {
       chance2h: 1 - Math.exp(-myPh / mkt.phDaysPerBlock * hours / 24), cost2h: myCostH * hours };
     out.mining = {
       action: green ? 'alugar' : 'esperar', edge: mkt.edgeAtBidPct, price: mkt.bidEH, maxPrice: mkt.capEH, ph, budgetUsd: budget, durationH: dur,
-      amountBtc: +amountBtc.toFixed(4), chance, expBlocks: lam, costPerHourUsd: costH, blockUsd: mkt.blockNetUsd, alt, mine,
+      amountBtc: +amountBtc.toFixed(4), chance, expBlocks: lam, costPerHourUsd: costH, blockUsd: mkt.blockNetUsd, alt, mine, power,
       chance2h: 1 - Math.exp(-ph / mkt.phDaysPerBlock * hours / 24), cost2h: costH * hours,
       why: [`Orçamento por tentativa: US$${n(budget, 0)} (o seu stop-loss). Soma todas as ordens até achar bloco; ao estourar, o robô cancela e espera ${cfg.stopCooldownH === undefined ? 6 : cfg.stopCooldownH} h. É o máximo que você perde numa tentativa sem bloco (o limite diário segura o dia).`,
         `As janelas boas duram ~2 h (pesquisa de 6 meses). A potência é a que gasta esse orçamento dentro de uma janela: US$${n(budget, 0)} ÷ (US$${n(perPhDay / 24, 2)} por PH/s por hora × 2 h) = ${rawPh} PH/s.`,
         capBy ? `Limitado a ${ph} PH/s pelo ${capBy}.` : `Cabe no teto de segurança (${limits.maxLimitPh} PH/s) e na liquidez do mercado.`,
-        'Por dólar gasto, a média é a mesma com qualquer potência. Mais potência = mais chance enquanto a janela está aberta (e o orçamento acaba mais rápido); menos potência = a janela fecha antes de você usar o orçamento.'],
+        'Por dólar gasto, a média é a mesma com qualquer potência. Mais potência = mais chance enquanto a janela está aberta (e o orçamento acaba mais rápido); menos potência = a janela fecha antes de você usar o orçamento.',
+        power ? (power.idealPh > 0
+          ? `Potência ideal (IA): ${power.idealPh} PH/s, lucro esperado ~US$${n(power.idealProfitDay, 0)}/dia com margem real de ${n(power.edgePct, 1)}% (lance pela profundidade do livro). A sorte de 1 dia oscila ~±US$${n((power.curve.find((r) => r.ph === power.idealPh) || {}).luckDay || 0, 0)}. Capital mínimo para essa margem aguentar a sorte (critério de Kelly): ~US$${n(power.bankrollMinUsd, 0)}.`
+          : `Potência ideal (IA): 0 PH/s agora. Em nenhuma potência o lucro esperado é positivo: margem real de ${n(power.edgePct, 1)}% no preço que de fato recebe hash (${n((power.curve[0] || {}).bidEH || 0, 4)}).`) : 'Sem o livro da NiceHash não dá para calcular a potência ideal.'],
       title: green ? `Alugar agora: ${ph} PH/s a até ${n(mkt.capEH, 4)}` : `Esperar: o aluguel está acima do preço que compensa`,
       text: green
         ? `Margem de ${n(mkt.edgeAtBidPct, 1)}% no lance. Com ${ph} PH/s (~US$${n(costH, 0)}/h), o orçamento de US$${n(budget, 0)} dura ~${n(dur, 1)} h e dá ${n(chance * 100, 0)}% de chance de achar um bloco (~US$${n(mkt.blockNetUsd, 0)}). Parar no bloco; stop-loss em US$${n(budget, 0)}.`

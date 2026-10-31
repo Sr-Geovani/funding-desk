@@ -67,7 +67,9 @@ function parseNiceHashBook(d) {
     var s = d.stats[mk], orders = (s.orders || []).filter(function (o) { return o.alive !== false; });
     var act = orders.map(function (o) { return { price: parseFloat(o.price), speed: parseFloat(o.acceptedSpeed) || 0, type: o.type, limit: parseFloat(o.limit) || 0, rigs: +o.rigsCount || 0 }; })
       .filter(function (o) { return isFinite(o.price); });
-    var paying = act.filter(function (o) { return o.speed > 0; }).sort(function (a, b) { return a.price - b.price; });
+    // recebendo agora = velocidade aceita e máquinas trabalhando (a velocidade é média e demora a zerar)
+    var withRigs = act.some(function (o) { return o.speed > 0 && o.rigs > 0; });
+    var paying = act.filter(function (o) { return o.speed > 0 && (!withRigs || o.rigs > 0); }).sort(function (a, b) { return a.price - b.price; });
     var tot = paying.reduce(function (a, o) { return a + o.speed; }, 0), acc = 0, med = null;
     for (var i = 0; i < paying.length; i++) { acc += paying[i].speed; if (acc >= tot / 2) { med = paying[i].price; break; } }
     out.push({

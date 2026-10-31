@@ -132,6 +132,12 @@ sempre identificado; nada de prometer previsão de sorte (Poisson é sem memóri
   DARR) e juros (CDI, juro real pelo Focus, CDI − T-bill); ranking do retorno anual medido de tudo, com o CDI ao lado;
   tetos teóricos (Polymarket) separados; mudanças em 7 dias. `market2.macro`: Selic, IPCA 12 m, Focus, T-bill 13 semanas.
   Telas: Início (cartão do copiloto) e Radar (topo das frentes). Catálogo ganhou o grupo G (fora de cripto).
+- Preço real do hash (31/10): o livro só conta ordens com máquinas (`rigsCount > 0`) em `parseBook`, `bookPerHash` e
+  `parseNiceHashBook`; antes, ordens sem máquinas com velocidade média > 0 baixavam o "menor preço recebendo" de ~0,4254
+  para 0,40 e a simulação comprava ~6% barato demais. Simulações de mineração arquivadas (`paperArchive`, `paperPriceV: 2`)
+  e recomeçadas. Potência ideal (IA, `powerPlan`): lucro esperado por dia em cada potência com lance pela profundidade
+  do livro (`book.depth`), sorte de 1 dia e capital mínimo pelo critério de Kelly (bloco ÷ 2 × margem); o plano nunca
+  passa da potência que mais lucra e mostra 0 PH/s quando nenhuma tem lucro esperado.
 - Ciclo do servidor: 3 min. Mínimo do Cloudflare é 1 min, mas o KV grátis aceita 1.000 gravações/dia e propaga em até
   60 s; abaixo de 3 min exige plano pago + Durable Objects. Atraso de 3 min custa < US$1 com 10 PH/s.
 

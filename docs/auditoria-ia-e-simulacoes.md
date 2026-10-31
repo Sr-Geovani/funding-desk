@@ -42,6 +42,7 @@ faz a mesma conta que a operação real faria. Lido linha a linha: `worker/src/b
 | 10 | Média | simulação mineração | Preço baixava na hora; a NiceHash só desce um degrau a cada 10 min (o robô já respeitava). | Igual ao robô. |
 | 11 | Alta | outras moedas | Dificuldade do momento (DOGE/DASH em vale) e custos faltando: Scrypt +19,7%, X11 +132%. | Média de 24 h, pool PPS 4%, perdas 2,5%, mercado < US$1.000/dia = raso. Simulação recomeçou. |
 | 12 | Média | funding | Resultado supõe as 2 pernas em ordem limite; com 1 perna a mercado, ~US$0,60 a mais por operação (o validado é +US$0,11). | Resumo mostra "se 1 perna fosse a mercado". |
+| 14 | **Alta (dinheiro)** | robô, simulação, painel | Preço de compra otimista: "menor preço recebendo hash" usava a velocidade média (> 0), que demora a zerar; ordens sem máquinas a 0,40 pareciam recebendo. O hash real só ia para lances ≥ ~0,4254 (31/10). Simulações compravam ~6% mais barato que o possível e mostravam margem de +3% a +5% quando a real era ~−0,5%. | Só conta ordem com máquinas (`rigsCount > 0`); simulações antigas arquivadas (`paperArchive`) e recomeçadas; potência ideal (IA) pela profundidade do livro. |
 | 13 | Média | painel | Robô/Rede/IA congelavam no iPhone até reabrir. | Atualiza ao voltar e em qualquer aba; leitura presa destrava. |
 
 ## Simulações: o que é fiel e o que não é

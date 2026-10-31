@@ -996,6 +996,31 @@ test('panorama do mercado (IA): macro fora de cripto, regime, ranking e mudança
   assert.ok(P.changes.some((c) => /Bitfinex ↓/.test(c)) && P.lines.some((l) => /juro real/.test(l)));
 });
 
+test('livro da NiceHash: só conta como recebendo a ordem com máquinas (velocidade média engana)', () => {
+  const d = JSON.parse(readFileSync(new URL('./fixtures/nicehash-book-stale.real.json', import.meta.url)));
+  const b = parseBook(d);
+  assert.ok(b.fillEH >= 0.425 && b.fillEH < 0.4256, 'preço real para receber ~0,4254, não 0,40: ' + b.fillEH);
+  assert.ok(b.staleOrders > 10, 'ordens com velocidade mas sem máquinas');
+  assert.ok(b.depth.length > 3 && b.depth.every((x, i, a) => !i || (x[0] > a[i - 1][0] && x[1] >= a[i - 1][1])), 'profundidade crescente');
+  const R = createRequire(import.meta.url)('../radar.js'); assert.ok(R.bookPerHash(d).fill * 1e18 >= 0.425);
+});
+
+test('potência ideal (IA): lucro esperado por potência pela profundidade do livro, sorte e capital de Kelly', async () => {
+  const { powerPlan } = await import('../worker/src/brain.js');
+  const book = parseBook(JSON.parse(readFileSync(new URL('./fixtures/nicehash-book-stale.real.json', import.meta.url))));
+  const cfg = Object.assign({}, DEFAULT_CONFIG, { bidPremiumPct: 0.1 }), lim = { maxLimitPh: 100 };
+  const base = { ok: true, btcUsd: 77371, phDaysPerBlock: 26.18, fillEH: book.fillEH, depth: book.depth, breakEvenEH: 0.42 };
+  // bloco de US$885 (empate ~0,4242) abaixo do preço real (0,4254): nenhuma potência dá lucro esperado → ideal 0
+  const neg = powerPlan(Object.assign({ blockNetUsd: 885 }, base), cfg, lim);
+  assert.equal(neg.idealPh, 0); assert.ok(neg.edgePct < 0); assert.ok(neg.curve.every((r) => r.profitDay < 0));
+  // bloco de US$915 (~3% acima do custo): lucro cresce com a potência (livro fundo) → ideal no teto; Kelly = V ÷ (2 × margem)
+  const pos = powerPlan(Object.assign({ blockNetUsd: 915 }, base), cfg, lim);
+  assert.equal(pos.idealPh, 100); assert.ok(pos.idealProfitDay > 0 && pos.edgePct > 2.5);
+  close(pos.bankrollMinUsd, 915 / (2 * pos.edgePct / 100), 1e-6);
+  const r100 = pos.curve.find((r) => r.ph === 100); close(r100.blocksDay, 100 / 26.18, 1e-9); close(r100.luckDay, Math.sqrt(100 / 26.18) * 915, 1e-6);
+  assert.ok(pos.curve.some((r) => r.overCap), 'mostra acima do teto marcado');
+});
+
 test('auditoria IA: mesma régua do robô, reajuste real, funding acompanhado e grupo de controle', () => {
   const T0 = Date.UTC(2026, 9, 31, 12), H = 36e5;
   const base = { now: T0, edge: 1.5, green: false, minEdge: 3, darr: 1.05, D: 5e11, mom: { vsEmaPct: 3 }, ret: null, win: null, fund: [], rows: {}, stable24: {}, algos: [] };

@@ -155,6 +155,19 @@ export async function tick(env, opts = {}) {
   const dec = decide({ cfg, mkt, orders, state, now, units, limits, blockEvent });
 
   // Simulação (só no modo Observar) e resultado real (ordens gerenciadas + blocos).
+  // Preço v2 (31/10): o lance simulado passou a sair do preço que de fato recebe hash (ordens com máquinas). Até aqui as
+  // simulações compravam ~6% mais barato que o possível (0,402 em vez de ~0,4255): ficam arquivadas e recomeçam.
+  let paperArchive = state.paperArchive || null;
+  if (state.paperPriceV !== 2) {
+    const sm = (p) => (p ? { since: p.since, ph: p.ph, spendUsd: p.spendUsd || 0, evUsd: p.evUsd || 0, wonUsd: p.wonUsd || 0, blocks: p.blocks || 0, draws: p.draws || 0,
+      hoursOn: p.hoursOn || 0, wins: (p.wins || []).slice(-5), lastPriceEH: p.priceEH || null } : null);
+    if (state.paper || state.paperAlways || state.paperPlan || state.paperBurst) {
+      paperArchive = { at: now, paper: sm(state.paper), burst: sm(state.paperBurst), plan: sm(state.paperPlan), always: sm(state.paperAlways),
+        why: 'preço de compra otimista: usava a menor ordem com velocidade média > 0, mesmo sem máquinas (0,40), em vez do preço que recebe hash (~0,4254)' };
+      log.push({ t: now, kind: 'simulado', text: 'Simulações de mineração recomeçaram com o preço real (ordens com máquinas); as anteriores compravam ~6% mais barato que o possível e foram arquivadas' });
+    }
+    state.paper = null; state.paperBurst = null; state.paperPlan = null; state.paperAlways = null; state.paperPriceV = 2;
+  }
   let paper = state.paper || null;
   if (cfg.mode === 'observe') {
     const ps = paperStep(paper, { cfg, mkt, now, units, limits, blocks: newBlocks });
@@ -455,7 +468,7 @@ export async function tick(env, opts = {}) {
   const mempool = mpR.ok ? Object.assign({ at: now }, mpR.v) : state.mempool || null;
 
   const next = Object.assign({}, dec.state, alertState, {
-    lastTick: now, verified: Object.fromEntries(Object.entries(verified).filter(([, x]) => now - x.at <= 6 * 3600e3)), ai: br.ai, aiAnalysis, plan, acct, algoMap, mempool, stable24, pairStats, msig, darr, recentBlocks, nhWeek, paper, paperBurst, paperPlan, paperAlways, hashMkts, fronts, frontsPaper, ltStreak, fundPaperLT, market2, aiPanorama, blockBuf, blockFlush, lastBlockT, real, fundPaper, alertScore, algoPaper, algoTs, aiScores, fundPaperAI, fhistHour, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig,
+    lastTick: now, verified: Object.fromEntries(Object.entries(verified).filter(([, x]) => now - x.at <= 6 * 3600e3)), ai: br.ai, aiAnalysis, plan, acct, algoMap, mempool, stable24, pairStats, msig, darr, recentBlocks, nhWeek, paper, paperBurst, paperPlan, paperAlways, hashMkts, fronts, frontsPaper, ltStreak, fundPaperLT, market2, aiPanorama, paperArchive, paperPriceV: 2, blockBuf, blockFlush, lastBlockT, real, fundPaper, alertScore, algoPaper, algoTs, aiScores, fundPaperAI, fhistHour, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig,
     market: mkt.ok ? { breakEvenEH: mkt.breakEvenEH, capEH: mkt.capEH, fillEH: mkt.fillEH, medianEH: mkt.medianEH, bidEH: mkt.bidEH,
       edgeAtBidPct: mkt.edgeAtBidPct, green: mkt.green, D: mkt.D, bookTotalPH: book ? book.totalPH : 0, bchUsd: mkt.bchUsd, btcUsd: mkt.btcUsd, costPerBlockUsd: mkt.costPerBlockUsd,
       hashpriceNet: mkt.hashpriceNet, blockNetUsd: mkt.blockNetUsd, phDaysPerBlock: mkt.phDaysPerBlock, market: mkt.market } : { ok: false, reason: mkt.reason },
@@ -565,7 +578,7 @@ async function api(req, env, url, fetchFn) {
       telegram: !!(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID), creds: credStatus(env), limits, config: cfg,
       state: { lastTick: state.lastTick, lastHeight: state.lastHeight, market: state.market, myBlocks: state.myBlocks || [], dailyUsd: state.dailyUsd || 0,
         errors: state.errors || [], edgeHist: state.edgeHist || [], alerts: (state.alerts || []).slice(-30).reverse(),
-        paper: state.paper || null, paperBurst: state.paperBurst || null, paperPlan: state.paperPlan || null, paperAlways: state.paperAlways || null, hashMkts: state.hashMkts || null, fronts: state.fronts || null, frontsPaper: state.frontsPaper || null, market2: state.market2 || null, aiPanorama: state.aiPanorama || null,
+        paper: state.paper || null, paperBurst: state.paperBurst || null, paperPlan: state.paperPlan || null, paperAlways: state.paperAlways || null, paperArchive: state.paperArchive || null, hashMkts: state.hashMkts || null, fronts: state.fronts || null, frontsPaper: state.frontsPaper || null, market2: state.market2 || null, aiPanorama: state.aiPanorama || null,
         fundPaperLT: state.fundPaperLT ? { summary: fundPaperSummary(state.fundPaperLT, LT_FEES), open: state.fundPaperLT.open, closed: state.fundPaperLT.closed.slice(-50).reverse() } : null, opLog: (state.opLog || []).slice(-20).reverse(), real: state.real ? Object.assign({}, state.real, { paid: undefined }) : null,
         fundPaper: state.fundPaper ? { summary: fundPaperSummary(state.fundPaper, FD.DEFAULT_FEES), open: state.fundPaper.open, closed: state.fundPaper.closed.slice(-100).reverse() } : null,
         algoPaper: state.algoPaper || null,

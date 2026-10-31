@@ -74,7 +74,12 @@ export function parseBook(d) {
   if (!mk) return null;
   const s = d.stats[mk], pf = parseFloat(s.priceFactor) || 1e18, mf = parseFloat(s.marketFactor) || 1e18;
   const toEH = 1e18 / pf, toPH = mf / 1e15;
-  const paying = (s.orders || []).filter((o) => o.alive !== false && parseFloat(o.acceptedSpeed) > 0)
+  // Recebendo hash AGORA = velocidade aceita e máquinas trabalhando (rigsCount > 0). A velocidade aceita é uma média que
+  // demora a zerar: ordens que perderam as máquinas continuam com velocidade e preço baixo por um tempo e enganam o
+  // "menor preço recebendo" (31/10: 0,40 parecia recebendo, mas o hash real só ia para ordens a partir de 0,4254).
+  const live = (o) => o.alive !== false && parseFloat(o.acceptedSpeed) > 0;
+  const withRigs = (s.orders || []).some((o) => live(o) && +o.rigsCount > 0);
+  const paying = (s.orders || []).filter((o) => live(o) && (!withRigs || +o.rigsCount > 0))
     .map((o) => ({ price: parseFloat(o.price) * toEH, speed: parseFloat(o.acceptedSpeed) * toPH }))
     .sort((a, b) => a.price - b.price);
   const tot = paying.reduce((a, o) => a + o.speed, 0);
@@ -82,7 +87,12 @@ export function parseBook(d) {
   for (const o of paying) { acc += o.speed; if (acc >= tot / 2) { med = o.price; break; } }
   // menor preço entre ordens FIXED (preço garantido, costuma sair mais caro que a STANDARD)
   const fixed = (s.orders || []).filter((o) => o.alive !== false && /FIXED/i.test(String((o.type && o.type.code) || o.type || ''))).map((o) => parseFloat(o.price) * toEH).filter(isFinite);
-  return { market: mk, fillEH: paying.length ? paying[0].price : null, medianEH: med, totalPH: tot, payingOrders: paying.length, fixedEH: fixed.length ? Math.min(...fixed) : null };
+  // Profundidade: [preço, PH/s acumulados até esse preço] das ordens recebendo. Um lance acima de um nível toma o hash
+  // das ordens abaixo dele: é o tamanho que dá para comprar sem subir mais o preço (usado na potência ideal).
+  const depth = []; let c = 0;
+  for (const o of paying) { c += o.speed; if (depth.length && depth[depth.length - 1][0] === o.price) depth[depth.length - 1][1] = c; else depth.push([o.price, c]); }
+  return { market: mk, fillEH: paying.length ? paying[0].price : null, medianEH: med, totalPH: tot, payingOrders: paying.length, fixedEH: fixed.length ? Math.min(...fixed) : null,
+    depth: depth.slice(0, 40), staleOrders: withRigs ? (s.orders || []).filter((o) => live(o) && !(+o.rigsCount > 0)).length : 0 };
 }
 
 const ceil4 = (x) => Math.ceil(x * 1e4 - 1e-9) / 1e4;
@@ -97,7 +107,7 @@ export function computeMarket({ D, bchUsd, btcUsd, feesBch = 0, book, cfg }) {
   const breakEvenEH = hashpriceNet / (1 + cfg.rentFeePct / 100) / btcUsd * 1000;
   const capEH = breakEvenEH * (1 - cfg.minEdgePct / 100);
   const m = { ok: true, D, bchUsd, btcUsd, phDaysPerBlock, blockNetUsd, hashpriceNet, breakEvenEH, capEH,
-    fillEH: book && book.fillEH, medianEH: book && book.medianEH, market: book && book.market };
+    fillEH: book && book.fillEH, medianEH: book && book.medianEH, market: book && book.market, depth: (book && book.depth) || null };
   if (!m.fillEH) return Object.assign(m, { ok: false, reason: 'livro de ordens vazio' });
   m.bidEH = ceil4(m.fillEH * (1 + cfg.bidPremiumPct / 100));
   m.edgeAtBidPct = (breakEvenEH / m.bidEH - 1) * 100;
