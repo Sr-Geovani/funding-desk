@@ -280,6 +280,16 @@ details.card>summary{color:var(--fg);font-size:15px}
         </details>
         </details>
       </div>
+      <details class="card" id="f_how" style="margin-bottom:12px"><summary>Como funciona: ciclo, pagamentos, entrar e sair rápido</summary>
+        <ul class="note" style="margin:8px 0 0;padding-left:18px">
+          <li><b>De onde vem o ganho:</b> short numa exchange e long em outra, do mesmo tamanho. O preço da moeda não importa (uma perna ganha o que a outra perde); você recebe a <b>diferença de funding</b> entre elas.</li>
+          <li><b>Quando paga:</b> em horários fixos. Hyperliquid a cada 1 h; Binance, Bybit, OKX e Bitget em geral a cada 8 h (algumas moedas 4 h ou 1 h). Só recebe quem está com a posição aberta no horário.</li>
+          <li><b>O custo:</b> 4 execuções (2 para entrar, 2 para sair) mais um pouco de deslize, ~0,1% a 0,2% do tamanho. Por isso cada oportunidade diz em quantos pagamentos <b>empata</b>.</li>
+          <li><b>O que é o ciclo:</b> o tempo que você pretende ficar para os pagamentos cobrirem o custo e sobrar lucro (ex.: 3 dias). Não é prazo obrigatório: fique enquanto o funding seguir positivo; saia quando virar negativo (o painel e o Telegram avisam).</li>
+          <li><b>Dá para entrar e sair rápido?</b> Dá: abrir antes de um pagamento e fechar logo depois. Só compensa quando o spread é muito alto, porque 1 pagamento precisa cobrir as 4 execuções. A linha "Curto prazo" de cada oportunidade mostra o mínimo; ordem limite (maker) baixa bastante o custo. Ganhar com sobe e desce do preço não é o jogo aqui.</li>
+          <li><b>Na hora:</b> a execução é manual, na exchange. Cada oportunidade tem "Como executar (passo a passo)". Registre a posição para o painel acompanhar.</li>
+        </ul>
+      </details>
       <div id="best" class="card" style="margin-bottom:12px"></div>
       <div id="list" style="display:grid;gap:10px"></div>
     </div>
@@ -396,6 +406,8 @@ details.card>summary{color:var(--fg);font-size:15px}
     <div id="mine-ops" class="stack" hidden>
       <div class="card" id="o_conn"></div>
       <div class="card sig" id="o_status"></div>
+      <div class="card" id="o_paper"></div>
+      <div class="card" id="o_real" hidden></div>
       <div class="card"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Ordens na NiceHash</h2><button class="sm" id="o_refresh">Atualizar</button></div>
         <div id="o_bal" class="note" style="margin:6px 0 10px"></div><div id="o_orders" style="display:grid;gap:10px"></div></div>
       <div class="card">

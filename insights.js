@@ -252,11 +252,35 @@ function fundingFromHistory(pos, a, b, until) {
   return { usd: sum, payments: count };
 }
 
+/* ---------- funding: passo a passo de execução ---------- */
+// o: oportunidade; p: { capital, lev, hold, now, plan, mode }. Devolve frases curtas, na ordem de execução.
+function executionSteps(o, p) {
+  var perLegMargin = p.capital / 2, notional = o.m.notional, first = p.plan && p.plan.firstIncome;
+  var when = first ? first.venue + ' paga em ' + dur(first.t - p.now) : 'antes do próximo pagamento';
+  if (p.mode === 'sp') {
+    return [
+      'Deixe ~' + money(p.capital, 0) + ' em USDT na ' + o.s + ': metade para comprar ' + o.coin + ' à vista, metade de margem para o short.',
+      'Compre ' + money(notional, 0) + ' de ' + o.coin + ' à vista e abra SHORT do mesmo tamanho no perpétuo ' + o.coin + '-USDT da ' + o.s + ' (margem isolada, ' + p.lev + 'x), no mesmo minuto.',
+      'As duas pernas precisam estar abertas antes do pagamento (' + when + '): só recebe quem está posicionado no horário.',
+      'Toque em "Registrar posição" para o painel acompanhar e avisar (no Telegram também).',
+      'Fique enquanto o funding seguir positivo; se virar negativo, venda o à vista e feche o short juntos.'
+    ];
+  }
+  return [
+    'Deixe ~' + money(perLegMargin, 0) + ' em USDT na ' + o.s + ' e ~' + money(perLegMargin, 0) + ' na ' + o.l + ' (margem de cada perna).',
+    'Nas duas: perpétuo ' + o.coin + '-USDT, margem isolada, alavancagem ' + p.lev + 'x (posição de ~' + money(notional, 0) + ' por perna).',
+    'No mesmo minuto e no mesmo tamanho: SHORT na ' + o.s + ' e LONG na ' + o.l + '. Ordem limite (maker) paga menos taxa; se uma perna executar e a outra não, complete ou feche na hora.',
+    'As duas pernas precisam estar abertas antes do pagamento (' + when + '): só recebe quem está posicionado no horário.',
+    'Toque em "Registrar posição" para o painel acompanhar e avisar (no Telegram também).',
+    'Fique enquanto o funding seguir positivo, mesmo depois do ciclo de ' + p.hold + ' dias. Se virar negativo, feche as duas pernas juntas (ordens opostas, mesmo tamanho, mesmo minuto).'
+  ];
+}
+
 var FDI = {
   dur: dur, fundingPlan: fundingPlan, planText: planText, capitalForTarget: capitalForTarget,
   backtestFunding: backtestFunding, backtestText: backtestText, nextBlockChance: nextBlockChance,
   poolOf: poolOf, networkSplit: networkSplit, lastBlockStory: lastBlockStory, miningOutlook: miningOutlook, allocation: allocation,
-  legCost: legCost, shortTerm: shortTerm, stayAdvice: stayAdvice, switchAdvice: switchAdvice, fundingFromHistory: fundingFromHistory
+  legCost: legCost, shortTerm: shortTerm, stayAdvice: stayAdvice, switchAdvice: switchAdvice, fundingFromHistory: fundingFromHistory, executionSteps: executionSteps
 };
 if (typeof module !== 'undefined' && module.exports) module.exports = FDI;
 else root.FDI = FDI;

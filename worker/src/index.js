@@ -7,6 +7,7 @@ import { createClient, NH_HOSTS, DEFAULT_ALGO } from './nicehash.js';
 import { createChain, paidTo, DEFAULT_BCH_REST, DEFAULT_PRICE_URL } from './chain.js';
 import { DEFAULT_CONFIG, sanitizeConfig, parseBook, computeMarket, decide, limitsFromEnv } from './bot.js';
 import { fundingSnapshot, runAlerts } from './alerts.js';
+import { paperStep, realStep } from './paper.js';
 import { withCreds, reloadCreds, saveCreds, credStatus, parseNiceHash, TG_TOKEN_RE, chatFromUpdates } from './creds.js';
 
 export const VERSION = '1.0.0';
@@ -137,6 +138,16 @@ export async function tick(env, opts = {}) {
   }
   const dec = decide({ cfg, mkt, orders, state, now, units, limits, blockEvent });
 
+  // Simulação (só no modo Observar) e resultado real (ordens gerenciadas + blocos).
+  let paper = state.paper || null;
+  if (cfg.mode === 'observe') {
+    const ps = paperStep(paper, { cfg, mkt, now, units, limits });
+    paper = ps.paper;
+    for (const e of ps.events) log.push({ t: now, kind: 'simulado', text: e });
+  } else if (paper) paper.lastTs = now; // fora do Observar a simulação fica parada
+  const real = realStep(state.real, { orders, managedIds: cfg.managed, blockEvent, now,
+    btcUsd: mkt.btcUsd || (prices.ok ? prices.v.btcUsd : 0), bchUsd: mkt.bchUsd || (prices.ok ? prices.v.bchUsd : 0) });
+
   // Execução: só no modo ativo. No modo observar, registra o que faria.
   const results = [];
   for (const a of dec.actions) {
@@ -190,10 +201,10 @@ export async function tick(env, opts = {}) {
   }
 
   const next = Object.assign({}, dec.state, alertState, {
-    lastTick: now, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig,
+    lastTick: now, paper, real, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig,
     market: mkt.ok ? { breakEvenEH: mkt.breakEvenEH, capEH: mkt.capEH, fillEH: mkt.fillEH, medianEH: mkt.medianEH, bidEH: mkt.bidEH,
       edgeAtBidPct: mkt.edgeAtBidPct, green: mkt.green, D: mkt.D, bchUsd: mkt.bchUsd, btcUsd: mkt.btcUsd, costPerBlockUsd: mkt.costPerBlockUsd,
-      hashpriceNet: mkt.hashpriceNet, market: mkt.market } : { ok: false, reason: mkt.reason },
+      hashpriceNet: mkt.hashpriceNet, blockNetUsd: mkt.blockNetUsd, phDaysPerBlock: mkt.phDaysPerBlock, market: mkt.market } : { ok: false, reason: mkt.reason },
     errors
   });
   // Histórico curto da margem (para achar horários baratos), um ponto a cada ~15 min.
@@ -202,7 +213,7 @@ export async function tick(env, opts = {}) {
   next.edgeHist = hist.slice(-672); // 7 dias
   await kvPut(env, 'state', next);
   await appendLog(env, log);
-  return { market: next.market, actions: results, notes: dec.notes, errors, blockEvent, mode: cfg.mode, alerts: newAlerts };
+  return { market: next.market, actions: results, notes: dec.notes, errors, blockEvent, mode: cfg.mode, alerts: newAlerts, paper };
 }
 
 /* ---------- contas conectadas pelo painel ---------- */
@@ -299,7 +310,8 @@ async function api(req, env, url, fetchFn) {
     return json({ version: VERSION, algo: nh.algorithm, nhEnv: env.NH_BASE ? 'personalizado' : (env.NH_ENV === 'prod' ? 'produção' : 'teste'), keys: hasKeys(env),
       telegram: !!(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID), creds: credStatus(env), limits, config: cfg,
       state: { lastTick: state.lastTick, lastHeight: state.lastHeight, market: state.market, myBlocks: state.myBlocks || [], dailyUsd: state.dailyUsd || 0,
-        errors: state.errors || [], edgeHist: state.edgeHist || [], alerts: (state.alerts || []).slice(-20).reverse() } });
+        errors: state.errors || [], edgeHist: state.edgeHist || [], alerts: (state.alerts || []).slice(-30).reverse(),
+        paper: state.paper || null, real: state.real ? Object.assign({}, state.real, { paid: undefined }) : null } });
   }
   if (p === '/config' && m === 'PUT') {
     const { config, errors } = sanitizeConfig(body, await getConfig(env), limits);
@@ -310,6 +322,12 @@ async function api(req, env, url, fetchFn) {
     return json({ config });
   }
   if (p === '/tick' && m === 'POST') return json(await tick(env, { fetchFn }));
+  if (p === '/paper/reset' && m === 'POST') {
+    const st = await kvGet(env, 'state', {});
+    st.paper = null; await kvPut(env, 'state', st);
+    await appendLog(env, [{ t: Date.now(), kind: 'config', text: 'simulação reiniciada' }]);
+    return json({ ok: true });
+  }
   if (p === '/credentials' && m === 'GET') return json(credStatus(env));
   if (p === '/credentials' && m === 'PUT') return putCredentials(env, body, fetchFn);
   if (p === '/telegram' && m === 'POST') return connectTelegram(env, body, fetchFn);

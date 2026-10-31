@@ -10,6 +10,7 @@ import worker, { tick } from '../worker/src/index.js';
 import { createMock, MOCK_KEYS } from '../worker/dev/mock.mjs';
 import { memoryKV } from '../worker/dev/server.mjs';
 import { seal, unseal, chatFromUpdates, parseNiceHash } from '../worker/src/creds.js';
+import { paperStep, realStep } from '../worker/src/paper.js';
 const FDM = createRequire(import.meta.url)('../mining.js');
 
 const close = (a, b, eps = 1e-9, msg = '') => assert.ok(Math.abs(a - b) <= eps, `${msg} esperado ${b}, veio ${a}`);
@@ -433,4 +434,68 @@ test('livro: pede o mercado SHA256ASICBOOST inteiro (sem size vêm só as 100 ma
   const c = createClient({ base: 'https://api2.nicehash.com', fetchFn: async (u) => { url = String(u); return Response.json({ stats: {} }); } });
   await c.orderBook();
   assert.match(url, /algorithm=SHA256ASICBOOST/); assert.match(url, /size=1000/);
+});
+
+/* ---------- simulação (modo Observar) e resultado real ---------- */
+const PCFG = Object.assign({}, DEFAULT_CONFIG, { targetPh: 10, rentFeePct: 3, sessionBudgetUsd: 300, dailyBudgetUsd: 500 });
+const PU = { minLimitPH: 1 }, PL = { maxLimitPh: 100 };
+const pm = (o) => Object.assign({ ok: true, green: true, bidEH: 0.40, capEH: 0.42, edgeAtBidPct: 8, D: 500e9, btcUsd: 77000, blockNetUsd: 900 }, o);
+
+test('simulação: acumula gasto, receita média e blocos esperados só enquanto "compraria"', () => {
+  const T0 = Date.UTC(2026, 9, 31, 12);
+  let r = paperStep(null, { cfg: PCFG, mkt: pm(), now: T0, units: PU, limits: PL });
+  assert.match(r.events[0], /compraria 10 PH\/s a 0\.4000/);
+  assert.equal(r.paper.spendUsd, 0);
+  r = paperStep(r.paper, { cfg: PCFG, mkt: pm(), now: T0 + 180e3, units: PU, limits: PL });
+  const cost = 10 * 0.40 / 1000 * 77000 * 1.03 * 180 / 86400, lam = 10 * 1e15 * 180 / (500e9 * 4294967296);
+  close(r.paper.spendUsd, cost, 1e-9); close(r.paper.lambda, lam, 1e-15); close(r.paper.evUsd, lam * 900, 1e-9);
+  assert.deepEqual(r.events, [], 'sem log repetido');
+  r = paperStep(r.paper, { cfg: PCFG, mkt: pm({ green: false, bidEH: 0.45 }), now: T0 + 360e3, units: PU, limits: PL });
+  assert.match(r.events[0], /pausaria \(aluguel 0\.4500 acima do teto 0\.4200\)/);
+  const spent = r.paper.spendUsd;
+  r = paperStep(r.paper, { cfg: PCFG, mkt: pm({ green: false }), now: T0 + 540e3, units: PU, limits: PL });
+  close(r.paper.spendUsd, spent, 1e-12, 'pausado não gasta');
+  // backend parado 2 h: conta no máximo 15 min
+  r = paperStep(r.paper, { cfg: PCFG, mkt: pm(), now: T0 + 600e3, units: PU, limits: PL });
+  const before = r.paper.spendUsd;
+  r = paperStep(r.paper, { cfg: PCFG, mkt: pm(), now: T0 + 600e3 + 2 * 3600e3, units: PU, limits: PL });
+  close(r.paper.spendUsd - before, 10 * 0.40 / 1000 * 77000 * 1.03 * 900 / 86400, 1e-9);
+  assert.equal(r.paper.sessions, 1, 'pausar não abre sessão nova (mesma ordem, só potência menor)');
+});
+
+test('simulação: stop-loss e limite diário virtuais', () => {
+  const T0 = Date.UTC(2026, 9, 31, 0);
+  const cfg = Object.assign({}, PCFG, { targetPh: 100, sessionBudgetUsd: 50, dailyBudgetUsd: 120 });
+  let r = paperStep(null, { cfg, mkt: pm(), now: T0, units: PU, limits: PL }), all = [];
+  for (let i = 1; i <= 20; i++) { r = paperStep(r.paper, { cfg, mkt: pm(), now: T0 + i * 180e3, units: PU, limits: PL }); all.push(...r.events); }
+  assert.ok(all.some((e) => /stop-loss da sessão/.test(e)), all.join(' | '));
+  assert.ok(all.some((e) => /limite diário de US\$120/.test(e)), all.join(' | '));
+  assert.ok(r.paper.days['2026-10-31'].spendUsd < 120 + 40, 'para perto do limite do dia');
+  assert.equal(r.paper.on, false);
+});
+
+test('resultado real: soma o pago nas ordens gerenciadas e os blocos', () => {
+  const T0 = Date.UTC(2026, 9, 31, 12);
+  let r = realStep(null, { orders: [{ id: 'A', paidBtc: 0, createdTs: T0 }, { id: 'X', paidBtc: 1 }], managedIds: ['A'], btcUsd: 77000, bchUsd: 300, now: T0 });
+  r = realStep(r, { orders: [{ id: 'A', paidBtc: 0.001, createdTs: T0 }], managedIds: ['A'], btcUsd: 77000, bchUsd: 300, now: T0 + 180e3 });
+  close(r.spendUsd, 77);
+  r = realStep(r, { orders: [], managedIds: ['A'], btcUsd: 77000, bchUsd: 300, now: T0 + 360e3, blockEvent: { height: 1, bch: 3.1 } });
+  assert.equal(r.blocks, 1); close(r.revenueUsd, 930);
+  assert.deepEqual(r.paid, {}, 'ordem encerrada sai da conta');
+});
+
+test('integração: modo Observar registra a simulação e mostra no status', async () => {
+  const t = await setup();
+  try {
+    await t.call('PUT', '/api/config', { mode: 'observe', targetPh: 20 });
+    let r = await t.call('POST', '/api/tick');
+    assert.ok(r.body.paper && r.body.paper.on, JSON.stringify(r.body.market));
+    const log = await t.call('GET', '/api/log');
+    assert.ok(log.body.log.some((l) => l.kind === 'simulado' && /Simulação: compraria 20 PH\/s/.test(l.text)));
+    const st = await t.call('GET', '/api/status');
+    assert.equal(st.body.state.paper.sessions, 1);
+    assert.ok(st.body.state.market.blockNetUsd > 0);
+    assert.equal((await t.call('POST', '/api/paper/reset')).status, 200);
+    assert.equal((await t.call('GET', '/api/status')).body.state.paper, null);
+  } finally { t.server.close(); }
 });

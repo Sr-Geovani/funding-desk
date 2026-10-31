@@ -165,3 +165,16 @@ test('funding recebido pelo histórico público desde a entrada', () => {
   assert.equal(r.payments, 6);
   close(I.fundingFromHistory(pos, a, null, NOW).usd, 1000 * 0.12 / 100, 1e-12);
 });
+
+test('passo a passo de execução: pernas, tamanho, prazo do pagamento', () => {
+  const o = { coin: 'ENA', s: 'Bybit', l: 'Hyperliquid', m: { notional: 1000 } };
+  const plan = { firstIncome: { venue: 'Hyperliquid', t: NOW + 40 * 60e3 } };
+  const pp = I.executionSteps(o, { capital: 1000, lev: 2, hold: 3, now: NOW, plan, mode: 'pp' });
+  assert.match(pp[0], /US\$500 em USDT na Bybit e ~US\$500 na Hyperliquid/);
+  assert.match(pp[2], /SHORT na Bybit e LONG na Hyperliquid/);
+  assert.match(pp[3], /Hyperliquid paga em 40 min/);
+  assert.match(pp[5], /negativo, feche as duas pernas juntas/);
+  const sp = I.executionSteps(o, { capital: 1000, lev: 2, hold: 3, now: NOW, plan: null, mode: 'sp' });
+  assert.match(sp[1], /à vista e abra SHORT do mesmo tamanho no perpétuo ENA-USDT da Bybit/);
+  assert.match(sp[2], /antes do próximo pagamento/);
+});

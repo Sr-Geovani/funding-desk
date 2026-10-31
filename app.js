@@ -379,6 +379,8 @@ function renderScan(){
         (tgt.maxCapital?(tgt.feasible?'; cabe na liquidez (até ~'+usd(tgt.maxCapital,0)+').':'; acima do que a liquidez comporta (~'+usd(tgt.maxCapital,0)+'): use outra moeda ou divida.'):'.')+'</div>':'')+
       '</div>':'')+
     nextLine(o)+
+    (v.level!=='no'?'<details class="nums"><summary>Como executar (passo a passo)</summary><ol class="note" style="margin:6px 0;padding-left:18px">'+
+      FDI.executionSteps(o,{capital:p.capital,lev:p.lev,hold:p.hold,now:Date.now(),plan:plan,mode:state.mode}).map(function(x){return '<li>'+esc(x)+'</li>'}).join('')+'</ol></details>':'')+
     '<details class="nums"><summary>Números</summary>'+
     '<div class="legs" style="margin:6px 0">Short <b>'+o.s+'</b>'+srcTag(o.s)+' ('+pct(o.rs.apr,1)+' a.a., paga a cada '+o.rs.hours+'h)'+(o.rl?' · Long <b>'+o.l+'</b>'+srcTag(o.l)+' ('+pct(o.rl.apr,1)+' a.a., a cada '+o.rl.hours+'h)':' · Long <b>spot</b> (sem funding)')+'</div>'+
     '<div class="kv"><div><small>Spread previsto</small><span>'+pct(o.spread,1)+'</span></div>'+
@@ -659,17 +661,62 @@ function loadOps(){
   if(opsLoading)return;opsLoading=true;
   Promise.all([apiCall('GET','/status'),apiCall('GET','/orders'),apiCall('GET','/balance'),apiCall('GET','/pools'),apiCall('GET','/log')].map(settle)).then(function(r){
     opsLoading=false;ops.at=Date.now();ops.err={};
-    if(r[0].ok&&r[0].v&&r[0].v.config)ops.status=r[0].v;else{ops.status=null;ops.err.status=r[0].ok?'resposta inesperada do backend':r[0].e.message}
+    if(r[0].ok&&r[0].v&&r[0].v.config){ops.status=r[0].v;mergeServerAlerts((r[0].v.state||{}).alerts||[])}else{ops.status=null;ops.err.status=r[0].ok?'resposta inesperada do backend':r[0].e.message}
     if(r[1].ok)ops.orders=r[1].v.orders||[];else ops.err.orders=r[1].e.message;
     if(r[2].ok)ops.bal=r[2].v;else ops.err.bal=r[2].e.message;
     if(r[3].ok)ops.pools=r[3].v.list||[];else ops.err.pools=r[3].e.message;
     if(r[4].ok)ops.log=r[4].v.log||[];
-    renderOps();renderHome();renderMine();renderAcct();
+    renderOps();renderHome();renderMine();renderAcct();renderRadar();
   });
 }
 setInterval(function(){if(document.visibilityState==='visible'&&!$('mine-ops').hidden&&!$('tab-mine').hidden)loadOps()},30000);
 var MODE_TXT={off:'Desligado',observe:'Observando',active:'Ativo'},MODE_CHIP={off:'',observe:'warn',active:'ok'};
 var BOT_FIELDS=['mode','onBlock','payoutAddress','minEdgePct','bidPremiumPct','targetPh','minPh','sessionBudgetUsd','dailyBudgetUsd','poolFeePct','rentFeePct','poolId','orderAmountBtc'];
+// Margem em linguagem simples: retorno médio (não é chance) e a chance de achar bloco com a potência alvo em 24 h.
+function robotExplain(m,cfg){
+  var ph=+cfg.targetPh||0,pd=m.phDaysPerBlock||(m.D?m.D*4294967296/1e15/86400:0),blk=m.blockNetUsd||(m.bchUsd?3.125*m.bchUsd*(1-(cfg.poolFeePct||2)/100):0);
+  if(!(pd>0&&ph>0&&m.costPerBlockUsd>0))return '';
+  var lam=ph/pd,cost=lam*m.costPerBlockUsd,p=1-Math.exp(-lam),back=1+m.edgeAtBidPct/100;
+  return '<div class="box" style="margin-top:10px"><b>O que é esse '+pct(m.edgeAtBidPct,1)+'</b>'+
+    (m.edgeAtBidPct>=0?'Retorno médio esperado, não chance: no preço de agora, cada US$1 de aluguel volta em média US$'+nf(back,2)+' em BCH, contando muitos blocos. ':'Retorno médio negativo: no preço de agora, cada US$1 de aluguel volta em média US$'+nf(back,2)+'. ')+
+    '<br><b style="margin-top:6px">E a chance de achar bloco?</b>Com '+nf(ph,0)+' PH/s por 24 h: custo de ~'+usd(cost)+' e <strong>'+pctp(p*100,0)+'</strong> de chance de achar pelo menos um bloco (vale ~'+usd(blk)+'). '+
+    'Em '+pctp((1-p)*100,0)+' dos dias assim não sai bloco e o aluguel do dia é perdido: o ganho médio só aparece depois de vários blocos.</div>'+
+    '<details style="margin-top:8px"><summary>O que são lance, teto, empate e custo/bloco</summary><dl class="gloss" style="margin-top:6px">'+
+    '<dt>Lance</dt><dd>Preço que o robô pagaria agora: um pouco acima do menor preço que está recebendo hash.</dd>'+
+    '<dt>Empate</dt><dd>Preço em que o aluguel custa exatamente o que o hash rende em média (já sem taxas do pool e da NiceHash).</dd>'+
+    '<dt>Teto</dt><dd>Preço máximo que o robô aceita: empate menos a sua margem mínima ('+nf(cfg.minEdgePct,1)+'%). Acima dele, ele pausa.</dd>'+
+    '<dt>Custo/bloco</dt><dd>Quanto se gasta em média, nesse lance, para achar um bloco. Compare com o valor do bloco.</dd>'+
+    '<dt>Margem</dt><dd>Empate ÷ lance − 1. É o "desconto" sobre o preço justo; não é probabilidade.</dd></dl></details>';
+}
+function dayRows(days,cols){
+  var ks=Object.keys(days||{}).sort().reverse().slice(0,7);
+  return ks.length?'<div class="scroll"><table><tr>'+cols.map(function(c){return '<th>'+c[0]+'</th>'}).join('')+'</tr>'+ks.map(function(k){var d=days[k];
+    return '<tr><td>'+k.slice(8,10)+'/'+k.slice(5,7)+'</td>'+cols.slice(1).map(function(c){return '<td>'+c[1](d)+'</td>'}).join('')+'</tr>'}).join('')+'</table></div>':'';
+}
+function renderPaper(st){
+  var s=st.state||{},p=s.paper,cfg=st.config,el=$('o_paper');
+  var head='<div class="row" style="justify-content:space-between"><h2 style="margin:0">Simulação</h2><span class="chip">o que o robô teria feito</span></div>';
+  if(!p){el.innerHTML=head+'<p class="note">'+(cfg.mode==='observe'?'Começa no próximo ciclo do robô (até 3 min).':'Só roda com o robô em Observar.')+'</p>';return}
+  var res=p.evUsd-p.spendUsd,ch=1-Math.exp(-p.lambda);
+  el.innerHTML=head+
+    '<p class="note" style="margin:6px 0">Desde '+new Date(p.since).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})+'. '+
+    (cfg.mode!=='observe'?'<b>Parada</b>: o robô não está em Observar.':(p.on?'Agora: <b class="good">compraria</b> '+nf(p.ph,0)+' PH/s a '+(+p.priceEH).toFixed(4)+'.':'Agora: <b>pausado</b> (aluguel acima do teto ou limite do dia).'))+'</p>'+
+    '<div class="kv"><div><small>Tempo comprando</small><span>'+nf(p.hoursOn,1)+' h</span></div><div><small>Gasto simulado</small><span>'+usd(p.spendUsd)+'</span></div><div><small>Receita média</small><span>'+usd(p.evUsd)+'</span></div>'+
+    '<div><small>Resultado médio</small><span class="'+(res>=0?'good':'bad')+'">'+(res>=0?'+':'')+usd(res)+(p.spendUsd>0?' ('+pct(res/p.spendUsd*100,1)+')':'')+'</span></div>'+
+    '<div><small>Blocos esperados</small><span>'+nf(p.lambda,2)+'</span></div><div><small>Chance de ≥1 bloco</small><span>'+pctp(ch*100,0)+'</span></div>'+
+    '<div><small>Sessões</small><span>'+p.sessions+'</span></div><div><small>Stop-loss</small><span>'+p.stops+'</span></div></div>'+
+    dayRows(p.days,[['Dia'],['Horas',function(d){return nf(d.hoursOn,1)}],['Gasto',function(d){return usd(d.spendUsd)}],['Receita',function(d){return usd(d.evUsd)}],['Chance',function(d){return pctp((1-Math.exp(-d.lambda))*100,0)}]])+
+    '<p class="note" style="margin:8px 0 0">A simulação não sorteia blocos: mostra a média. Acerto = comprar abaixo do empate (resultado médio positivo) sem estourar os limites. '+
+    'O resultado real depende de sorte: com '+nf(p.lambda,2)+' blocos esperados, a chance de não ter saído nenhum é de '+pctp((1-ch)*100,0)+'.</p>'+
+    '<div class="row" style="margin-top:8px"><button class="sm" id="o_paper_reset">Reiniciar simulação</button></div>';
+  var real=s.real,re=$('o_real');
+  re.hidden=!(real&&(real.spendUsd>0||real.blocks>0||cfg.mode==='active'));
+  if(!re.hidden){var rr=(real.revenueUsd||0)-(real.spendUsd||0);
+    re.innerHTML='<div class="row" style="justify-content:space-between"><h2 style="margin:0">Resultado real</h2><span class="chip '+(rr>=0?'ok':'bad')+'">'+(rr>=0?'+':'')+usd(rr)+'</span></div>'+
+      '<div class="kv" style="margin-top:8px"><div><small>Gasto (ordens do robô)</small><span>'+usd(real.spendUsd||0)+'</span></div><div><small>Blocos</small><span>'+(real.blocks||0)+'</span></div><div><small>Recebido</small><span>'+usd(real.revenueUsd||0)+'</span></div></div>'+
+      dayRows(real.days,[['Dia'],['Gasto',function(d){return usd(d.spendUsd)}],['Blocos',function(d){return d.blocks}],['Recebido',function(d){return usd(d.revenueUsd)}]])+
+      '<p class="note" style="margin:8px 0 0">Desde '+new Date(real.since).toLocaleDateString('pt-BR')+'. Conta só ordens marcadas "robô gerencia"; o extrato da NiceHash é o registro oficial.</p>';}
+}
 function renderOps(){
   var c=apiCfg(),st=ops.status;
   if(!c.url){
@@ -687,11 +734,13 @@ function renderOps(){
   $('o_status').innerHTML='<div class="row" style="justify-content:space-between"><h2 style="margin:0">Robô</h2><span class="chip '+MODE_CHIP[cfg.mode]+'">'+MODE_TXT[cfg.mode]+'</span></div>'+
     (m.bidEH?'<div class="row" style="margin-top:10px;align-items:baseline"><span class="huge '+(m.green?'good':m.edgeAtBidPct>=0?'warn':'bad')+'">'+pct(m.edgeAtBidPct,1)+'</span><span class="note">margem no lance (servidor)</span></div>'+
     '<div class="kv" style="margin-top:8px"><div><small>Lance</small><span>'+m.bidEH.toFixed(4)+'</span></div><div><small>Teto</small><span>'+m.capEH.toFixed(4)+'</span></div><div><small>Empate</small><span>'+m.breakEvenEH.toFixed(4)+'</span></div>'+
-    '<div><small>Custo/bloco</small><span>'+usd(m.costPerBlockUsd)+'</span></div><div><small>Gasto hoje</small><span>'+usd(s.dailyUsd||0)+'</span></div><div><small>Blocos achados</small><span>'+(s.myBlocks||[]).length+'</span></div></div>'
+    '<div><small>Custo/bloco</small><span>'+usd(m.costPerBlockUsd)+'</span></div><div><small>Gasto hoje</small><span>'+usd(s.dailyUsd||0)+'</span></div><div><small>Blocos achados</small><span>'+(s.myBlocks||[]).length+'</span></div></div>'+
+    robotExplain(m,cfg)
     :'<p class="note">'+esc(m.reason||'Sem ciclo ainda. Toque em Rodar ciclo agora.')+'</p>')+
     '<div class="legs" style="margin-top:6px">Último ciclo: '+(s.lastTick?'<b data-ago="'+s.lastTick+'">'+ago(s.lastTick)+'</b> atrás':'nunca')+(s.lastHeight?' · bloco BCH '+s.lastHeight:'')+'</div>'+
     ((s.errors||[]).length?'<div class="note bad">'+esc(s.errors.join('; '))+'</div>':'')+
     ((s.myBlocks||[]).length?'<div class="legs">Seus blocos: '+s.myBlocks.slice(-5).reverse().map(function(b){return '<b>'+b.height+'</b> ('+(+b.bch).toFixed(4)+' BCH)'}).join(' · ')+'</div>':'');
+  renderPaper(st);
   var btcUsd=m.btcUsd||live().btcUsd;
   $('o_bal').innerHTML=ops.bal?'Saldo disponível: <b>'+(+ops.bal.available).toFixed(8)+' BTC</b>'+(btcUsd?' ('+usd(+ops.bal.available*btcUsd)+')':''):esc(ops.err.bal||'');
   $('o_orders').innerHTML=ops.orders.length?ops.orders.map(function(o){
@@ -1076,6 +1125,18 @@ function notifyLocal(list){
       list.slice(0,3).forEach(function(a){new Notification(a.title,{body:a.text})});
   }catch(e){}
 }
+// Alertas do servidor (rodam 24 h) entram no histórico deste aparelho: Safari, atalho e outro celular ficam iguais.
+// Mesma regra do painel: se este aparelho já registrou o mesmo alerta nas últimas 6 h, não duplica.
+function mergeServerAlerts(list){
+  var added=0;
+  list.forEach(function(a){
+    if(!a||!a.key||!a.t)return;
+    if(alerts.some(function(x){return x.id===a.id||(x.key===a.key&&Math.abs(x.t-a.t)<6*3600e3)}))return;
+    alerts.push(Object.assign({},a,{id:a.id||('srv:'+a.key+':'+a.t),srv:true}));added++;
+  });
+  if(!added)return;
+  alerts.sort(function(x,y){return x.t-y.t});alerts=FDR.pruneHistory(alerts,Date.now());ls('fd_alerts',alerts);renderBadge();
+}
 function unseen(){var seen=+(ls('fd_aseen')||0),now=Date.now();return alerts.filter(function(a){return a.t>seen&&HIGH[a.kind]&&!FDR.isMuted(a.key,aprefs,now)}).length}
 function renderBadge(){var n=unseen(),b=$('r_badge');b.hidden=!n;b.textContent=n>9?'9+':n}
 var KIND={entrada:['Entrada','ok','✓'],saida:['Saída','bad','✕'],risco:['Risco','warn','!'],atencao:['Atenção','warn','!'],oportunidade:['Oportunidade','ok','↗']};
@@ -1106,7 +1167,7 @@ function dayLabel(t){var d=new Date(t),n=new Date(),y=new Date(n.getTime()-864e5
   return d.toDateString()===n.toDateString()?'Hoje':d.toDateString()===y.toDateString()?'Ontem':d.toLocaleDateString('pt-BR',{weekday:'long',day:'2-digit',month:'2-digit'})}
 function renderRadar(){
   if(!$('r_alerts'))return;
-  var now=Date.now(),srv=ops.status&&ops.status.state&&ops.status.state.alerts||[];
+  var now=Date.now();
   var act=FDR.groupConditions((state.active||[]).filter(function(a){return !FDR.isMuted(a.key,aprefs,now)}));
   var muted=(state.active||[]).length-(state.active||[]).filter(function(a){return !FDR.isMuted(a.key,aprefs,now)}).length;
   var shown=alertsOpen?act:act.slice(0,5),histList=alerts.slice().reverse(),byDay={};
@@ -1118,10 +1179,10 @@ function renderRadar(){
       '<p class="note" style="margin:0">Aqui aparecem só condições que valem neste momento, por prioridade: saída, risco, atenção, entrada. Elas somem sozinhas quando deixam de valer.</p>')+
     (act.length>5?'<div style="margin-top:6px"><button class="sm" id="r_more">'+(alertsOpen?'Mostrar menos':'Ver todos ('+act.length+')')+'</button></div>':'')+
     (muted?'<p class="note" style="margin:6px 0 0">'+plural(muted,'item silenciado ou dispensado','itens silenciados ou dispensados')+'. <button class="sm" id="r_unmute">Mostrar de novo</button></p>':'')+
+    (histList.length?'<div class="eyebrow" style="margin:12px 0 6px">Últimos alertas'+(settings.apiUrl?' (deste aparelho e do servidor, 24 h)':'')+'</div><div class="stack" style="gap:6px">'+histList.slice(0,5).map(function(a){return alertHTML(a,{history:true})}).join('')+'</div>':'')+
     '<details id="r_hist" style="margin-top:10px"><summary>Histórico (7 dias): '+histList.length+' eventos</summary>'+(histList.length?'<div style="margin:6px 0"><button class="sm" id="r_clear">Limpar histórico</button></div>':'')+
       (histList.length?Object.keys(byDay).map(function(d){return '<div class="eyebrow" style="margin:8px 0 4px">'+esc(d)+'</div><div class="stack" style="gap:6px">'+byDay[d].slice(0,20).map(function(a){return alertHTML(a,{history:true})}).join('')+'</div>'}).join(''):'<p class="note">Sem eventos.</p>')+'</details>'+
-    (srv.length?'<details style="margin-top:8px"><summary>Do servidor (Telegram): '+srv.length+'</summary><div class="stack" style="gap:8px">'+srv.slice(0,8).map(alertHTML).join('')+'</div></details>':
-      '<p class="note" style="margin:8px 0 0">'+(settings.apiUrl?'Servidor sem alertas recentes.':'Sem backend, os alertas só são calculados com o painel aberto. Com o backend ligado e o Telegram configurado, chegam 24 h por dia.')+'</p>');
+    '<p class="note" style="margin:8px 0 0">'+(settings.apiUrl?(ops.status?'O histórico inclui os alertas do servidor, que roda 24 h e avisa no Telegram: é igual em todos os aparelhos conectados.':'Conectando ao servidor para trazer os alertas dele…'):'Sem backend, os alertas só são calculados com o painel aberto. Com o backend ligado, eles rodam 24 h e aparecem iguais em todos os aparelhos.')+'</p>';
   var sent=state.live?FDR.sentiment(state.rows,VENUES):null;
   $('r_sent').innerHTML=sent?'<span class="chip '+sent.cls+'">'+sent.label+'</span>':'';
   $('r_senttxt').textContent=sent?'Funding médio de BTC, ETH e SOL: '+pct(sent.avg,1)+' ao ano (o normal é ~11%). '+sent.text:(state.live?'':'Sem dados ao vivo de funding agora.');
@@ -1206,7 +1267,7 @@ function tab(t,sub){
   document.querySelectorAll('nav button').forEach(function(b){b.setAttribute('aria-current',b.dataset.tab===t?'true':'false')});
   if(sub)subTab(t,sub);
   settings.tab=t;ls('fd_set',settings);
-  if(t==='radar'){ls('fd_aseen',Date.now());renderBadge();loadMarketMap();renderRadar()}
+  if(t==='radar'){if(settings.apiUrl&&Date.now()-(ops.at||0)>60000)loadOps();renderRadar();ls('fd_aseen',Date.now());renderBadge();loadMarketMap()}
   if((t==='mine'||t==='home')&&(!mine.at||Date.now()-mine.at>300000))loadMining();
   window.scrollTo(0,0);
 }
@@ -1414,6 +1475,8 @@ $('ac_tg_del').addEventListener('click',function(){
 });
 $('api_clear').addEventListener('click',function(){try{localStorage.removeItem('fd_tok')}catch(e){}$('api_token').placeholder='';opsMsg('api_msg','Token apagado deste aparelho.')});
 $('o_refresh').addEventListener('click',loadOps);
+document.addEventListener('click',function(e){if(e.target&&e.target.id==='o_paper_reset'){if(!confirm('Zerar a simulação e começar a contar de agora?'))return;
+  apiCall('POST','/paper/reset').then(function(){loadOps()},function(err){alert('Erro: '+err.message)})}});
 BOT_FIELDS.forEach(function(k){$('b_'+k).addEventListener('input',function(){ops.dirty=true})});
 $('b_save').addEventListener('click',function(){
   var f=botForm();

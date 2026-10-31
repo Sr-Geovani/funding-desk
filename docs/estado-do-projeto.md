@@ -36,6 +36,10 @@ sempre identificado; nada de prometer previsão de sorte (Poisson é sem memóri
   tem poucas ordens; painel, robô, radar e fotos usam ASICBOOST (`NH_ALGO` no Worker troca, se preciso).
   Unidades: mínimo 1 PH/s, preço só desce 0,002 BTC/EH a cada ~10 min. Pools da ordem precisam ser do mesmo algoritmo.
 - Cotações no backend: CoinGecko → Kraken → Coinbase (a CoinGecko bloqueia o Cloudflare).
+- Simulação (modo Observar, `worker/src/paper.js`): a cada ciclo soma o que o robô teria gasto, a receita média
+  esperada (λ × valor do bloco) e a chance de ≥1 bloco; não sorteia blocos. Resultado real (Ativo): gasto pago nas
+  ordens gerenciadas + blocos no endereço. Ambos por dia (30 dias), em Operar.
+- Alertas do servidor entram no histórico do Radar de cada aparelho (Safari, atalho e outros ficam iguais).
 
 ## Estado e pendências
 - [x] Painel publicado; dados ao vivo validados do Brasil (Binance/Bybit diretos no iPhone).
