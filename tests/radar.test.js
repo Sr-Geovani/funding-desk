@@ -61,7 +61,8 @@ test('mapa de mineração: Scrypt soma LTC + DOGE (merged) e calcula a margem', 
   assert.ok(sc.merged);
   assert.deepEqual(sc.coins.slice().sort(), ['DOGE', 'LTC']);
   const coins = R.wtmCoins(w), ltc = coins.find((c) => c.tag === 'LTC'), doge = coins.find((c) => c.tag === 'DOGE');
-  close(sc.revBtcPerH, (R.coinRevenueBtc(ltc) + R.coinRevenueBtc(doge)) * 0.98, 1e-25);
+  close(sc.revBtcPerH, (R.coinRevenueBtc(ltc) + R.coinRevenueBtc(doge)) * 0.96 * 0.975, 1e-25, 'pool PPS 4% e perdas 2,5% (não a taxa do pool solo)');
+  assert.ok(sc.pps && sc.rawEdgePct >= sc.edgePct);
   const b = R.bookPerHash(books.SCRYPT);
   close(sc.rentBtcPerH, b.median * 1.03, 1e-25);
   close(sc.edgePct, (sc.revBtcPerH / sc.rentBtcPerH - 1) * 100, 1e-9);
@@ -148,9 +149,20 @@ test('mapa de players: categorias, links https e quem já está no painel', () =
   assert.deepEqual(inPanel, ['Binance', 'Bybit', 'OKX', 'Bitget', 'Gate', 'Hyperliquid']);
 });
 
+test('receita usa a média de 24 h quando a dificuldade do momento está num vale (DOGE, DASH)', () => {
+  const c = { tag: 'DOGE', block_time: 60, block_reward: 10000, nethash: 2.5e15, exchange_rate: 1e-6, difficulty: 37e6, difficulty24: 44e6 };
+  close(R.coinRevenueBtc(c), R.coinRevenueRaw(c) * 37 / 44, 1e-30);
+  close(R.coinRevenueBtc(Object.assign({}, c, { difficulty24: 30e6 })), R.coinRevenueRaw(c), 1e-30, 'acima da média: usa a do momento');
+  // mercado que gasta menos de US$1.000/dia não comporta a ordem de teste: rebaixa para "no limite"
+  const w = { coins: { a: { tag: 'DASH', algorithm: 'X11', block_time: 150, block_reward: 0.4, nethash: 1e15, exchange_rate: 0.0006, exchange_rate_vol: 40 } } };
+  const book = { stats: { BTC: { priceFactor: '1e15', marketFactor: '1e15', displayPriceFactor: 'PH', orders: Array.from({ length: 6 }, () => ({ price: '0.001', acceptedSpeed: '0.005', alive: true })) } } };
+  const x = R.miningMap(w, { X11: book }, { btcUsd: 77000 }).find((m) => m.algo === 'X11');
+  assert.ok(x.edgePct > 3 && x.marketUsdDay < 1000); assert.equal(x.thin, true); assert.equal(x.level, 'maybe');
+});
+
 test('livro raso rebaixa "compensa" para "no limite"', () => {
   const w = { coins: { a: { tag: 'BCH', algorithm: 'SHA-256', block_time: 600, block_reward: 3.125, nethash: 4e18, exchange_rate: 0.0045, exchange_rate_vol: 300 } } };
-  const book = (n) => ({ stats: { BTC: { priceFactor: '1e18', displayPriceFactor: 'EH', orders: Array.from({ length: n }, (_, i) => ({ price: '0.30', acceptedSpeed: '0.001', alive: true })) } } });
+  const book = (n) => ({ stats: { BTC: { priceFactor: '1e18', displayPriceFactor: 'EH', orders: Array.from({ length: n }, (_, i) => ({ price: '0.30', acceptedSpeed: '0.1', alive: true })) } } });
   assert.equal(R.miningMap(w, { SHA256ASICBOOST: book(10) }, { btcUsd: 77000 })[0].level, 'go');
   const thin = R.miningMap(w, { SHA256ASICBOOST: book(2) }, { btcUsd: 77000 })[0];
   assert.equal(thin.level, 'maybe'); assert.equal(thin.thin, true);

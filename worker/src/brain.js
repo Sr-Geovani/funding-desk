@@ -2,30 +2,45 @@
 // PREVISÃO conferível ("a janela abre em até 6 h", "esse pico some em 24 h"...). Quando o prazo vence, o servidor confere
 // com os dados reais: acerto dá XP. A confiança de cada tipo de previsão aprende com o próprio histórico de acertos,
 // e a maturidade (nível) sobe com o número de previsões conferidas e a taxa de acerto. Ninguém precisa executar a dica.
+// Fácil = aposta que o que está aí continua (acerta quase sempre, vale pouco). Difícil = aposta numa mudança (vale muito).
+// Para subir de nível não basta tempo: é preciso acertar as difíceis.
 export const LEVELS = [
-  { n: 1, name: 'Aprendiz', min: 0, hit: 0 }, { n: 2, name: 'Analista', min: 30, hit: 0 },
-  { n: 3, name: 'Estrategista', min: 100, hit: 0.55 }, { n: 4, name: 'Mestre', min: 300, hit: 0.6 }
+  { n: 1, name: 'Aprendiz', min: 0, hard: 0, hit: 0 }, { n: 2, name: 'Analista', min: 30, hard: 5, hit: 0 },
+  { n: 3, name: 'Estrategista', min: 100, hard: 20, hit: 0.5 }, { n: 4, name: 'Mestre', min: 300, hard: 60, hit: 0.55 }
 ];
+export const XP = { hard: 10, easy: 2, trusted: 5 };
 export const TYPES = {
-  mine_buy: { label: 'Compra de hash (BCH) segue boa por 1 h', h: 1, cool: 3, base: 0.6 },
-  mine_wait: { label: 'Janela do BCH abre em até 6 h', h: 6, cool: 6, base: 0.4 },
-  mine_close: { label: 'Dificuldade do BCH sobe em 3 h (hash chegando)', h: 3, cool: 6, base: 0.55 },
-  mine_avoid: { label: 'Alugar não compensa nas próximas 12 h', h: 12, cool: 12, base: 0.7 },
-  btc_retarget: { label: 'DARR depois do reajuste do BTC', h: null, cool: 24 * 12, base: 0.6 },
-  fund_go: { label: 'Entrada de funding paga as taxas em 3 dias', h: 72, cool: 24, base: 0.4 },
-  fund_spike: { label: 'Pico de funding some em 24 h', h: 24, cool: 24, base: 0.7 },
-  algo_go: { label: 'Outra moeda segue compensando por 6 h', h: 6, cool: 12, base: 0.5 }
+  mine_buy: { label: 'Compra de hash (BCH) segue boa por 1 h', h: 1, cool: 3, base: 0.6, hard: false },
+  mine_wait: { label: 'Janela do BCH abre em até 6 h', h: 6, cool: 6, base: 0.4, hard: true },
+  mine_close: { label: 'Dificuldade do BCH sobe em 3 h (hash chegando)', h: 3, cool: 6, base: 0.55, hard: true },
+  mine_avoid: { label: 'Alugar não compensa nas próximas 12 h', h: 12, cool: 12, base: 0.7, hard: false },
+  btc_retarget: { label: 'DARR depois do reajuste do BTC', h: null, cool: 24 * 12, base: 0.6, hard: true },
+  fund_go: { label: 'Entrada de funding paga as taxas em 3 dias', h: 72, cool: 24, base: 0.4, hard: true },
+  fund_spike: { label: 'Pico de funding some em 24 h', h: 24, cool: 24, base: 0.7, hard: false },
+  algo_go: { label: 'Outra moeda segue compensando por 6 h', h: 6, cool: 12, base: 0.5, hard: false }
 };
+const xpOf = (type, hit, trusted) => (!hit ? 0 : TYPES[type] && TYPES[type].hard ? XP.hard + (trusted ? XP.trusted : 0) : XP.easy);
 const H = 3600e3;
 
 export function levelOf(ai) {
-  const st = Object.values(ai.stats || {}), n = st.reduce((a, s) => a + s.n, 0), hits = st.reduce((a, s) => a + s.hits, 0);
-  const rate = n ? hits / n : 0;
+  const ent = Object.entries(ai.stats || {}), sum = (fn) => ent.reduce((a, [k, s]) => a + (fn(k) ? s.n : 0), 0);
+  const n = sum(() => true), hits = ent.reduce((a, [, s]) => a + s.hits, 0), rate = n ? hits / n : 0;
+  const isHard = (k) => !!(TYPES[k] && TYPES[k].hard);
+  const hn = sum(isHard), hh = ent.reduce((a, [k, s]) => a + (isHard(k) ? s.hits : 0), 0), hRate = hn ? hh / hn : 0;
   let cur = LEVELS[0];
-  for (const L of LEVELS) if (n >= L.min && rate >= L.hit) cur = L;
+  for (const L of LEVELS) if (n >= L.min && hn >= L.hard && hRate >= L.hit) cur = L;
   const next = LEVELS.find((L) => L.n === cur.n + 1) || null;
-  const progress = next ? Math.min(1, n / next.min) * (next.hit ? Math.min(1, rate / next.hit) : 1) : 1;
-  return { level: cur, next, resolved: n, hits, rate, progress };
+  const progress = next ? Math.min(1, n / next.min) * Math.min(1, hn / next.hard) * (next.hit ? Math.min(1, hRate / next.hit) : 1) : 1;
+  return { level: cur, next, resolved: n, hits, rate, hard: { n: hn, hits: hh, rate: hRate }, easy: { n: n - hn, hits: hits - hh }, progress };
+}
+// Versão 2 do XP (31/10): refaz o XP com o peso por dificuldade (antes: até 15 por acerto de qualquer tipo, 1 por erro).
+function migrate(ai) {
+  if (ai.v === 2) return ai;
+  ai.xp = 0;
+  for (const [k, s] of Object.entries(ai.stats || {})) { s.xp = s.hits * xpOf(k, true, false); ai.xp += s.xp; }
+  for (const d of ai.done || []) if (d.hit !== null && d.hit !== undefined) d.xp = xpOf(d.type, d.hit, false);
+  ai.v = 2;
+  return ai;
 }
 export function reliability(ai, type) {
   const s = (ai.stats || {})[type] || { n: 0, hits: 0 };
@@ -36,7 +51,7 @@ const spreadOf = (rows, key) => { const [c, s, l] = key.split('|'), r = rows && 
 
 // snap: { now, edge, green, minEdge, darr, D, mom, ret, win, fund:[{key,coin,netUsd}], rows, stable24, algos:[{k,label,edge,level}], scoreDone:[...] }
 export function brainStep(prev, snap) {
-  const ai = prev && prev.since ? JSON.parse(JSON.stringify(prev)) : { since: snap.now, xp: 0, open: [], done: [], stats: {}, last: {} };
+  const ai = migrate(prev && prev.since ? JSON.parse(JSON.stringify(prev)) : { since: snap.now, xp: 0, open: [], done: [], stats: {}, last: {}, v: 2 });
   const events = [], now = snap.now;
   // 1) conferir previsões abertas
   const still = [];
@@ -60,11 +75,11 @@ export function brainStep(prev, snap) {
       mine_avoid: `maior margem no período: ${f(value, 1)}% (mínimo ${o.minEdge}%)`, mine_close: `dificuldade variou ${f(value, 2)}%`, btc_retarget: `DARR depois: ${f(value, 3)} (previsto ${f(o.pred, 3)})`,
       algo_go: `margem 6 h depois: ${f(value, 1)}%`, fund_spike: `diferença 24 h depois: ${f(value, 0)}% a.a. (era ${f(o.s0, 0)}%)`, fund_go: `resultado em 3 dias: US$${f(value, 2)}` })[o.type] || '';
     if (hit !== null) {
-      const s = ai.stats[o.type] || (ai.stats[o.type] = { n: 0, hits: 0 });
+      const s = ai.stats[o.type] || (ai.stats[o.type] = { n: 0, hits: 0, xp: 0 });
       s.n++; if (hit) s.hits++;
-      r.xp = hit ? Math.round(10 * o.conf) + (o.trusted ? 5 : 0) : 1;
-      ai.xp += r.xp;
-      events.push(`IA ${hit ? 'acertou' : 'errou'}: ${o.text} (+${r.xp} XP)`);
+      r.xp = xpOf(o.type, hit, o.trusted); r.hard = !!TYPES[o.type].hard;
+      s.xp = (s.xp || 0) + r.xp; ai.xp += r.xp;
+      events.push(`IA ${hit ? 'acertou' : 'errou'}${r.hard ? '' : ' (fácil)'}: ${o.text} (+${r.xp} XP)`);
     }
     ai.done.push(r);
   }
@@ -100,7 +115,7 @@ export function brainStep(prev, snap) {
     if (sp >= 60 && !(snap.stable24 || {})[key]) spikes.push([key, sp]);
   }
   for (const [key, sp] of spikes.sort((a, b) => b[1] - a[1]).slice(0, 2)) add('fund_spike', key, `o pico de ${key.split('|')[0]} (${f(sp, 0)}% a.a. entre ${key.split('|').slice(1).join(' e ')}) cai pela metade em 24 h`, { s0: sp, why: `${f(sp, 0)}% a.a. é pico (≥ 60%) e não ficou 24 h estável; no histórico, diferenças assim voltam em ~18 h.` });
-  for (const a of (snap.algos || []).filter((x) => x.level === 'go' && isFinite(x.edge))) add('algo_go', a.k, `${a.label} segue com margem positiva daqui a 6 h (agora ${f(a.edge, 1)}%)`, { why: `margem ${f(a.edge, 1)}% = receita por hash ÷ aluguel típico − 1, já com taxas; livro com ordens suficientes.` });
+  for (const a of (snap.algos || []).filter((x) => x.level === 'go' && isFinite(x.edge) && x.edge <= 100)) add('algo_go', a.k, `${a.label} segue com margem positiva daqui a 6 h (agora ${f(a.edge, 1)}%)`, { why: `margem ${f(a.edge, 1)}% = receita por hash ÷ aluguel típico − 1, já com taxas; livro com ordens suficientes.` });
   for (const k of Object.keys(ai.last)) if (now - ai.last[k] > 30 * 24 * H) delete ai.last[k];
   return { ai, events };
 }
@@ -189,7 +204,7 @@ export function actionPlan(ctx) {
     const pools = (ctx.pools || {})[a.algo] || [];
     out.others.push({ algo: a.algo, title: `${a.label} (${(a.coins || []).join('+')}): margem ${n(a.edgePct, 1)}%`,
       text: `Ordem manual na NiceHash (${a.algo}) apontada para um pool PPS${pools.length ? ' como ' + pools.slice(0, 2).map((p) => p[0]).join(' ou ') : ''}; preço até ${a.capBtcPerUnit ? n(a.capBtcPerUnit, 6) + ' BTC/' + (a.unit || 'unid.') + '/dia' : 'o máximo do mapa'}; orçamento sugerido US$100/dia; parar se a margem ficar abaixo de 0.`,
-      why: [`Margem ${n(a.edgePct, 1)}% = quanto o hash rende nessa moeda ÷ aluguel típico na NiceHash − 1, já com 3% da NiceHash e 2% do pool.`, 'Pool PPS paga por share: sem sorte de bloco, o resultado diário é o esperado.', 'O livro tem ordens suficientes recebendo hash (preço confiável).', 'Ordem manual: o robô automático hoje só opera o BCH.'] });
+      why: [`Margem ${n(a.edgePct, 1)}% = quanto o hash rende nessa moeda ÷ aluguel típico na NiceHash − 1, já com 3% da NiceHash, pool PPS 4%, shares perdidos e venda das moedas (2,5%) e a dificuldade média de 24 h.`, 'Pool PPS paga por share: sem sorte de bloco, o resultado diário é o esperado.', 'O livro tem ordens suficientes recebendo hash (preço confiável).', 'Ordem manual: o robô automático hoje só opera o BCH.'] });
   }
   return out;
 }

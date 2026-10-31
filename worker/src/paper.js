@@ -5,6 +5,7 @@
 // Resultado real (modo Ativo): gasto pago nas ordens gerenciadas e blocos que pagaram o seu endereço.
 const TWO32 = 4294967296;
 const MAX_GAP = 15 * 60e3; // intervalo maior que isso (backend parado) não conta
+const DOWN_STEP_MS = 10 * 60e3; // NiceHash: o preço da ordem só desce um degrau (priceDownStep) a cada ~10 min
 const KEEP_DAYS = 30;
 const utcDay = (ms) => new Date(ms).toISOString().slice(0, 10);
 
@@ -78,7 +79,14 @@ export function paperStep(paper, { cfg, mkt, now, units, limits, blocks }) {
     if (!p.on) events.push(`Simulação: compraria ${target} PH/s a ${mkt.bidEH.toFixed(4)} BTC/EH/dia (margem ${mkt.edgeAtBidPct.toFixed(1)}%). Por quê: lance ≤ teto ${mkt.capEH.toFixed(4)} (empate ${mkt.breakEvenEH ? mkt.breakEvenEH.toFixed(4) : '—'} − margem mínima ${cfg.minEdgePct}%); potência = sua potência alvo`);
     // !p.run com p.on: simulação criada antes do diário de operações; a operação passa a contar daqui
     if (!p.on || !p.run) p.run = { start: now, ph: target, priceEH: mkt.bidEH, edgePct: mkt.edgeAtBidPct, spendUsd: 0, evUsd: 0, lambda: 0, hours: 0 };
-    Object.assign(p, { on: true, ph: target, priceEH: mkt.bidEH, D: mkt.D, btcUsd: mkt.btcUsd, blockNetUsd: mkt.blockNetUsd });
+    // Preço como a NiceHash deixa (igual ao robô real): sobe na hora; desce só um degrau a cada 10 min. Quando o mercado
+    // cai, a ordem fica alguns minutos pagando acima do lance de agora.
+    let price = mkt.bidEH;
+    const step = units.priceDownStepEH || 0;
+    if (p.on && step > 0 && p.priceEH > mkt.bidEH) {
+      if (now - (p.lastDec || 0) >= DOWN_STEP_MS) { price = Math.max(mkt.bidEH, p.priceEH - step); p.lastDec = now; } else price = p.priceEH;
+    }
+    Object.assign(p, { on: true, ph: target, priceEH: price, D: mkt.D, btcUsd: mkt.btcUsd, blockNetUsd: mkt.blockNetUsd });
   } else {
     if (p.on) {
       const why = dailyHit ? `limite diário de US$${cfg.dailyBudgetUsd} atingido`

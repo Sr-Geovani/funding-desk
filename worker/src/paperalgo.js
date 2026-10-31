@@ -3,11 +3,14 @@
 // próprio resultado. Para comparar algoritmos de unidades diferentes, cada um usa o mesmo orçamento de aluguel
 // (US$/dia) enquanto o mapa diz "Compensa" (margem ≥ mínima e livro com ordens suficientes).
 // Margem = receita por hash ÷ aluguel típico (mediana do livro + taxa da NiceHash) − 1, a mesma do mapa do painel.
+// Versão 2 (31/10): margem realista (dificuldade média de 24 h, pool PPS 4%, perdas de share e venda 2,5%). A v1 usava a
+// dificuldade do momento da WhatToMine e mostrava lucro que não existe; ao trocar de versão a simulação recomeça.
 export const ALGO_RULES = { budgetUsdDay: 100, maxGap: 20 * 60e3, keepRuns: 30, maxEdgePct: 100 }; // margem > 100%: dado suspeito
 
 export function algoPaperStep(pa, { map, now, rules = ALGO_RULES }) {
-  const p = pa && pa.since ? JSON.parse(JSON.stringify(pa)) : { since: now, lastTs: now, budgetUsdDay: rules.budgetUsdDay, algos: {} };
-  const events = [];
+  const fresh = !(pa && pa.since && pa.v === 2);
+  const p = !fresh ? JSON.parse(JSON.stringify(pa)) : { v: 2, since: now, lastTs: now, budgetUsdDay: rules.budgetUsdDay, algos: {} };
+  const events = fresh && pa && pa.since ? ['Outras moedas: simulação recomeçou com a margem realista (dificuldade média de 24 h, pool PPS 4%, perdas 2,5%); a anterior usava a dificuldade do momento e exagerava o lucro'] : [];
   const dt = Math.min(Math.max(0, now - (p.lastTs || now)), rules.maxGap);
   // 1) o intervalo que passou, com a decisão anterior
   for (const a of Object.values(p.algos)) {

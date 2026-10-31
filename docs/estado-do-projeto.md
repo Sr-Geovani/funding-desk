@@ -88,6 +88,18 @@ sempre identificado; nada de prometer previsão de sorte (Poisson é sem memóri
 - Plano de ação (`actionPlan`): potência = orçamento da sessão (stop-loss) ÷ (custo por PH/s/h × 2 h), até o teto e 5% do
   mercado; recalculado na hora ao salvar a configuração; mostra "sua configuração × sugestão". Ajustes do operador ficam
   em `opLog` (e no log como "operador"). Simulação roda 3 cenários com os mesmos blocos: sua config, copiloto, rajada 50.
+- Painel (31/10): atualiza ao voltar do segundo plano e em qualquer aba (`freshen`: servidor 60 s, mineração 5 min,
+  funding 2 min); leitura presa (iPhone congela o fetch em segundo plano) destrava em 45 s; barra da IA mostra a hora
+  dos dados do servidor e avisa se ele parou. Antes, Robô/Rede/IA só recarregavam ao abrir o app ou entrar em Operar.
+- IA, XP v2 (31/10): previsões fáceis (o que está aí continua: compra segue boa, evitar alugar, pico some, outra moeda
+  segue) valem 2 XP; difíceis (janela abre, dificuldade sobe, DARR pós-reajuste, funding paga) valem 10 (+5 se o tipo é
+  confiável); erro 0. Nível exige difíceis conferidas e acerto nelas. XP antigo refeito com o peso novo.
+- Outras moedas, margem realista (31/10): a WhatToMine usa a dificuldade do momento; DOGE e DASH reajustam a cada bloco
+  e num vale mostravam +20% (Scrypt) e +130% (X11). Agora: dificuldade média de 24 h quando a do momento está abaixo,
+  pool PPS 4%, shares perdidos e venda 2,5%; mercado que gasta < US$1.000/dia é "livro raso". `rawEdgePct` guarda a
+  conta bruta. Simulação de outras moedas recomeçou (v2).
+- Mineração: cenário "sempre ligado" (sua potência, sem pausar nem stop-loss, mesmos blocos); simulação baixa o preço
+  só um degrau a cada 10 min, como a NiceHash e o robô real.
 - Ciclo do servidor: 3 min. Mínimo do Cloudflare é 1 min, mas o KV grátis aceita 1.000 gravações/dia e propaga em até
   60 s; abaixo de 3 min exige plano pago + Durable Objects. Atraso de 3 min custa < US$1 com 10 PH/s.
 

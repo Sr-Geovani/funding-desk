@@ -59,10 +59,19 @@ var ALGOS = [
 ];
 
 // Receita em BTC por H/s por dia de uma moeda da WhatToMine (exchange_rate em BTC; para o próprio BTC é US$).
+// A WhatToMine usa a dificuldade DO MOMENTO. Moedas que reajustam a cada bloco (DOGE, DASH) oscilam muito: num vale a
+// conta mostra +20% ou +100% que não dá para capturar (o vale dura minutos e o pool PPS paga pela média). Quando a
+// dificuldade de agora está abaixo da média de 24 h, usa a média (conservador). Receita ∝ 1 ÷ dificuldade.
 function coinRevenueBtc(c) {
   var rate = c.tag === 'BTC' ? 1 : +c.exchange_rate;
   if (!(c.block_time > 0 && c.nethash > 0 && rate > 0)) return null;
-  return 86400 / c.block_time * c.block_reward * rate / c.nethash;
+  var r = 86400 / c.block_time * c.block_reward * rate / c.nethash, d = +c.difficulty, d24 = +c.difficulty24;
+  return d > 0 && d24 > d ? r * d / d24 : r;
+}
+// Receita sem a correção (como a WhatToMine mostra), para comparar.
+function coinRevenueRaw(c) {
+  var rate = c.tag === 'BTC' ? 1 : +c.exchange_rate;
+  return c.block_time > 0 && c.nethash > 0 && rate > 0 ? 86400 / c.block_time * c.block_reward * rate / c.nethash : null;
 }
 function wtmCoins(wtm) {
   return Object.keys((wtm && wtm.coins) || {}).map(function (k) { return wtm.coins[k]; })
@@ -81,44 +90,55 @@ function bookPerHash(d) {
     .map(function (o) { return { p: parseFloat(o.price), v: parseFloat(o.acceptedSpeed) }; }).sort(function (a, b) { return a.p - b.p; });
   var tot = paying.reduce(function (a, o) { return a + o.v; }, 0), acc = 0, med = null;
   paying.forEach(function (o) { if (med === null) { acc += o.v; if (acc >= tot / 2) med = o.p; } });
-  return { unit: s.displayPriceFactor || '', factor: pf, fill: paying.length ? paying[0].p / pf : null, median: med !== null ? med / pf : null, paying: paying.length };
+  // btcDay: quanto o mercado inteiro gasta por dia (BTC) nas ordens recebendo hash; mede se cabe uma ordem nossa.
+  var mf = parseFloat(s.marketFactor) || pf; // velocidade vem em marketFactor (ex.: PH) e preço em priceFactor (ex.: EH)
+  var btcDay = paying.reduce(function (a, o) { return a + o.v * mf / pf * o.p; }, 0);
+  return { unit: s.displayPriceFactor || '', factor: pf, fill: paying.length ? paying[0].p / pf : null, median: med !== null ? med / pf : null, paying: paying.length, btcDay: btcDay };
 }
 // books: { SHA256ASICBOOST: <livro>, SCRYPT: <livro>, ... }; extra: moedas fora da WhatToMine (ex.: BSV).
+// Custos reais: SHA-256 vai para pool solo (taxa do pool configurada). Os outros algoritmos vão para pool PPS, que cobra
+// mais (ppsFeePct, padrão 4%), e perdem shares rejeitados/atrasados entre NiceHash e pool + a venda das moedas
+// recebidas (lossPct, padrão 2,5%). rawEdgePct = margem como a WhatToMine mostraria (dificuldade do momento, sem perdas).
 // Só entram como opção principal moedas com liquidez (volume 24 h ≥ minVolBtc). Redes pequenas ficam em `small`:
 // a conta por hash engana nelas (o hash alugado derruba a dificuldade e não há onde vender).
 function miningMap(wtm, books, opts) {
   opts = opts || {};
   var btcUsd = opts.btcUsd || btcUsdFrom(wtm), fee = (opts.rentFeePct === undefined ? 3 : opts.rentFeePct) / 100;
-  var pool = (opts.poolFeePct === undefined ? 2 : opts.poolFeePct) / 100, m = (opts.minEdgePct || 0) / 100;
+  var solo = (opts.poolFeePct === undefined ? 2 : opts.poolFeePct) / 100, m = (opts.minEdgePct || 0) / 100;
+  var pps = (opts.ppsFeePct === undefined ? 4 : opts.ppsFeePct) / 100, loss = (opts.lossPct === undefined ? 2.5 : opts.lossPct) / 100;
   var coins = wtmCoins(wtm).concat(opts.extra || []), minVol = opts.minVolBtc === undefined ? 10 : opts.minVolBtc;
   function liquid(c) { return c.exchange_rate_vol === undefined || c.exchange_rate_vol === null || +c.exchange_rate_vol >= minVol; }
   return ALGOS.map(function (a) {
     var all = coins.filter(function (c) { return c.algorithm === a.wtm; })
-      .map(function (c) { return { coin: c.tag, name: c.name || c.tag, rev: coinRevenueBtc(c), liquid: liquid(c) }; })
+      .map(function (c) { return { coin: c.tag, name: c.name || c.tag, rev: coinRevenueBtc(c), raw: coinRevenueRaw(c), liquid: liquid(c) }; })
       .filter(function (c) { return c.rev > 0; }).sort(function (x, y) { return y.rev - x.rev; });
     var list = all.filter(function (c) { return c.liquid; });
     if (!list.length) return null;
-    var best = list[0], option = { coins: [best.coin], rev: best.rev };
+    var best = list[0], option = { coins: [best.coin], rev: best.rev, raw: best.raw };
     if (a.merged) {
       var mc = list.filter(function (c) { return a.merged.indexOf(c.coin) >= 0; });
       var mrev = mc.reduce(function (s, c) { return s + c.rev; }, 0);
-      if (mc.length > 1 && mrev > option.rev) option = { coins: mc.map(function (c) { return c.coin; }), rev: mrev };
+      if (mc.length > 1 && mrev > option.rev) option = { coins: mc.map(function (c) { return c.coin; }), rev: mrev, raw: mc.reduce(function (s, c) { return s + (c.raw || 0); }, 0) };
     }
-    var b = bookPerHash(books && books[a.nh]);
-    var rev = option.rev * (1 - pool);
+    var b = bookPerHash(books && books[a.nh]), isSolo = a.nh === 'SHA256ASICBOOST';
+    var keep = isSolo ? 1 - solo : (1 - pps) * (1 - loss);
+    var rev = option.rev * keep;
     var rent = b && b.median ? b.median * (1 + fee) : (b && b.fill ? b.fill * (1 + fee) : null);
     var level = rent ? (rent <= rev * (1 - m) ? 'go' : (rent <= rev ? 'maybe' : 'no')) : 'none';
-    // Livro raso (poucas ordens recebendo hash): o preço típico não é o que se paga por volume real.
-    var thin = !!b && b.paying < (opts.minPaying || 5);
+    // Livro raso: poucas ordens recebendo hash, ou o mercado inteiro gasta tão pouco por dia que a nossa ordem de
+    // teste (US$100/dia) seria mais de 10% dele (ex.: X11 com ~US$80/dia): o preço típico não vale para o nosso volume.
+    var mktUsd = b && btcUsd ? b.btcDay * btcUsd : null;
+    var thin = !!b && (b.paying < (opts.minPaying || 5) || (mktUsd !== null && mktUsd < (opts.minMarketUsdDay || 1000)));
     if (thin && level === 'go') level = 'maybe';
     var unitF = b ? b.factor : null;
     return {
       algo: a.nh, label: a.label, where: a.where, coins: option.coins, merged: option.coins.length > 1, all: list.slice(0, 4).map(function (c) { return c.coin; }),
       small: all.filter(function (c) { return !c.liquid && c.rev > option.rev; }).slice(0, 3).map(function (c) { return c.coin; }),
       revBtcPerH: rev, rentBtcPerH: rent, edgePct: rent ? (rev / rent - 1) * 100 : null, level: level,
+      rawEdgePct: rent && option.raw ? (option.raw * (1 - solo) / rent - 1) * 100 : null, pps: !isSolo, keepPct: keep * 100,
       unitFactor: unitF, capBtcPerUnit: unitF ? rev * unitF / (1 + fee) * (1 - m) : null, fillBtcPerUnit: b && b.fill ? b.fill * unitF : null,
       unit: b ? b.unit : '', revUsdPerUnit: unitF && btcUsd ? rev * unitF * btcUsd : null, rentUsdPerUnit: unitF && rent && btcUsd ? rent * unitF * btcUsd : null,
-      paying: b ? b.paying : 0, thin: thin
+      paying: b ? b.paying : 0, thin: thin, marketUsdDay: mktUsd
     };
   }).filter(Boolean).sort(function (x, y) { return (y.edgePct === null ? -1e9 : y.edgePct) - (x.edgePct === null ? -1e9 : x.edgePct); });
 }
@@ -320,7 +340,7 @@ var PLAYER_CATS = { funding: 'Operar funding (perpétuos)', hash: 'Comprar potê
 
 var FDR = {
   MAJORS: MAJORS, ALGOS: ALGOS, fundingMatrix: fundingMatrix, sentiment: sentiment,
-  coinRevenueBtc: coinRevenueBtc, wtmCoins: wtmCoins, btcUsdFrom: btcUsdFrom, bookPerHash: bookPerHash, miningMap: miningMap,
+  coinRevenueBtc: coinRevenueBtc, coinRevenueRaw: coinRevenueRaw, wtmCoins: wtmCoins, btcUsdFrom: btcUsdFrom, bookPerHash: bookPerHash, miningMap: miningMap,
   pushHistory: pushHistory, hourProfile: hourProfile, priceMove: priceMove, evaluateAlerts: evaluateAlerts, COOLDOWN: COOLDOWN,
   PLAYERS: PLAYERS, PLAYER_CATS: PLAYER_CATS,
   POOLS: POOLS, SHA_COINS: SHA_COINS, trackSince: trackSince, markEnded: markEnded,

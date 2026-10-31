@@ -206,6 +206,12 @@ export async function tick(env, opts = {}) {
   const pmS = state.plan && state.plan.mining;
   if (cfg.mode === 'observe' && pmS) paperPlan = paperStep(paperPlan, { cfg: Object.assign({}, cfg, { targetPh: pmS.ph, sessionBudgetUsd: pmS.budgetUsd, onBlock: 'cancel' }), mkt, now, units, limits, blocks: newBlocks }).paper;
   else if (paperPlan) paperPlan.lastTs = now;
+  // Cenário "sempre ligado": sua potência sem pausar pelo preço e sem stop-loss, mesmos blocos e sorteio. Responde
+  // "se ficasse ligado direto teria mais bloco?": mais chance, mas paga também as horas com aluguel acima do teto.
+  let paperAlways = state.paperAlways || null;
+  if (cfg.mode === 'observe') paperAlways = paperStep(paperAlways, { cfg: Object.assign({}, cfg, { sessionBudgetUsd: 0, dailyBudgetUsd: 0, onBlock: 'keep' }),
+    mkt: mkt.ok ? Object.assign({}, mkt, { green: true }) : mkt, now, units, limits, blocks: newBlocks }).paper;
+  else if (paperAlways) paperAlways.lastTs = now;
   const real = realStep(state.real, { orders, managedIds: cfg.managed, blockEvent, now,
     btcUsd: mkt.btcUsd || (prices.ok ? prices.v.btcUsd : 0), bchUsd: mkt.bchUsd || (prices.ok ? prices.v.bchUsd : 0) });
 
@@ -337,7 +343,7 @@ export async function tick(env, opts = {}) {
   const mempool = mpR.ok ? Object.assign({ at: now }, mpR.v) : state.mempool || null;
 
   const next = Object.assign({}, dec.state, alertState, {
-    lastTick: now, verified: Object.fromEntries(Object.entries(verified).filter(([, x]) => now - x.at <= 6 * 3600e3)), ai: br.ai, aiAnalysis, plan, acct, algoMap, mempool, stable24, pairStats, msig, darr, recentBlocks, nhWeek, paper, paperBurst, paperPlan, blockBuf, blockFlush, lastBlockT, real, fundPaper, alertScore, algoPaper, algoTs, aiScores, fundPaperAI, fhistHour, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig,
+    lastTick: now, verified: Object.fromEntries(Object.entries(verified).filter(([, x]) => now - x.at <= 6 * 3600e3)), ai: br.ai, aiAnalysis, plan, acct, algoMap, mempool, stable24, pairStats, msig, darr, recentBlocks, nhWeek, paper, paperBurst, paperPlan, paperAlways, blockBuf, blockFlush, lastBlockT, real, fundPaper, alertScore, algoPaper, algoTs, aiScores, fundPaperAI, fhistHour, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig,
     market: mkt.ok ? { breakEvenEH: mkt.breakEvenEH, capEH: mkt.capEH, fillEH: mkt.fillEH, medianEH: mkt.medianEH, bidEH: mkt.bidEH,
       edgeAtBidPct: mkt.edgeAtBidPct, green: mkt.green, D: mkt.D, bookTotalPH: book ? book.totalPH : 0, bchUsd: mkt.bchUsd, btcUsd: mkt.btcUsd, costPerBlockUsd: mkt.costPerBlockUsd,
       hashpriceNet: mkt.hashpriceNet, blockNetUsd: mkt.blockNetUsd, phDaysPerBlock: mkt.phDaysPerBlock, market: mkt.market } : { ok: false, reason: mkt.reason },
@@ -447,7 +453,7 @@ async function api(req, env, url, fetchFn) {
       telegram: !!(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID), creds: credStatus(env), limits, config: cfg,
       state: { lastTick: state.lastTick, lastHeight: state.lastHeight, market: state.market, myBlocks: state.myBlocks || [], dailyUsd: state.dailyUsd || 0,
         errors: state.errors || [], edgeHist: state.edgeHist || [], alerts: (state.alerts || []).slice(-30).reverse(),
-        paper: state.paper || null, paperBurst: state.paperBurst || null, paperPlan: state.paperPlan || null, opLog: (state.opLog || []).slice(-20).reverse(), real: state.real ? Object.assign({}, state.real, { paid: undefined }) : null,
+        paper: state.paper || null, paperBurst: state.paperBurst || null, paperPlan: state.paperPlan || null, paperAlways: state.paperAlways || null, opLog: (state.opLog || []).slice(-20).reverse(), real: state.real ? Object.assign({}, state.real, { paid: undefined }) : null,
         fundPaper: state.fundPaper ? { summary: fundPaperSummary(state.fundPaper), open: state.fundPaper.open, closed: state.fundPaper.closed.slice(-100).reverse() } : null,
         algoPaper: state.algoPaper || null,
         fundPaperAI: state.fundPaperAI ? { summary: fundPaperSummary(state.fundPaperAI), open: state.fundPaperAI.open, closed: state.fundPaperAI.closed.slice(-100).reverse() } : null,
@@ -521,8 +527,8 @@ async function api(req, env, url, fetchFn) {
   if (p === '/paper/reset' && m === 'POST') {
     const st = await kvGet(env, 'state', {});
     if (body.what === 'funding') { st.fundPaper = null; st.fundPaperAI = null; st.alertScore = null; }
-    else if (body.what === 'mining') { st.paper = null; st.paperBurst = null; } else if (body.what === 'algos') { st.algoPaper = null; st.algoTs = 0; }
-    else if (body.what === 'all') { st.paper = null; st.paperBurst = null; st.fundPaper = null; st.fundPaperAI = null; st.algoPaper = null; st.algoTs = 0; } else st.paper = null;
+    else if (body.what === 'mining') { st.paper = null; st.paperBurst = null; st.paperPlan = null; st.paperAlways = null; } else if (body.what === 'algos') { st.algoPaper = null; st.algoTs = 0; }
+    else if (body.what === 'all') { st.paper = null; st.paperBurst = null; st.paperPlan = null; st.paperAlways = null; st.fundPaper = null; st.fundPaperAI = null; st.algoPaper = null; st.algoTs = 0; } else st.paper = null;
     await kvPut(env, 'state', st);
     await appendLog(env, [{ t: Date.now(), kind: 'config', text: 'simulação reiniciada (' + ({ funding: 'funding', algos: 'outras moedas', all: 'tudo' }[body.what] || 'mineração') + ')' }]);
     return json({ ok: true });

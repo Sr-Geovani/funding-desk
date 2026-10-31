@@ -134,9 +134,9 @@ function loadOKX(){return Promise.all([fetchJSON('https://www.okx.com/api/v5/pub
 function loadBitget(){return Promise.all([fetchJSON('https://api.bitget.com/api/v2/mix/market/current-fund-rate?productType=USDT-FUTURES'),fetchJSON('https://api.bitget.com/api/v2/mix/market/tickers?productType=USDT-FUTURES')]).then(function(a){return FD.parseBitget(a[0],a[1])})}
 function loadGate(){return Promise.all([fetchJSON('https://api.gateio.ws/api/v4/futures/usdt/contracts'),fetchJSON('https://api.gateio.ws/api/v4/futures/usdt/tickers')]).then(function(a){return FD.parseGate(a[0],a[1])})}
 
-var loading=false;
+var loading=false,loadingAt=0;
 function load(){
-  if(loading)return;loading=true;usedProxy={};
+  if(loading&&Date.now()-loadingAt<45000)return;loading=true;loadingAt=Date.now();usedProxy={};
   $('status').textContent='lendo…';$('status').className='chip demo';
   Promise.all([loadBinance(),loadBybit(),loadHL(),loadPredicted(),loadOKX(),loadBitget(),loadGate()].map(settle)).then(function(res){
     loading=false;
@@ -174,7 +174,7 @@ function load(){
 }
 
 /* ---------- mineração: coleta ---------- */
-var mineLoading=false,mineAgain=false;
+var mineLoading=false,mineLoadingAt=0,mineAgain=false;
 function loadBook(){
   var direct='https://api2.nicehash.com/main/api/v2/hashpower/orderBook?algorithm=SHA256ASICBOOST&size=1000'; // sem size a NiceHash manda só as 100 mais caras
   var pu=proxied(direct);
@@ -183,7 +183,7 @@ function loadBook(){
   return snap();
 }
 function loadMining(){
-  if(mineLoading){mineAgain=true;return}mineLoading=true;mineAgain=false;
+  if(mineLoading&&Date.now()-mineLoadingAt<45000){mineAgain=true;return}mineLoading=true;mineLoadingAt=Date.now();mineAgain=false;
   Promise.all([
     fetchJSON('https://api.blockchair.com/bitcoin-cash/stats'),
     fetchJSON('https://mempool.space/api/v1/mining/hashrate/3d'),
@@ -224,7 +224,6 @@ function live(){
   return {bchUsd:bchUsd,btcUsd:btcUsd,D:D,book:mk,st:st,rewardCoin:3.125+fees,btcD:mine.btcD,bsvD:mine.bsvD,bsvUsd:mine.bsvUsd,networkPH:netPH};
 }
 // Blockchair grátis limita o uso por IP: no máximo uma leitura a cada 5 min.
-setInterval(function(){if(document.visibilityState==='visible')loadMining()},300000);
 
 /* ---------- histórico de funding ---------- */
 var HIST_DAYS=7,histCache={},openHist={};
@@ -680,10 +679,10 @@ function apiCall(method,path,body){
       if(!r.ok){var er=new Error(j.error||('HTTP '+r.status));er.data=j;throw er}return j})},
     function(e){clearTimeout(tm);throw new Error(e&&e.name==='AbortError'?'o backend não respondeu em 20 s; confira a internet e tente de novo':'sem conexão com o backend ('+(e&&e.message||e)+')')});
 }
-var opsLoading=false;
+var opsLoading=false,opsLoadingAt=0;
 function loadOps(){
   if(!apiCfg().url){renderOps();return}
-  if(opsLoading)return;opsLoading=true;
+  if(opsLoading&&Date.now()-opsLoadingAt<45000)return;opsLoading=true;opsLoadingAt=Date.now();
   Promise.all([apiCall('GET','/status'),apiCall('GET','/orders'),apiCall('GET','/balance'),apiCall('GET','/pools'),apiCall('GET','/log')].map(settle)).then(function(r){
     opsLoading=false;ops.at=Date.now();ops.err={};
     if(r[0].ok&&r[0].v&&r[0].v.config){ops.status=r[0].v;mergeServerAlerts((r[0].v.state||{}).alerts||[])}else{ops.status=null;ops.err.status=r[0].ok?'resposta inesperada do backend':r[0].e.message}
@@ -694,7 +693,16 @@ function loadOps(){
     renderOps();renderHome();renderMine();renderAcct();renderRadar();renderRobo();renderWindow();renderHeat();renderAI();renderNext();renderAct();
   });
 }
-setInterval(function(){if(document.visibilityState==='visible'&&!$('mine-ops').hidden&&!$('tab-mine').hidden)loadOps()},30000);
+// Dados do servidor em qualquer aba: 30 s em Operar, 60 s nas outras. Ao voltar do segundo plano (iPhone deixa o app
+// congelado por horas), freshen() atualiza na hora tudo o que estiver velho.
+setInterval(function(){if(document.visibilityState==='visible')freshen()},30000);
+function freshen(){
+  var now=Date.now(),opsTab=!$('mine-ops').hidden&&!$('tab-mine').hidden;
+  if(settings.apiUrl&&now-(ops.at||0)>(opsTab?25000:55000))loadOps();
+  if(now-(mine.at||0)>300000)loadMining();
+  if(now-(state.updated?+state.updated:0)>120000)load();
+  if(settings.apiUrl&&!$('tab-mine').hidden&&!$('mine-net').hidden&&now-blk.at>120000)loadBlocksLog();
+}
 var MODE_TXT={off:'Desligado',observe:'Observando',active:'Ativo'},MODE_CHIP={off:'',observe:'warn',active:'ok'};
 var BOT_FIELDS=['mode','onBlock','payoutAddress','minEdgePct','bidPremiumPct','targetPh','minPh','sessionBudgetUsd','dailyBudgetUsd','poolFeePct','rentFeePct','poolId','orderAmountBtc'];
 // Margem em linguagem simples: retorno médio (não é chance) e a chance de achar bloco com a potência alvo em 24 h.
@@ -726,13 +734,17 @@ function simResultHTML(p){
     '<details style="margin-top:8px"><summary>Chance e média de longo prazo</summary>'+outcomesHTML(p.spendUsd,p.evUsd,p.lambda,p.blockNetUsd)+'</details>';
 }
 // Contínuo (sua configuração) × rajada de 50 PH/s parando no bloco (método do vídeo): mesmos blocos e sorteio.
-function burstHTML(p,b,c){
-  if(!b&&!c)return '';
-  var row=function(x){if(!x)return ['—','—','—','—'];var res=(x.wonUsd||0)-x.spendUsd;return [usd(x.spendUsd),(x.blocks||0)+' de '+(x.draws||0),signUsd(res),pctp((1-Math.exp(-x.lambda))*100,1)]};
-  var A=row(p),C=row(c),B=row(b),lab=['Gasto','Blocos seus (de cobertos)','Resultado','Chance de ≥1 bloco'];
-  return '<div class="eyebrow" style="margin:14px 0 6px">Cenários lado a lado (mesmos blocos, mesmo sorteio)</div><div class="scroll"><table><tr><th></th><th>Sua: '+nf(p.ph||+((ops.status||{}).config||{}).targetPh||0,0)+' PH/s</th><th>Copiloto'+(c&&c.ph?': '+nf(c.ph,0)+' PH/s':'')+'</th><th>Rajada 50</th></tr>'+
-    lab.map(function(l,i){return '<tr><td>'+l+'</td><td>'+A[i]+'</td><td>'+C[i]+'</td><td>'+B[i]+'</td></tr>'}).join('')+'</table></div>'+
-    '<p class="note" style="margin:6px 0 0">Mesmas regras de preço (compra abaixo do teto, pausa acima). "Sua" usa a potência e o stop-loss que você configurou; "Copiloto" usa os do plano; "Rajada" usa 50 PH/s e para no bloco. Por dólar a média é igual: muda quanto cada um gasta enquanto a janela está aberta e o risco por sessão.</p>';
+function burstHTML(p,b,c,a){
+  if(!b&&!c&&!a)return '';
+  var cols=[[p,'Sua: '+nf(p.ph||+((ops.status||{}).config||{}).targetPh||0,0)+' PH/s'],[c,'Copiloto'+(c&&c.ph?': '+nf(c.ph,0)+' PH/s':'')],[b,'Rajada 50'],[a,'Sempre ligado'+(a&&a.ph?': '+nf(a.ph,0)+' PH/s':'')]];
+  var rows=[['Desde',function(x){return dt2(x.since)}],['Horas comprando',function(x){return nf(x.hoursOn||0,1)+' h'}],['Pausas',function(x){return String((x.runs||[]).length)}],
+    ['Gasto',function(x){return usd(x.spendUsd)}],['Blocos seus (de cobertos)',function(x){return (x.blocks||0)+' de '+(x.draws||0)}],
+    ['Resultado (com a sorte)',function(x){var r=(x.wonUsd||0)-x.spendUsd;return '<span class="'+(r>=0?'good':'bad')+'">'+signUsd(r)+'</span>'}],
+    ['Média esperada (sem sorte)',function(x){var m=(x.evUsd||0)-x.spendUsd;return '<span class="'+(m>=0?'good':'bad')+'">'+signUsd(m)+'</span>'+(x.spendUsd>0?' ('+pct(m/x.spendUsd*100,1)+')':'')}],
+    ['Chance de ≥1 bloco',function(x){return pctp((1-Math.exp(-(x.lambda||0)))*100,1)}]];
+  return '<div class="eyebrow" style="margin:14px 0 6px">Cenários lado a lado (mesmos blocos, mesmo sorteio)</div><div class="scroll"><table><tr><th></th>'+cols.map(function(k){return '<th>'+k[1]+'</th>'}).join('')+'</tr>'+
+    rows.map(function(r){return '<tr><td>'+r[0]+'</td>'+cols.map(function(k){return '<td>'+(k[0]?r[1](k[0]):'—')+'</td>'}).join('')+'</tr>'}).join('')+'</table></div>'+
+    '<p class="note" style="margin:6px 0 0">"Sua", "Copiloto" e "Rajada" compram abaixo do teto e pausam acima. "Sempre ligado" usa a sua potência sem pausar e sem stop-loss: tem mais chance de bloco porque fica mais horas comprando, mas paga também as horas em que o aluguel passou do teto. Compare a linha <b>Média esperada</b> (em %): ela mostra se cada hora comprada rende ou perde, sem a sorte. Os cenários podem ter começado em horas diferentes (linha "Desde").</p>';
 }
 // Desfechos honestos de um período de aluguel: sem bloco (o mais comum) perde o gasto; com bloco ganha o bloco menos o gasto.
 // A média de longo prazo (receita esperada − gasto) só aparece repetindo muitas vezes.
@@ -816,7 +828,7 @@ function renderRobo(){
       return '<div class="trow"><div><b>'+nf(r.ph,0)+' PH/s</b> <span class="note">a '+r.priceEH.toFixed(4)+' (margem '+pct(r.edgePct,1)+')</span></div><div class="note">'+dt2(r.start)+' → '+dt2(r.end)+' · '+FDI.dur(r.end-r.start)+' · gasto '+usd(r.spendUsd)+' · blocos da rede '+(r.draws||0)+', seus '+(r.blocks||0)+' → <strong class="'+(((r.wonUsd||0)-r.spendUsd)>=0?'good':'bad')+'">'+signUsd((r.wonUsd||0)-r.spendUsd)+'</strong></div><div class="note">Saída: '+esc(r.reason)+'</div></div>'}).join('')+'</div>'+
       (rs.length>15?'<div style="margin-top:6px"><button class="sm" data-roboall="m">'+(roboAll.m?'Mostrar menos':'Ver todas ('+rs.length+')')+'</button></div>':'')
       :'<p class="note" style="margin:0">Nenhuma encerrada ainda.</p>');
-    mh+=simResultHTML(mp)+burstHTML(mp,s.paperBurst,s.paperPlan);
+    mh+=simResultHTML(mp)+burstHTML(mp,s.paperBurst,s.paperPlan,s.paperAlways);
   }
   mh+='<div class="row" style="margin-top:8px"><button class="sm" data-roboreset="funding">Reiniciar funding</button><button class="sm" data-roboreset="mining">Reiniciar mineração</button></div>';
   $('rb_mine').innerHTML=mh;
@@ -825,7 +837,7 @@ function renderRobo(){
 var algoOpen={};
 function renderAlgoPaper(ap){
   var h='<div class="row between"><h2 style="margin:0">Outras moedas (pool PPS)</h2>'+(ap?'<span class="note">desde '+dt2(ap.since)+'</span>':'')+'</div>'+
-    '<p class="note" style="margin:4px 0 8px">Mesmo orçamento para cada algoritmo (US$'+((ap&&ap.budgetUsdDay)||100)+'/dia de aluguel enquanto compensa). Pool PPS paga por share: sem sorte de bloco, o resultado é o esperado. Recalcula a cada 15 min.</p>';
+    '<p class="note" style="margin:4px 0 8px">Mesmo orçamento para cada algoritmo (US$'+((ap&&ap.budgetUsdDay)||100)+'/dia de aluguel enquanto compensa). Pool PPS paga por share: sem sorte de bloco, o resultado é o esperado. Margem realista: dificuldade média de 24 h, pool PPS 4%, shares perdidos e venda das moedas 2,5%. Recalcula a cada 15 min.'+(ap&&ap.v===2?'':' (Resultado anterior usava a conta bruta da WhatToMine e exagerava o lucro; recomeça no próximo cálculo.)')+'</p>';
   if(!ap){$('rb_algo').innerHTML=h+'<p class="note">Começa no próximo cálculo do servidor (até 15 min).</p>';return}
   var list=Object.keys(ap.algos).map(function(k){var a=ap.algos[k];a.key=k;a.res=a.revUsd-a.spendUsd;return a}).sort(function(x,y){return y.res-x.res||(y.edgeNow||-1e9)-(x.edgeNow||-1e9)});
   var tot=list.reduce(function(s,a){return s+a.res},0),sp=list.reduce(function(s,a){return s+a.spendUsd},0);
@@ -956,6 +968,15 @@ document.addEventListener('click',function(e){
   b.disabled=true;
   apiCall('PUT','/config',body).then(function(){loadOps()},function(err){alert('Não deu: '+err.message);b.disabled=false});
 });
+// Margem "bruta" (como a WhatToMine mostra: dificuldade do momento, sem perdas) × realista (média de 24 h, pool PPS,
+// shares perdidos e venda das moedas). Mostra só quando a diferença importa.
+function rawTxt(m){
+  if(!isFinite(m.rawEdgePct)||m.edgePct===null||Math.abs(m.rawEdgePct-m.edgePct)<1)return '';
+  return '<div class="note">Na conta bruta da WhatToMine daria '+pct(m.rawEdgePct,1)+'. A realista '+(m.pps?'desconta pool PPS (4%), shares perdidos e venda das moedas (2,5%) e ':'')+'usa a dificuldade média de 24 h quando a do momento está num vale (DOGE e DASH reajustam a cada bloco; o vale dura minutos).</div>';
+}
+function thinTxt(m){
+  return 'Livro raso: '+(m.paying<5?'só '+m.paying+' ordens recebendo hash':'o mercado inteiro gasta ~'+usd(m.marketUsdDay||0,0)+'/dia')+'; uma ordem de US$100/dia mudaria o preço. O "compensa" não vale para volume real.';
+}
 /* ---------- copiloto IA: análise, previsões conferíveis, XP e maturidade ---------- */
 function renderAI(){
   var st=ops.status&&ops.status.state,A=st&&st.ai,an=st&&st.aiAnalysis,T=(st&&st.aiTypes)||{};
@@ -964,7 +985,8 @@ function renderAI(){
   bar.style.display='block';card.hidden=false;
   var nx=A.next;
   $('aibar_t').innerHTML='<b>IA copiloto</b> · Nível '+A.level.n+' '+esc(A.level.name)+' · '+A.xp+' XP';
-  $('aibar_r').textContent=A.resolved?('acerto '+pctp(A.rate*100,0)+' ('+A.hits+'/'+A.resolved+')'):'aprendendo';
+  var HD=A.hard||{n:0,hits:0},lt=st.lastTick||0,old=Date.now()-lt>10*60e3;
+  $('aibar_r').innerHTML=(A.resolved?'difíceis '+HD.hits+'/'+HD.n+' · todas '+A.hits+'/'+A.resolved:'aprendendo')+(lt?' · <span class="'+(old?'bad':'')+'">'+(old?'servidor parado desde ':'dados de ')+hhmm(new Date(lt))+'</span>':'');
   $('aibar_p').style.width=Math.round((A.progress||0)*100)+'%';
   var conf=function(r){return r.trusted?'<span class="chip ok">confiável · '+r.n+' conferidas</span>':'<span class="chip">em teste · '+(r.n||0)+' conferidas</span>'};
   var dueTxt=function(o){var ms=o.due-Date.now();return ms>0?'confere em '+FDI.dur(ms):'conferindo'};
@@ -973,12 +995,12 @@ function renderAI(){
   if(an&&an.recs.length)h+='<div class="eyebrow" style="margin:12px 0 6px">Sugestões</div><div class="stack" style="gap:6px">'+an.recs.map(function(r){return '<div class="box" style="margin:0">'+esc(r.text)+' '+conf(r)+'</div>'}).join('')+'</div>';
   h+='<div class="eyebrow" style="margin:12px 0 6px">Previsões em aberto ('+A.open.length+')</div>'+(A.open.length?'<div class="stack" style="gap:4px">'+A.open.slice(0,8).map(function(o){return '<div class="trow"><div class="note">'+esc(o.text)+'</div>'+(o.why?'<div class="note"><b>Por quê:</b> '+esc(o.why)+'</div>':'')+'<div class="note">'+dueTxt(o)+' · confiança '+pctp(o.conf*100,0)+(o.trusted?' · confiável':'')+'</div></div>'}).join('')+'</div>':'<p class="note" style="margin:0">Nenhuma agora: ela prevê quando algum sinal aparece.</p>');
   var dn=A.done.filter(function(d){return d.hit!==null&&d.hit!==undefined});
-  h+='<div class="eyebrow" style="margin:12px 0 6px">Conferidas</div>'+(dn.length?'<div class="stack" style="gap:4px">'+dn.slice(0,8).map(function(d){return '<div class="trow"><div class="note">'+(d.hit?'<span class="chip ok">acertou +'+d.xp+' XP</span>':'<span class="chip bad">errou +1 XP</span>')+' '+esc(d.text)+'</div>'+(d.why?'<div class="note"><b>Por quê previu:</b> '+esc(d.why)+'</div>':'')+(d.check?'<div class="note"><b>Como foi conferida:</b> '+esc(d.check)+'</div>':'')+'<div class="note">'+dt2(d.resolvedAt)+'</div></div>'}).join('')+'</div>':'<p class="note" style="margin:0">As primeiras são conferidas em 1 a 6 h; as de funding, em 3 dias.</p>');
+  h+='<div class="eyebrow" style="margin:12px 0 6px">Conferidas</div>'+(dn.length?'<div class="stack" style="gap:4px">'+dn.slice(0,8).map(function(d){return '<div class="trow"><div class="note">'+(d.hit?'<span class="chip ok">acertou +'+d.xp+' XP</span>':'<span class="chip bad">errou · 0 XP</span>')+(T[d.type]&&!T[d.type].hard?' <span class="chip">fácil</span>':' <span class="chip warn">difícil</span>')+' '+esc(d.text)+'</div>'+(d.why?'<div class="note"><b>Por quê previu:</b> '+esc(d.why)+'</div>':'')+(d.check?'<div class="note"><b>Como foi conferida:</b> '+esc(d.check)+'</div>':'')+'<div class="note">'+dt2(d.resolvedAt)+'</div></div>'}).join('')+'</div>':'<p class="note" style="margin:0">As primeiras são conferidas em 1 a 6 h; as de funding, em 3 dias.</p>');
   var OL=(st&&st.opLog)||[];
   if(OL.length)h+='<div class="eyebrow" style="margin:12px 0 6px">Seus ajustes (correções do operador)</div><div class="stack" style="gap:4px">'+OL.slice(0,5).map(function(o){return '<div class="trow"><div class="note">'+esc(o.changes.map(function(c){return c.label+' '+c.from+' → '+c.to}).join('; '))+'</div>'+(o.plan?'<div class="note">copiloto sugeria '+o.plan.ph+' PH/s e '+usd(o.plan.budgetUsd,0)+' por sessão</div>':'')+'<div class="note">'+dt2(o.t)+'</div></div>'}).join('')+'</div><p class="note" style="margin:4px 0 0">Seus ajustes rodam como cenário na simulação, ao lado da sugestão: os resultados mostram quem acertou mais.</p>';
   var ks=Object.keys(T);
-  h+='<details style="margin-top:10px"><summary>O que ela aprendeu por tipo de previsão</summary><div class="scroll"><table><tr><th>Previsão</th><th>Conferidas</th><th>Acerto</th></tr>'+ks.map(function(k){var s=(A.stats||{})[k]||{n:0,hits:0};return '<tr><td>'+esc(T[k].label)+'</td><td>'+s.n+'</td><td>'+(s.n?pctp(s.hits/s.n*100,0):'—')+'</td></tr>'}).join('')+'</table></div></details>'+
-    '<details style="margin-top:6px"><summary>Como a IA aprende e ganha XP</summary><p class="note" style="margin:6px 0 0">A cada 3 min o servidor junta todos os sinais (DARR, margem, reajuste do BTC, BCH contra o BTC, blocos chegando, funding com 24 h estável e meia-vida, outras moedas) e transforma cada sinal numa previsão com prazo. Quando o prazo vence, ele confere com os dados reais: acerto vale até 15 XP (mais confiança, mais XP); erro vale 1. Não precisa que você execute: conta se a dica era boa. A confiança de cada tipo de previsão vem do histórico de acertos dele; tipos com 20+ conferidas e 60%+ de acerto viram "confiáveis" e as sugestões deles ficam mais assertivas. Níveis: Aprendiz → Analista (30 conferidas) → Estrategista (100, acerto ≥ 55%) → Mestre (300, acerto ≥ 60%).'+(nx?' Próximo nível: '+esc(nx.name)+' ('+A.resolved+' de '+nx.min+' conferidas'+(nx.hit?', acerto ≥ '+pctp(nx.hit*100,0):'')+').':'')+'</p></details>';
+  h+='<details style="margin-top:10px"><summary>O que ela aprendeu por tipo de previsão</summary><div class="scroll"><table><tr><th>Previsão</th><th>Tipo</th><th>Conferidas</th><th>Acerto</th><th>XP</th></tr>'+ks.map(function(k){var s=(A.stats||{})[k]||{n:0,hits:0};return '<tr><td>'+esc(T[k].label)+'</td><td>'+(T[k].hard?'difícil':'fácil')+'</td><td>'+s.n+'</td><td>'+(s.n?pctp(s.hits/s.n*100,0):'—')+'</td><td>'+(s.xp||0)+'</td></tr>'}).join('')+'</table></div><p class="note" style="margin:6px 0 0">Fácil = aposta que o que está aí continua (ex.: margem boa segue boa por 1 h): acerta quase sempre e por isso vale pouco. Difícil = aposta numa mudança (janela abre, dificuldade sobe, DARR depois do reajuste, funding paga as taxas): é aqui que se vê se a IA sabe algo.</p></details>'+
+    '<details style="margin-top:6px"><summary>Como a IA aprende e ganha XP</summary><p class="note" style="margin:6px 0 0">A cada 3 min o servidor junta todos os sinais (DARR, margem, reajuste do BTC, BCH contra o BTC, blocos chegando, funding com 24 h estável e meia-vida, outras moedas) e transforma cada sinal numa previsão com prazo. Quando o prazo vence, ele confere com os dados reais. Acerto difícil vale 10 XP (15 se o tipo já é confiável); acerto fácil vale 2; erro vale 0. Não precisa que você execute: conta se a dica era boa. A confiança de cada tipo vem do histórico de acertos dele; tipos com 20+ conferidas e 60%+ de acerto viram "confiáveis". Níveis: Aprendiz → Analista (30 conferidas, 5 difíceis) → Estrategista (100, 20 difíceis com acerto ≥ 50%) → Mestre (300, 60 difíceis com acerto ≥ 55%). Tempo sozinho não sobe de nível: precisa acertar as difíceis.'+(nx?' Próximo nível: '+esc(nx.name)+' ('+A.resolved+' de '+nx.min+' conferidas; difíceis '+HD.n+' de '+nx.hard+(nx.hit?', acerto nelas '+pctp(HD.rate*100,0)+' de ≥ '+pctp(nx.hit*100,0):'')+').':'')+'</p></details>';
   card.innerHTML=h;
 }
 // Cartão único da rede: usa o bloco mais recente entre a Blockchair (painel) e o servidor, e julga cada número.
@@ -1603,8 +1625,8 @@ function renderRadar(){
   $('r_mmap').innerHTML=mm&&mm.length?mm.map(function(m){
     return '<div class="coinrow"><div class="row between"><b>'+esc(m.label)+'</b>'+chip(m.level)+'</div>'+
       '<div>Melhor opção: <b>'+esc(m.coins.join(' + '))+'</b>'+(m.merged?' (mineradas juntas)':'')+'</div>'+
-      (m.edgePct!==null?'<div>Rende <b>'+usd(m.revUsdPerUnit)+'</b> por '+m.unit+'/s ao dia · aluguel '+usd(m.rentUsdPerUnit)+' → <b class="'+(m.edgePct>=0?'good':'bad')+'">'+pct(m.edgePct,1)+'</b></div>':'<div class="note">Sem preço de aluguel desse algoritmo agora.</div>')+
-      (m.thin?'<div class="note warn">Livro raso: só '+m.paying+' ordens recebendo hash; o preço para comprar volume real tende a ser maior.</div>':'')+
+      (m.edgePct!==null?'<div>Rende <b>'+usd(m.revUsdPerUnit)+'</b> por '+m.unit+'/s ao dia · aluguel '+usd(m.rentUsdPerUnit)+' → <b class="'+(m.edgePct>=0?'good':'bad')+'">'+pct(m.edgePct,1)+'</b> (realista)</div>'+rawTxt(m):'<div class="note">Sem preço de aluguel desse algoritmo agora.</div>')+
+      (m.thin?'<div class="note warn">'+thinTxt(m)+'</div>':'')+
       '<div class="note">'+esc(m.where)+(m.small.length?' · redes pequenas que rendem mais por hash, mas com pouca liquidez (o hash alugado derruba a dificuldade): '+esc(m.small.join(', ')):'')+'</div></div>'}).join('')+
     '<p class="note" style="margin:8px 0 0">Fonte: WhatToMine e NiceHash ('+esc(market.src||'')+(market.dataAt?', '+ago(market.dataAt)+' atrás':'')+'). Solo: a variação depende de quanto da rede você aluga.</p>'
     :'<p class="note">'+(market.err?'Mapa indisponível ('+esc(market.err)+'). Com o backend ligado, ele é lido em tempo real.':'Carregando mapa de mineração…')+'</p>';
@@ -1649,9 +1671,9 @@ function renderAlgos(){
     return '<div class="card sig '+({go:'favoravel',maybe:'neutro',no:'desfavoravel'}[m.level]||'')+'" id="algo-'+esc(m.label)+'"'+(foc?' style="outline:2px solid var(--accent)"':'')+'>'+
       '<div class="row between"><b>'+esc(m.label)+'</b>'+chip(m.level)+'</div>'+
       '<div class="why">Melhor opção: <b>'+esc(m.coins.join(' + '))+'</b>'+(m.merged?' (mineradas juntas)':'')+'</div>'+
-      (m.edgePct!==null?'<div>Rende <b>'+usd(m.revUsdPerUnit)+'</b> por '+m.unit+'/s ao dia · aluguel '+usd(m.rentUsdPerUnit)+' → <b class="'+(m.edgePct>=0?'good':'bad')+'">'+pct(m.edgePct,1)+'</b></div>':'<div class="note">Sem preço de aluguel desse algoritmo agora.</div>')+
+      (m.edgePct!==null?'<div>Rende <b>'+usd(m.revUsdPerUnit)+'</b> por '+m.unit+'/s ao dia · aluguel '+usd(m.rentUsdPerUnit)+' → <b class="'+(m.edgePct>=0?'good':'bad')+'">'+pct(m.edgePct,1)+'</b> (realista)</div>'+rawTxt(m):'<div class="note">Sem preço de aluguel desse algoritmo agora.</div>')+
       (act?'<p class="note good" style="margin:4px 0 0">Compensa há '+ago(act)+' (desde '+hhmm(act)+').</p>':'')+
-      (m.thin?'<p class="note warn" style="margin:4px 0 0">Livro raso: só '+m.paying+' ordens recebendo hash; comprar volume real tende a sair mais caro.</p>':'')+
+      (m.thin?'<p class="note warn" style="margin:4px 0 0">'+thinTxt(m)+'</p>':'')+
       '<details'+(foc||m.level==='go'?' open':'')+' style="margin-top:8px"><summary>Como minerar (manual)</summary><ol class="rules note" style="margin-top:6px">'+
         '<li>Na NiceHash, <a href="https://www.nicehash.com/my/marketplace" target="_blank" rel="noopener">mercado de hashpower</a> → algoritmo <b>'+esc(m.algo)+'</b>.</li>'+
         '<li>Cadastre o pool da moeda (aceite de NiceHash conferido no site do pool): '+(pools||'pool da moeda com porta para NiceHash')+'. Usuário = sua carteira '+esc(m.coins[0])+'.</li>'+
@@ -1672,6 +1694,7 @@ function tab(t,sub){
   settings.tab=t;ls('fd_set',settings);
   if(t==='radar'){if(settings.apiUrl&&Date.now()-(ops.at||0)>60000)loadOps();renderRadar();ls('fd_aseen',Date.now());renderBadge();loadMarketMap()}
   if((t==='mine'||t==='home')&&(!mine.at||Date.now()-mine.at>300000))loadMining();
+  if(settings.apiUrl&&Date.now()-(ops.at||0)>60000)loadOps();
   window.scrollTo(0,0);
 }
 var SUBS={fund:['fundSeg',['scan','journey','calc']],mine:['mineSeg',['now','journey','plan','algos','ops','net']],diary:['diarySeg',['pos','mine','robo']]};
@@ -1784,7 +1807,6 @@ $('feeTable').addEventListener('input',function(e){
 });
 $('feeReset').addEventListener('click',function(){FEES=cloneFees();ls('fd_fees',FEES);renderFees();renderScan()});
 // Atualiza funding a cada 2 min com a aba visível.
-setInterval(function(){if(document.visibilityState==='visible'&&state.live)load()},120000);
 
 /* ---------- eventos: investimento e operação ---------- */
 ['iv_total','iv_sess','iv_edge','iv_stop'].forEach(function(id){$(id).addEventListener('input',function(){saveSettings();renderInvest()})});
@@ -1938,7 +1960,8 @@ tickClock();setInterval(tickClock,20000);
   function kick(){fix();requestAnimationFrame(function(){window.scrollTo(window.scrollX,window.scrollY);fix()});setTimeout(fix,350);setTimeout(fix,1200)}
   if(vv){vv.addEventListener('resize',fix);vv.addEventListener('scroll',fix)}
   ['pageshow','focus','orientationchange','resize'].forEach(function(ev){window.addEventListener(ev,kick)});
-  document.addEventListener('visibilitychange',function(){if(document.visibilityState==='visible')kick()});
+  document.addEventListener('visibilitychange',function(){if(document.visibilityState==='visible'){kick();freshen()}});
+  window.addEventListener('pageshow',function(){freshen()});window.addEventListener('focus',function(){freshen()});
 })();
 load();loadMining();if(settings.apiUrl)loadOps();
 renderAcct();

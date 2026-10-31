@@ -734,6 +734,29 @@ test('integração: simulação em rajada (50 PH/s, para no bloco) roda ao lado 
     assert.equal(st.paperBurst.ph, 50); assert.equal(st.paper.ph, 10);
     assert.equal(st.paperBurst.draws, 1); assert.equal(st.paper.draws, 1, 'mesmo bloco real nas duas');
     assert.ok(st.paperBurst.spendUsd > st.paper.spendUsd * 4.9, 'rajada gasta 5x mais por hora');
+    assert.equal(st.paperAlways.ph, 10); assert.equal(st.paperAlways.draws, 1, 'sempre ligado usa os mesmos blocos');
+  } finally { t.server.close(); }
+});
+
+test('simulação: preço da ordem desce só um degrau a cada 10 min (regra da NiceHash, igual ao robô)', () => {
+  const T0 = Date.UTC(2026, 9, 31, 12);
+  const U = { minLimitPH: 1, priceDownStepEH: 0.002 };
+  let r = paperStep(null, { cfg: PCFG, mkt: pm({ bidEH: 0.410 }), now: T0, units: U, limits: PL });
+  r = paperStep(r.paper, { cfg: PCFG, mkt: pm({ bidEH: 0.400 }), now: T0 + 180e3, units: U, limits: PL });
+  assert.equal(+r.paper.priceEH.toFixed(4), 0.408, 'primeiro degrau');
+  r = paperStep(r.paper, { cfg: PCFG, mkt: pm({ bidEH: 0.400 }), now: T0 + 360e3, units: U, limits: PL });
+  assert.equal(+r.paper.priceEH.toFixed(4), 0.408, 'antes de 10 min não desce');
+  r = paperStep(r.paper, { cfg: PCFG, mkt: pm({ bidEH: 0.415 }), now: T0 + 540e3, units: U, limits: PL });
+  assert.equal(r.paper.priceEH, 0.415, 'subir é na hora');
+});
+
+test('integração: "sempre ligado" segue comprando quando o aluguel passa do teto', async () => {
+  const t = await setup();
+  try {
+    await t.call('PUT', '/api/config', { mode: 'observe', targetPh: 10, minEdgePct: 90 }); // teto inalcançável: o robô pausa
+    await t.call('POST', '/api/tick');
+    const st = (await t.call('GET', '/api/status')).body.state;
+    assert.equal(st.paper.on, false); assert.equal(st.paperAlways.on, true);
   } finally { t.server.close(); }
 });
 
@@ -870,9 +893,14 @@ test('IA: cria previsões dos sinais, confere no prazo e ganha XP', () => {
 });
 
 test('IA: nível sobe com previsões conferidas e acerto', () => {
-  assert.equal(levelOf({ stats: { a: { n: 35, hits: 10 } } }).level.name, 'Analista');
-  assert.equal(levelOf({ stats: { a: { n: 120, hits: 50 } } }).level.name, 'Analista', 'acerto abaixo de 55% não vira Estrategista');
-  assert.equal(levelOf({ stats: { a: { n: 120, hits: 70 } } }).level.name, 'Estrategista');
+  assert.equal(levelOf({ stats: { mine_buy: { n: 120, hits: 118 } } }).level.name, 'Aprendiz', 'só previsões fáceis (tempo) não sobe de nível');
+  assert.equal(levelOf({ stats: { mine_buy: { n: 30, hits: 29 }, mine_wait: { n: 5, hits: 1 } } }).level.name, 'Analista');
+  assert.equal(levelOf({ stats: { mine_buy: { n: 90, hits: 88 }, mine_wait: { n: 30, hits: 12 } } }).level.name, 'Analista', 'difíceis abaixo de 50% não vira Estrategista');
+  const L = levelOf({ stats: { mine_buy: { n: 90, hits: 88 }, mine_wait: { n: 30, hits: 16 } } });
+  assert.equal(L.level.name, 'Estrategista'); assert.deepEqual([L.hard.n, L.hard.hits], [30, 16]);
+  // XP antigo (até 15 por acerto de qualquer tipo, 1 por erro) é refeito com o peso por dificuldade
+  const { ai } = brainStep({ since: 1, xp: 999, open: [], done: [{ type: 'mine_buy', hit: true, xp: 13 }, { type: 'mine_wait', hit: false, xp: 1 }], stats: { mine_buy: { n: 10, hits: 10 }, mine_wait: { n: 4, hits: 2 } }, last: {} }, { now: 2 });
+  assert.equal(ai.xp, 10 * 2 + 2 * 10); assert.deepEqual(ai.done.map((d) => d.xp), [2, 0]); assert.equal(ai.v, 2);
 });
 
 test('integração: copiloto IA e mempool aparecem no status', async () => {
