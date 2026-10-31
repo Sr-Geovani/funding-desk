@@ -890,6 +890,7 @@ function renderAct(){
         kvJ('Bloco vale',usd(M.blockUsd||0,0),'',null,'recompensa já sem a taxa do pool')+'</div>'+
         (M.why?'<details style="margin-top:8px"><summary>Por que '+M.ph+' PH/s?</summary><ol class="note" style="margin:6px 0 0;padding-left:18px">'+M.why.map(function(w){return '<li>'+esc(w)+'</li>'}).join('')+'</ol>'+
           (M.alt?'<div class="scroll"><table style="margin-top:6px"><tr><th>Potência</th><th>Gasto em 2 h</th><th>Chance de bloco</th></tr>'+M.alt.map(function(a){return '<tr><td>'+a.ph+' PH/s</td><td>'+usd(a.costUsd,0)+'</td><td>'+pctp(a.chance*100,0)+'</td></tr>'}).join('')+'</table></div><p class="note" style="margin:4px 0 0">Chance e gasto crescem juntos: a média por dólar é igual. Se quiser arriscar menos por sessão, baixe o orçamento (Operar → Stop-loss por sessão) que a potência sugerida cai junto.</p>':'')+'</details>':'')+
+        chanceCalc(M)+norteHTML()+
         '<div class="row" style="margin-top:10px"><button class="sm pri" data-plan="apply">Aplicar plano no robô</button></div>';
     }
     if(P.blockers&&P.blockers.length)h+='<div class="eyebrow" style="margin:12px 0 6px">O que trava para operar ('+P.blockers.length+')</div><div class="stack" style="gap:6px">'+P.blockers.map(function(b,i){
@@ -905,6 +906,25 @@ function renderAct(){
     h+='<details style="margin-top:8px"><summary>Solo × PPS: qual depende de sorte?</summary><p class="note" style="margin:6px 0 0"><b>Solo</b> (BCH no BlockSniper): você só recebe se o SEU hash achar um bloco. Ou ganha o bloco inteiro (~US$900), ou não ganha nada: é sorte, com chance proporcional à sua potência. <b>PPS</b> (pay per share): o pool paga cada "share" (prova de trabalho) que você entrega, pelo valor médio, ache o pool bloco ou não. O pool fica com o risco da sorte e cobra uma taxa por isso. Por isso, em PPS o resultado já é o esperado: receita por hash − aluguel − taxas, todo dia, sem loteria. As outras moedas são simuladas assim.</p></details>';
     el.innerHTML=h;
   });
+}
+// Calculadora: chance desejada → potência e custo, com a dificuldade e o preço de agora (janela de ~2 h).
+function chanceCalc(M){
+  if(!(M.ph>0&&M.durationH>0&&M.expBlocks>0))return '';
+  var cph=M.costPerHourUsd/M.ph,lam1=M.expBlocks/(M.ph*M.durationH),h=2;
+  var rows=[0.1,0.2,0.3,0.5].map(function(p){var ph=-Math.log(1-p)/(lam1*h);return '<tr><td>'+pctp(p*100,0)+'</td><td>'+nf(ph,0)+' PH/s</td><td>'+usd(ph*h*cph,0)+'</td><td>'+usd(ph*lam1*h*(M.blockUsd||0),0)+'</td></tr>'}).join('');
+  return '<details style="margin-top:8px"><summary>Escolher pela chance (dificuldade de agora)</summary><p class="note" style="margin:6px 0">Com a dificuldade e o preço de agora, cada PH/s por 1 h custa '+usd(cph,2)+' e dá '+pctp(lam1*100,3)+' de chance. Para uma janela de 2 h:</p>'+
+    '<div class="scroll"><table><tr><th>Chance que você quer</th><th>Potência</th><th>Custo (perde se não sair)</th><th>Na média volta</th></tr>'+rows+'</table></div>'+
+    '<p class="note" style="margin:4px 0 0">"Na média volta" = blocos esperados × valor do bloco: fica acima do custo só quando a margem é positiva. Chance maior custa mais na mesma proporção; se a dificuldade sobe, a mesma chance passa a custar mais.</p></details>';
+}
+// Norte operacional: o que cada leitura decide.
+function norteHTML(){
+  return '<details style="margin-top:6px"><summary>Norte operacional: o que cada número decide</summary><ol class="note" style="margin:6px 0 0;padding-left:18px">'+
+    '<li><b>Margem (preço × empate) decide SE compra.</b> É a única alavanca do lucro médio. Abaixo do mínimo, não compra.</li>'+
+    '<li><b>Orçamento por sessão decide QUANTO arrisca.</b> Em solo, sem bloco você perde o que gastou.</li>'+
+    '<li><b>Dificuldade decide QUANTA chance o dinheiro compra.</b> Dificuldade 10% maior = cada dólar compra 10% menos chance (e o empate cai junto).</li>'+
+    '<li><b>Duração da janela decide a POTÊNCIA.</b> Potência = orçamento ÷ (custo por PH/s por hora × horas que a janela costuma durar).</li>'+
+    '<li><b>Tempo desde o último bloco, mempool e taxas não mudam a sua chance.</b> O sorteio não tem memória; só a dificuldade importa.</li>'+
+    '<li><b>Hash da rede chegando é aviso de janela fechando:</b> a dificuldade sobe em horas e a margem cai.</li></ol></details>';
 }
 document.addEventListener('click',function(e){
   var b=e.target.closest('[data-plan]');if(!b)return;
