@@ -675,3 +675,61 @@ test('outras moedas: margem irreal (> 100%) não entra', () => {
   const r = algoPaperStep(null, { map: [{ algo: 'X11', label: 'X11', coins: ['DASH'], level: 'go', edgePct: 450 }], now: Date.UTC(2026, 9, 31) });
   assert.equal(r.pa.algos.X11.on, false); assert.deepEqual(r.events, []);
 });
+
+/* ---------- IA do funding (modo sombra) ---------- */
+import { updateHistory, pickCoins, scorePairs } from '../worker/src/fundai.js';
+import { pairFeatures, score, FEATURES } from '../worker/src/features.js';
+
+test('IA: características só do passado e nota logística', () => {
+  const be = 30, flat = new Array(72).fill(60), spike = new Array(71).fill(5).concat([140]);
+  const a = pairFeatures(flat, be), b = pairFeatures(spike, be);
+  assert.equal(a.length, FEATURES.length);
+  close(a[0], 0.30); close(a[3], 0.30); close(a[5], 1); close(a[6], 1, 1e-9, '72 h seguidas acima do empate');
+  assert.ok(b[7] > a[7], 'pico fica marcado'); close(b[6], 1 / 72);
+  const m = { mean: new Array(8).fill(0), std: new Array(8).fill(1), weights: [0, 0, 0, 4, 0, 0, 0, -1], bias: 0 };
+  assert.ok(score(m, a) > score(m, b), 'spread estável vale mais que pico');
+});
+
+test('IA: histórico horário próprio (72 h) e nota dos pares candidatos', () => {
+  const rows = (x) => ({ ENA: { Bybit: { apr: x }, Hyperliquid: { apr: 10 } }, BTC: { Binance: { apr: 11 }, Hyperliquid: { apr: 10 } } });
+  let fh = null;
+  for (let h = 0; h < 80; h++) fh = updateHistory(fh, { rows: rows(90), selected: pickCoins(rows(90), []), hour: 1000 + h });
+  assert.deepEqual(Object.keys(fh.coins), ['ENA'], 'só moedas com diferença ≥ 20% a.a.');
+  assert.equal(fh.coins.ENA.v.Bybit.length, 72);
+  assert.equal(updateHistory(fh, { rows: rows(0), selected: [], hour: 1079 }).coins.ENA.v.Bybit.length, 72, 'mesma hora: não muda');
+  const model = { mean: new Array(8).fill(0), std: new Array(8).fill(1), weights: [1, 0, 0, 0, 0, 0, 0, 0], bias: 0, threshold: 0.5 };
+  const fees = { Bybit: { taker: 0.055 }, Hyperliquid: { taker: 0.045 } };
+  const sc = scorePairs(fh, { model, fees });
+  assert.deepEqual(Object.keys(sc), ['ENA|Bybit|Hyperliquid'], 'só a direção acima do empate');
+  assert.ok(sc['ENA|Bybit|Hyperliquid'].p > 0.5); assert.equal(sc['ENA|Bybit|Hyperliquid'].hours, 72);
+  // moeda nova com menos de 6 h de histórico ainda não recebe nota
+  let f2 = null; for (let h = 0; h < 4; h++) f2 = updateHistory(f2, { rows: rows(90), selected: ['ENA'], hour: h });
+  assert.deepEqual(scorePairs(f2, { model, fees }), {});
+  // some do acompanhamento 24 h depois de sair da seleção
+  let f3 = fh; for (let h = 1080; h < 1106; h++) f3 = updateHistory(f3, { rows: rows(0), selected: [], hour: h });
+  assert.deepEqual(Object.keys(f3.coins), []);
+});
+
+test('placar: separa os alertas que a IA aprovaria dos que vetaria', () => {
+  const T0 = Date.UTC(2026, 9, 31, 12), H = 36e5, fees = {};
+  const rows = { A: { Bybit: { rate: 0.05, apr: 54.75, hours: 8, next: T0 + 8 * H }, Binance: { rate: 0, apr: 0, hours: 8, next: T0 + 8 * H } } };
+  let sc = alertScoreStep(null, { rows, entries: [{ key: 'A|Bybit|Binance', coin: 'A', s: 'Bybit', l: 'Binance', projUsd: 1, ai: 0.8 }, { key: 'A|Bybit|Binance', coin: 'A', s: 'Bybit', l: 'Binance', projUsd: 1, ai: 0.2 }], now: T0, fees, holdDays: 1 });
+  sc = alertScoreStep(sc, { rows, entries: [], now: T0 + 25 * H, fees, holdDays: 1 });
+  const s = alertScoreSummary(sc, 0.5);
+  assert.deepEqual([s.aiYes.n, s.aiNo.n], [1, 1]);
+});
+
+test('integração: simulação em rajada (50 PH/s, para no bloco) roda ao lado da contínua', async () => {
+  const t = await setup();
+  try {
+    await t.call('PUT', '/api/config', { mode: 'observe', targetPh: 10 });
+    await t.call('POST', '/api/tick');
+    await fetch(t.base + '/_set', { method: 'POST', body: JSON.stringify({ hashes: { [t.state.height + 1]: 'ffffffff' } }) });
+    await fetch(t.base + '/_mine', { method: 'POST', body: JSON.stringify({ address: 'qoutro' }) });
+    await t.call('POST', '/api/tick');
+    const st = (await t.call('GET', '/api/status')).body.state;
+    assert.equal(st.paperBurst.ph, 50); assert.equal(st.paper.ph, 10);
+    assert.equal(st.paperBurst.draws, 1); assert.equal(st.paper.draws, 1, 'mesmo bloco real nas duas');
+    assert.ok(st.paperBurst.spendUsd > st.paper.spendUsd * 4.9, 'rajada gasta 5x mais por hora');
+  } finally { t.server.close(); }
+});

@@ -27,7 +27,8 @@ function newLegs(rs, rl, s, l) { return { s: { venue: s, rate: rs.rate, next: rs
 
 // pf: estado anterior; rows: rows[moeda][exchange] = { rate (% por intervalo), apr, hours, next };
 // best: oportunidades "Compensa" (key, coin, s, l, spread), já ordenadas. Devolve { pf, events }.
-export function fundPaperStep(pf, { rows, best, now, fees, rules = FUND_RULES }) {
+export function fundPaperStep(pf, { rows, best, now, fees, rules = FUND_RULES, label = '' }) {
+  const L = 'Funding simulado' + (label ? ' (' + label + ')' : '');
   const p = pf && pf.since ? JSON.parse(JSON.stringify(pf)) : { since: now, open: [], closed: [], seen: {}, nextId: 1 };
   const events = [];
   if (!rows) return { pf: p, events };
@@ -51,7 +52,7 @@ export function fundPaperStep(pf, { rows, best, now, fees, rules = FUND_RULES })
     c.netUsd = c.fundingUsd - c.feesUsd; c.retPct = c.netUsd / rules.capital * 100;
     delete c.legs; delete c.neg; delete c.missing;
     p.closed.push(c);
-    events.push(`Funding simulado: saiu de ${o.coin} (short ${o.s}, long ${o.l}) após ${o.payments} pagamentos: ${c.netUsd >= 0 ? '+' : '−'}US$${Math.abs(c.netUsd).toFixed(2)} (${why})`);
+    events.push(`${L}: saiu de ${o.coin} (short ${o.s}, long ${o.l}) após ${o.payments} pagamentos: ${c.netUsd >= 0 ? '+' : '−'}US$${Math.abs(c.netUsd).toFixed(2)} (${why})`);
   }
   p.open = still;
 
@@ -68,7 +69,7 @@ export function fundPaperStep(pf, { rows, best, now, fees, rules = FUND_RULES })
     p.open.push({ id: p.nextId++, key: b.key, coin: b.coin, s: b.s, l: b.l, openedAt: now, notional, entrySpread: rs.apr - rl.apr, spreadNow: rs.apr - rl.apr,
       feesUsd: entryFee, fundingUsd: 0, payments: 0, neg: 0, missing: 0,
       legs: newLegs(rs, rl, b.s, b.l) });
-    events.push(`Funding simulado: entrou em ${b.coin} (short ${b.s}, long ${b.l}) com diferença de ${(rs.apr - rl.apr).toFixed(1)}% a.a.`);
+    events.push(`${L}: entrou em ${b.coin} (short ${b.s}, long ${b.l}) com diferença de ${(rs.apr - rl.apr).toFixed(1)}% a.a.`);
   }
   p.closed = p.closed.slice(-rules.keepClosed);
   return { pf: p, events };
@@ -103,15 +104,18 @@ export function alertScoreStep(sc, { rows, entries, now, fees, holdDays = 3, rul
   for (const e of entries || []) {
     const cr = rows && rows[e.coin], rs = cr && cr[e.s], rl = cr && cr[e.l];
     if (!rs || !rl || p.open.length >= 60) continue;
-    p.open.push({ key: e.key, coin: e.coin, s: e.s, l: e.l, t: now, holdDays, projUsd: e.projUsd, entrySpread: rs.apr - rl.apr,
+    p.open.push({ key: e.key, coin: e.coin, s: e.s, l: e.l, t: now, holdDays, projUsd: e.projUsd, ai: e.ai === undefined ? null : e.ai, entrySpread: rs.apr - rl.apr,
       fundingUsd: 0, payments: 0, legs: newLegs(rs, rl, e.s, e.l) });
   }
   p.done = p.done.slice(-300);
   return p;
 }
 
-export function alertScoreSummary(p) {
+export function alertScoreSummary(p, threshold) {
   if (!p) return null;
   const d = p.done || [], proj = d.reduce((a, x) => a + (x.projUsd || 0), 0), real = d.reduce((a, x) => a + x.netUsd, 0);
-  return { since: p.since, scored: d.length, hits: d.filter((x) => x.hit).length, projUsd: proj, realUsd: real, open: (p.open || []).length };
+  const grp = (f) => { const g = d.filter(f); return { n: g.length, hits: g.filter((x) => x.hit).length, netUsd: g.reduce((a, x) => a + x.netUsd, 0) }; };
+  const th = threshold === undefined ? 0.5 : threshold;
+  return { since: p.since, scored: d.length, hits: d.filter((x) => x.hit).length, projUsd: proj, realUsd: real, open: (p.open || []).length,
+    aiYes: grp((x) => x.ai !== null && x.ai !== undefined && x.ai >= th), aiNo: grp((x) => x.ai !== null && x.ai !== undefined && x.ai < th) };
 }

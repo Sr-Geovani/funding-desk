@@ -348,6 +348,10 @@ function fundFor(mode){
   var vs=ops.map(function(o){return FDC.fundingVerdict(o,Object.assign({stab:stabOf(o)},c))});
   return {ops:ops,vs:vs,sum:FDC.fundingSummary(ops,vs,{hold:p.hold})};
 }
+// Nota da IA do servidor para o par (se ele acompanha esse par há pelo menos 6 h).
+function aiChip(o){var sc=ops.status&&ops.status.state&&ops.status.state.aiScores,M=ops.status&&ops.status.state&&ops.status.state.model;
+  var a=sc&&sc[o.coin+'|'+o.s+'|'+o.l];if(!a||!M)return '';
+  return '<span class="chip '+(a.p>=M.threshold?'ok':'warn')+'" title="Chance, segundo a IA, de pagar as taxas em 3 dias">IA '+pctp(a.p*100,0)+'</span>'}
 function renderScan(){
   var p=scanParams(),r=fundFor(state.mode),sum=r.sum,RANK={go:0,maybe:1,no:2,none:3};
   var idx=r.ops.map(function(o,i){return i}).sort(function(a,b){return RANK[r.vs[a].level]-RANK[r.vs[b].level]||a-b});
@@ -367,7 +371,8 @@ function renderScan(){
     var key=oppKey(o),v=vs[i],st=stabOf(o),pending=i<5&&state.live&&!stabMap[key];
     var tags=(state.live?'':'<span class="chip demo">exemplo</span>')+(o.capped?'<span class="chip warn">extremo</span>':'')+
       (o.age!==null&&o.age<num('newdays')?'<span class="chip warn">novo · '+Math.max(0,Math.floor(o.age))+'d</span>':'')+
-      (state.kinds[o.coin]?'<span class="chip warn" title="Ativo tradicional tokenizado: segue o horário da bolsa">'+esc(state.kinds[o.coin])+'</span>':'');
+      (state.kinds[o.coin]?'<span class="chip warn" title="Ativo tradicional tokenizado: segue o horário da bolsa">'+esc(state.kinds[o.coin])+'</span>':'')+
+      aiChip(o);
     var plan=FDI.fundingPlan(o,{now:Date.now(),hold:p.hold,aprCap:p.aprCap<1e8?p.aprCap:null}),bt=(stabMap[key]||{}).bt;
     var tgt=num('f_target')>0&&v.level!=='no'?FDI.capitalForTarget(o,num('f_target'),p):null;
     html+='<div class="card opp '+LV[v.level]+'"><div class="h"><span><span class="coin">'+esc(o.coin)+'</span>'+tags+'</span>'+chip(v.level)+'</div>'+
@@ -703,6 +708,15 @@ function simResultHTML(p){
     'O sorteio usa o hash de cada bloco real, que ninguém controla: o resultado não pode ser escolhido depois.</div>'+
     '<details style="margin-top:8px"><summary>Chance e média de longo prazo</summary>'+outcomesHTML(p.spendUsd,p.evUsd,p.lambda,p.blockNetUsd)+'</details>';
 }
+// Contínuo (sua configuração) × rajada de 50 PH/s parando no bloco (método do vídeo): mesmos blocos e sorteio.
+function burstHTML(p,b){
+  if(!b)return '';
+  var row=function(x){var res=(x.wonUsd||0)-x.spendUsd;return [usd(x.spendUsd),(x.blocks||0)+' de '+(x.draws||0),signUsd(res),pctp((1-Math.exp(-x.lambda))*100,1)]};
+  var A=row(p),B=row(b),lab=['Gasto','Blocos seus (de cobertos)','Resultado','Chance de ≥1 bloco'];
+  return '<div class="eyebrow" style="margin:14px 0 6px">Contínuo × rajada (método do vídeo)</div><div class="scroll"><table><tr><th></th><th>Contínuo '+nf(p.ph||+((ops.status||{}).config||{}).targetPh||0,0)+' PH/s</th><th>Rajada 50 PH/s</th></tr>'+
+    lab.map(function(l,i){return '<tr><td>'+l+'</td><td>'+A[i]+'</td><td>'+B[i]+'</td></tr>'}).join('')+'</table></div>'+
+    '<p class="note" style="margin:6px 0 0">Mesmas regras de preço (compra abaixo do teto, pausa acima), mesmos blocos reais e mesmo sorteio. A rajada gasta mais rápido e tem mais chance por hora; por dólar, a média é a mesma. A diferença está no risco de cada sessão.</p>';
+}
 // Desfechos honestos de um período de aluguel: sem bloco (o mais comum) perde o gasto; com bloco ganha o bloco menos o gasto.
 // A média de longo prazo (receita esperada − gasto) só aparece repetindo muitas vezes.
 function outcomesHTML(spend,ev,lam,blk){
@@ -743,7 +757,7 @@ function renderPaper(st){
 function utcHM(ms){var d=new Date(ms);return ('0'+d.getUTCHours()).slice(-2)+':'+('0'+d.getUTCMinutes()).slice(-2)}
 // Data e hora local, com a hora UTC (a do servidor) entre parênteses.
 function dt2(ms){return new Date(ms).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})+' ('+utcHM(ms)+' UTC)'}
-function signUsd(x){return (x>=0?'+':'')+usd(x)}
+function signUsd(x){if(Math.abs(x)<0.005)return 'US$0,00';return (x>=0?'+':'')+usd(x)}
 var roboAll={f:false,m:false};
 function renderRobo(){
   if(!$('rb_head'))return;
@@ -772,7 +786,7 @@ function renderRobo(){
       :'<p class="note" style="margin:0">Nenhuma ainda. Uma operação fecha quando o funding vira contra; pode levar horas ou dias.</p>');
     if(fs&&fs.closed)fh+='<p class="note" style="margin:8px 0 0">Média de '+FDI.dur(fs.avgHours*3600e3)+' por operação. Acerto = fechou no positivo depois de todas as taxas.</p>';
   }
-  $('rb_fund').innerHTML=fh;
+  $('rb_fund').innerHTML=fh+aiCompareHTML(s);
   renderScore(s.alertScore);
   // mineração
   var mh='<div class="row between"><h2 style="margin:0">Mineração (BCH solo)</h2>'+(mp?'<span class="note">desde '+dt2(mp.since)+'</span>':'')+'</div>';
@@ -785,7 +799,7 @@ function renderRobo(){
       return '<div class="trow"><div><b>'+nf(r.ph,0)+' PH/s</b> <span class="note">a '+r.priceEH.toFixed(4)+' (margem '+pct(r.edgePct,1)+')</span></div><div class="note">'+dt2(r.start)+' → '+dt2(r.end)+' · '+FDI.dur(r.end-r.start)+' · gasto '+usd(r.spendUsd)+' · blocos da rede '+(r.draws||0)+', seus '+(r.blocks||0)+' → <strong class="'+(((r.wonUsd||0)-r.spendUsd)>=0?'good':'bad')+'">'+signUsd((r.wonUsd||0)-r.spendUsd)+'</strong></div><div class="note">Saída: '+esc(r.reason)+'</div></div>'}).join('')+'</div>'+
       (rs.length>15?'<div style="margin-top:6px"><button class="sm" data-roboall="m">'+(roboAll.m?'Mostrar menos':'Ver todas ('+rs.length+')')+'</button></div>':'')
       :'<p class="note" style="margin:0">Nenhuma encerrada ainda.</p>');
-    mh+=simResultHTML(mp);
+    mh+=simResultHTML(mp)+burstHTML(mp,s.paperBurst);
   }
   mh+='<div class="row" style="margin-top:8px"><button class="sm" data-roboreset="funding">Reiniciar funding</button><button class="sm" data-roboreset="mining">Reiniciar mineração</button></div>';
   $('rb_mine').innerHTML=mh;
@@ -809,6 +823,23 @@ function renderAlgoPaper(ap){
   $('rb_algo').innerHTML=h;
 }
 // Placar dos alertas de funding: projetado no alerta × o que de fato pagou no prazo, já com as taxas.
+// IA em modo sombra: o mesmo robô de funding, mas só entra quando a IA dá p ≥ limiar. Lado a lado com as regras.
+var GH_DOC='https://github.com/Sr-Geovani/funding-desk/blob/main/docs/modelo-funding.md';
+function aiCompareHTML(s){
+  var M=s.model,fa=s.fundPaperAI,fr=s.fundPaper;
+  if(!M)return '<div class="box" style="margin-top:12px"><b>IA (modo sombra)</b>Modelo ainda não treinado.</div>';
+  var R=M.report||{},a=fa&&fa.summary,r=fr&&fr.summary,pc=function(x){return x===null||x===undefined?'—':pctp(x*100,0)};
+  var col=function(x){return x?[x.closed,x.closed?x.wins+' de '+x.closed:'—',signUsd(x.netUsd),x.open+(x.open?' ('+signUsd(x.openNetUsd)+')':'')]:['—','—','—','—']};
+  var A=col(a),B=col(r),lab=['Fechadas','Acerto','Resultado','Abertas agora'];
+  var h='<div class="eyebrow" style="margin:14px 0 6px">Regras × Regras + IA (modo sombra)</div><div class="scroll"><table><tr><th></th><th>Regras</th><th>Regras + IA</th></tr>'+
+    lab.map(function(l,i){return '<tr><td>'+l+'</td><td>'+B[i]+'</td><td>'+A[i]+'</td></tr>'}).join('')+'</table></div>';
+  if(fa&&fa.open&&fa.open.length)h+='<p class="note" style="margin:6px 0 0">Abertas pela IA: '+fa.open.map(function(o){var ai=(s.aiScores||{})[o.key];return esc(o.coin)+' (short '+esc(o.s)+', long '+esc(o.l)+(ai?', IA '+pctp(ai.p*100,0):'')+')'}).join(' · ')+'</p>';
+  h+='<div class="box" style="margin-top:8px"><b>Como a IA decide</b>Entra só quando a regra diz "Compensa" <strong>e</strong> a IA dá chance ≥ '+pctp(M.threshold*100,0)+' de a entrada pagar as taxas em 3 dias. '+
+    'Ela olha o histórico do próprio spread (média de 8, 24 e 72 h, oscilação, horas acima do empate, tamanho do pico). Treino: '+(R.days||'—')+' dias, '+(R.coins||'—')+' moedas (Hyperliquid, OKX, Bitget). '+
+    'No teste com dados que ela não viu: regras acertaram '+pc(R.test&&R.test.hit)+'; só as aprovadas pela IA, '+pc(R.testKept&&R.testKept.hit)+'; as vetadas, '+pc(R.testDropped&&R.testDropped.hit)+'. '+
+    'Precisa de 6 h de histórico do par para dar nota. <a href="'+GH_DOC+'" target="_blank" rel="noopener">Relatório do modelo</a>.</div>';
+  return h;
+}
 function renderScore(sc){
   var h='<div class="row between"><h2 style="margin:0">Placar dos alertas de funding</h2>'+(sc?'<span class="note">desde '+dt2(sc.summary.since)+'</span>':'')+'</div>'+
     '<p class="note" style="margin:4px 0 8px">Cada alerta de entrada vira uma posição hipotética mantida pelo prazo que ele projetou (3 dias). No fim, compara o projetado com o que de fato pagou, já com as taxas.</p>';
@@ -817,12 +848,13 @@ function renderScore(sc){
   h+='<div class="kv"><div><small>Avaliados</small><span>'+m.scored+'</span></div><div><small>Acerto</small><span>'+(m.scored?m.hits+' de '+m.scored+' ('+pctp(m.hits/m.scored*100,0)+')':'—')+'</span></div><div><small>Em andamento</small><span>'+m.open+'</span></div>'+
     '<div><small>Projetado</small><span>'+(m.scored?signUsd(m.projUsd):'—')+'</span></div><div><small>Realizado</small><span class="'+(m.realUsd<0?'bad':'good')+'">'+(m.scored?signUsd(m.realUsd):'—')+'</span></div><div><small>Realizado ÷ projetado</small><span>'+(ratio===null||!m.scored?'—':pctp(ratio,0))+'</span></div></div>';
   if(!m.scored)h+='<p class="note" style="margin:8px 0 0">Os primeiros resultados saem 3 dias depois dos primeiros alertas.</p>';
+  if(m.aiYes&&(m.aiYes.n||m.aiNo.n))h+='<p class="note" style="margin:8px 0 0"><b>IA:</b> dos que ela aprovaria, '+m.aiYes.hits+' de '+m.aiYes.n+' acertaram ('+signUsd(m.aiYes.netUsd)+'); dos que vetaria, '+m.aiNo.hits+' de '+m.aiNo.n+' ('+signUsd(m.aiNo.netUsd)+').</p>';
   var op=(sc.open||[]).slice().sort(function(a,b){return b.t-a.t});
   if(op.length)h+='<div class="eyebrow" style="margin:12px 0 6px">Em andamento</div><div class="stack" style="gap:6px">'+op.slice(0,10).map(function(o){
-    var el=Date.now()-o.t;return '<div class="trow"><div><b>'+esc(o.coin)+'</b> <span class="note">short '+esc(o.s)+', long '+esc(o.l)+' · alerta '+dt2(o.t)+'</span></div><div class="note">'+FDI.dur(el)+' de '+o.holdDays+' dias · '+o.payments+' pagto'+(o.payments===1?'':'s')+' · recebido '+signUsd(o.fundingUsd)+' · projetado '+signUsd(o.projUsd||0)+' (já descontando taxas)</div></div>'}).join('')+'</div>'+(op.length>10?'<p class="note">+'+(op.length-10)+' em andamento.</p>':'');
+    var el=Date.now()-o.t;return '<div class="trow"><div><b>'+esc(o.coin)+'</b> <span class="note">short '+esc(o.s)+', long '+esc(o.l)+' · alerta '+dt2(o.t)+(o.ai!==null&&o.ai!==undefined?' · IA '+pctp(o.ai*100,0):'')+'</span></div><div class="note">'+FDI.dur(el)+' de '+o.holdDays+' dias · '+o.payments+' pagto'+(o.payments===1?'':'s')+' · recebido '+signUsd(o.fundingUsd)+' · projetado '+signUsd(o.projUsd||0)+' (já descontando taxas)</div></div>'}).join('')+'</div>'+(op.length>10?'<p class="note">+'+(op.length-10)+' em andamento.</p>':'');
   var dn=sc.done||[];
   if(dn.length)h+='<div class="eyebrow" style="margin:12px 0 6px">Avaliados</div><div class="stack" style="gap:6px">'+dn.slice(0,20).map(function(d){
-    return '<div class="trow"><div>'+(d.hit?'<span class="chip ok">acertou</span>':'<span class="chip bad">errou</span>')+' <b>'+esc(d.coin)+'</b> <span class="note">short '+esc(d.s)+', long '+esc(d.l)+' · alerta '+dt2(d.t)+'</span></div><div class="note">Projetado '+signUsd(d.projUsd||0)+' → realizado <strong class="'+(d.netUsd>=0?'good':'bad')+'">'+signUsd(d.netUsd)+'</strong> ('+d.payments+' pagamentos, recebido '+signUsd(d.fundingUsd)+', taxas '+usd(d.costsUsd)+')</div></div>'}).join('')+'</div>';
+    return '<div class="trow"><div>'+(d.hit?'<span class="chip ok">acertou</span>':'<span class="chip bad">errou</span>')+' <b>'+esc(d.coin)+'</b> <span class="note">short '+esc(d.s)+', long '+esc(d.l)+' · alerta '+dt2(d.t)+(d.ai!==null&&d.ai!==undefined?' · IA '+pctp(d.ai*100,0):'')+'</span></div><div class="note">Projetado '+signUsd(d.projUsd||0)+' → realizado <strong class="'+(d.netUsd>=0?'good':'bad')+'">'+signUsd(d.netUsd)+'</strong> ('+d.payments+' pagamentos, recebido '+signUsd(d.fundingUsd)+', taxas '+usd(d.costsUsd)+')</div></div>'}).join('')+'</div>';
   $('rb_score').innerHTML=h;
 }
 document.addEventListener('click',function(e){

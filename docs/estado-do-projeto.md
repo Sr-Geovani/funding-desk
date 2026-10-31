@@ -55,6 +55,11 @@ sempre identificado; nada de prometer previsão de sorte (Poisson é sem memóri
   (WhatToMine + livros da NiceHash) e simula pool PPS com orçamento igual por algoritmo (US$100/dia enquanto
   "Compensa"); PPS não tem sorte de bloco, então o resultado é o esperado. Margem > 100% é ignorada (dado suspeito).
 - Horários: cabeçalho com hora local e UTC; diário e log mostram as duas; dias das tabelas são UTC.
+- IA do funding em modo sombra: `scripts/train-funding-model.mjs` treina um modelo logístico (90 dias de funding pago de
+  Hyperliquid, OKX e Bitget; teste fora da amostra) e grava `worker/src/fundmodel.js` + `docs/modelo-funding.md`.
+  O servidor guarda o previsto de hora em hora (KV `fhist`, 72 h), dá nota aos pares (`fundai.js`) e roda o robô
+  "Regras + IA" ao lado do "Regras"; o placar registra a nota da IA em cada alerta. Retreinar: rodar o script e publicar.
+- Mineração: variante "rajada" (50 PH/s, para no bloco, método do vídeo) ao lado da contínua, mesmos blocos e sorteio.
 - Ciclo do servidor: 3 min. Mínimo do Cloudflare é 1 min, mas o KV grátis aceita 1.000 gravações/dia e propaga em até
   60 s; abaixo de 3 min exige plano pago + Durable Objects. Atraso de 3 min custa < US$1 com 10 PH/s.
 

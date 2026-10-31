@@ -12,6 +12,8 @@ import { fundPaperStep, fundPaperSummary, alertScoreStep, alertScoreSummary } fr
 import FD from '../../core.js';
 import FDR from '../../radar.js';
 import { algoPaperStep } from './paperalgo.js';
+import { FUND_MODEL } from './fundmodel.js';
+import { updateHistory, pickCoins, scorePairs } from './fundai.js';
 import { withCreds, reloadCreds, saveCreds, credStatus, parseNiceHash, TG_TOKEN_RE, chatFromUpdates } from './creds.js';
 
 export const VERSION = '1.0.0';
@@ -151,6 +153,10 @@ export async function tick(env, opts = {}) {
     paper = ps.paper;
     for (const e of ps.events) log.push({ t: now, kind: 'simulado', text: e });
   } else if (paper) paper.lastTs = now; // fora do Observar a simulação fica parada
+  // Variante "rajada" (método do vídeo): 50 PH/s, para no bloco; mesmos blocos reais, mesmo sorteio, mesmos limites.
+  let paperBurst = state.paperBurst || null;
+  if (cfg.mode === 'observe') paperBurst = paperStep(paperBurst, { cfg: Object.assign({}, cfg, { targetPh: 50, onBlock: 'cancel' }), mkt, now, units, limits, blocks: newBlocks }).paper;
+  else if (paperBurst) paperBurst.lastTs = now;
   const real = realStep(state.real, { orders, managedIds: cfg.managed, blockEvent, now,
     btcUsd: mkt.btcUsd || (prices.ok ? prices.v.btcUsd : 0), bchUsd: mkt.bchUsd || (prices.ok ? prices.v.bchUsd : 0) });
 
@@ -197,6 +203,22 @@ export async function tick(env, opts = {}) {
     fundPaper = fp.pf;
     for (const e of fp.events) log.push({ t: now, kind: 'simulado', text: e });
   }
+  // IA (modo sombra): histórico horário próprio + nota dos pares; robô "Regras + IA" ao lado do "Regras".
+  let aiScores = state.aiScores || {}, fundPaperAI = state.fundPaperAI || null, fhistHour = state.fhistHour;
+  if (funding && FUND_MODEL) {
+    const hour = Math.floor(now / 3600e3);
+    if (hour !== fhistHour) {
+      const extra = (funding.best || []).map((b) => b.coin).concat(((fundPaper && fundPaper.open) || []).map((o) => o.coin), ((fundPaperAI && fundPaperAI.open) || []).map((o) => o.coin));
+      const fh = updateHistory(await kvGet(env, 'fhist', null), { rows: funding.rows, selected: pickCoins(funding.rows, extra), hour });
+      await kvPut(env, 'fhist', fh);
+      aiScores = scorePairs(fh, { model: FUND_MODEL, fees: FD.DEFAULT_FEES });
+      fhistHour = hour;
+    }
+    const okBest = (funding.best || []).filter((b) => aiScores[b.key] && aiScores[b.key].p >= FUND_MODEL.threshold);
+    const fa = fundPaperStep(fundPaperAI, { rows: funding.rows, best: okBest, now, fees: FD.DEFAULT_FEES, label: 'IA' });
+    fundPaperAI = fa.pf;
+    for (const e of fa.events) log.push({ t: now, kind: 'simulado', text: e });
+  }
   if (cfg.alerts !== false) {
     const ra = runAlerts({ state, funding, edges: mkt.ok ? { BCH: mkt.edgeAtBidPct } : {}, now, minEdgePct: cfg.minEdgePct });
     newAlerts = ra.alerts; alertState = ra.state;
@@ -234,12 +256,12 @@ export async function tick(env, opts = {}) {
   // Placar: cada alerta de entrada de funding vira uma posição hipotética acompanhada pelo prazo projetado.
   const byKey = {}; for (const b of (funding && funding.best) || []) byKey[b.key] = b;
   const entries = newAlerts.filter((a) => a.area === 'funding' && a.kind === 'entrada' && /^fe:/.test(a.key || '')).map((a) => {
-    const b = byKey[a.key.slice(3)]; return b ? { key: b.key, coin: b.coin, s: b.s, l: b.l, projUsd: b.netUsd } : null;
+    const b = byKey[a.key.slice(3)]; return b ? { key: b.key, coin: b.coin, s: b.s, l: b.l, projUsd: b.netUsd, ai: aiScores[b.key] ? aiScores[b.key].p : null } : null;
   }).filter(Boolean);
   const alertScore = alertScoreStep(state.alertScore, { rows: funding && funding.rows, entries, now, fees: FD.DEFAULT_FEES, holdDays: cfg.alertHold || 3 });
 
   const next = Object.assign({}, dec.state, alertState, {
-    lastTick: now, paper, real, fundPaper, alertScore, algoPaper, algoTs, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig,
+    lastTick: now, paper, paperBurst, real, fundPaper, alertScore, algoPaper, algoTs, aiScores, fundPaperAI, fhistHour, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig,
     market: mkt.ok ? { breakEvenEH: mkt.breakEvenEH, capEH: mkt.capEH, fillEH: mkt.fillEH, medianEH: mkt.medianEH, bidEH: mkt.bidEH,
       edgeAtBidPct: mkt.edgeAtBidPct, green: mkt.green, D: mkt.D, bchUsd: mkt.bchUsd, btcUsd: mkt.btcUsd, costPerBlockUsd: mkt.costPerBlockUsd,
       hashpriceNet: mkt.hashpriceNet, blockNetUsd: mkt.blockNetUsd, phDaysPerBlock: mkt.phDaysPerBlock, market: mkt.market } : { ok: false, reason: mkt.reason },
@@ -349,10 +371,13 @@ async function api(req, env, url, fetchFn) {
       telegram: !!(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID), creds: credStatus(env), limits, config: cfg,
       state: { lastTick: state.lastTick, lastHeight: state.lastHeight, market: state.market, myBlocks: state.myBlocks || [], dailyUsd: state.dailyUsd || 0,
         errors: state.errors || [], edgeHist: state.edgeHist || [], alerts: (state.alerts || []).slice(-30).reverse(),
-        paper: state.paper || null, real: state.real ? Object.assign({}, state.real, { paid: undefined }) : null,
+        paper: state.paper || null, paperBurst: state.paperBurst || null, real: state.real ? Object.assign({}, state.real, { paid: undefined }) : null,
         fundPaper: state.fundPaper ? { summary: fundPaperSummary(state.fundPaper), open: state.fundPaper.open, closed: state.fundPaper.closed.slice(-100).reverse() } : null,
         algoPaper: state.algoPaper || null,
-        alertScore: state.alertScore ? { summary: alertScoreSummary(state.alertScore), open: state.alertScore.open.map((o) => Object.assign({}, o, { legs: undefined })), done: state.alertScore.done.slice(-100).reverse() } : null } });
+        fundPaperAI: state.fundPaperAI ? { summary: fundPaperSummary(state.fundPaperAI), open: state.fundPaperAI.open, closed: state.fundPaperAI.closed.slice(-100).reverse() } : null,
+        aiScores: state.aiScores || {},
+        model: FUND_MODEL ? { threshold: FUND_MODEL.threshold, report: FUND_MODEL.report } : null,
+        alertScore: state.alertScore ? { summary: alertScoreSummary(state.alertScore, FUND_MODEL ? FUND_MODEL.threshold : 0.5), open: state.alertScore.open.map((o) => Object.assign({}, o, { legs: undefined })), done: state.alertScore.done.slice(-100).reverse() } : null } });
   }
   if (p === '/config' && m === 'PUT') {
     const { config, errors } = sanitizeConfig(body, await getConfig(env), limits);
@@ -365,8 +390,9 @@ async function api(req, env, url, fetchFn) {
   if (p === '/tick' && m === 'POST') return json(await tick(env, { fetchFn }));
   if (p === '/paper/reset' && m === 'POST') {
     const st = await kvGet(env, 'state', {});
-    if (body.what === 'funding') st.fundPaper = null; else if (body.what === 'algos') { st.algoPaper = null; st.algoTs = 0; }
-    else if (body.what === 'all') { st.paper = null; st.fundPaper = null; st.algoPaper = null; st.algoTs = 0; } else st.paper = null;
+    if (body.what === 'funding') { st.fundPaper = null; st.fundPaperAI = null; }
+    else if (body.what === 'mining') { st.paper = null; st.paperBurst = null; } else if (body.what === 'algos') { st.algoPaper = null; st.algoTs = 0; }
+    else if (body.what === 'all') { st.paper = null; st.paperBurst = null; st.fundPaper = null; st.fundPaperAI = null; st.algoPaper = null; st.algoTs = 0; } else st.paper = null;
     await kvPut(env, 'state', st);
     await appendLog(env, [{ t: Date.now(), kind: 'config', text: 'simulação reiniciada (' + ({ funding: 'funding', algos: 'outras moedas', all: 'tudo' }[body.what] || 'mineração') + ')' }]);
     return json({ ok: true });
