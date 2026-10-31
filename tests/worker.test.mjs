@@ -783,3 +783,9 @@ test('integração: busca blocos anteriores ao registro (só dados da blockchain
     assert.ok(b[1].dt !== null, 'intervalo calculado com o vizinho');
   } finally { t.server.close(); }
 });
+
+test('blocos: nomes de pool agrupados mesmo com assinatura suja', () => {
+  assert.equal(poolOf('/JCBCH/Z').pool, 'JCBCH'); assert.equal(poolOf('LXBG LSoftware DMCC 9810').pool, 'LSoftware DMCC');
+  assert.equal(poolOf('/luckyfastblocks/').pool, 'luckyfastblocks'); assert.equal(poolOf('000d5fce KardanPool').pool, 'KardanPool');
+  assert.equal(poolOf('themule.online').pool, 'themule.online'); assert.deepEqual(poolOf(''), { pool: 'desconhecido', solo: false });
+});

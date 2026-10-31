@@ -9,11 +9,17 @@ const POOLS = [
   [/viabtc/i, 'ViaBTC', false], [/antpool/i, 'AntPool', false], [/f2pool/i, 'F2Pool', false], [/mining-dutch/i, 'Mining-Dutch', false],
   [/btc\.com/i, 'BTC.com', false], [/binance/i, 'Binance Pool', false], [/poolin/i, 'Poolin', false], [/foundry/i, 'Foundry', false],
   [/kryptex/i, 'Kryptex', false], [/zergpool/i, 'Zergpool', false], [/prohashing/i, 'Prohashing', false], [/emcd/i, 'EMCD', false],
-  [/bitdeer/i, 'Bitdeer', false], [/solo/i, 'Solo (outro)', true]
+  [/bitdeer/i, 'Bitdeer', false], [/jcbch/i, 'JCBCH', false], [/lsoftware/i, 'LSoftware DMCC', false], [/harshy/i, "Harshy's Pool", false],
+  [/kardan/i, 'KardanPool', false], [/k1pool/i, 'K1Pool', false], [/solo/i, 'Solo (outro)', true]
 ];
 export function poolOf(tag) {
   for (const [re, name, solo] of POOLS) if (re.test(tag || '')) return { pool: name, solo };
-  return { pool: tag ? tag.slice(0, 24) : 'desconhecido', solo: false };
+  if (!tag) return { pool: 'desconhecido', solo: false };
+  // assinatura desconhecida: o nome entre barras (/nome/) ou as primeiras palavras com letras
+  const m = /\/([^/]{3,30})\//.exec(tag);
+  if (m) return { pool: m[1].trim(), solo: false };
+  const words = []; for (const w of tag.split(/\s+/)) { if (!/[A-Za-z]{3,}/.test(w) || /^[0-9a-f]{6,}$/i.test(w)) { if (words.length) break; continue; } words.push(w); }
+  return { pool: (words.join(' ') || tag).slice(0, 24), solo: false };
 }
 
 // b: bloco do REST (com outs, size, txs, tag); ctx: mercado e simulação naquele ciclo.

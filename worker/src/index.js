@@ -14,7 +14,7 @@ import FDR from '../../radar.js';
 import { algoPaperStep } from './paperalgo.js';
 import { FUND_MODEL } from './fundmodel.js';
 import { updateHistory, pickCoins, scorePairs } from './fundai.js';
-import { blockRecord, blockSummary } from './blocks.js';
+import { blockRecord, blockSummary, poolOf } from './blocks.js';
 import { withCreds, reloadCreds, saveCreds, credStatus, parseNiceHash, TG_TOKEN_RE, chatFromUpdates } from './creds.js';
 
 export const VERSION = '1.0.0';
@@ -426,7 +426,7 @@ async function api(req, env, url, fetchFn) {
   }
   if (p === '/blocks' && m === 'GET') {
     const st = await kvGet(env, 'state', {});
-    const list = (await kvGet(env, 'blocks', [])).concat(st.blockBuf || []);
+    const list = (await kvGet(env, 'blocks', [])).concat(st.blockBuf || []).map((b) => Object.assign(b, poolOf(b.tag))); // nomes sempre com a regra atual
     return json({ blocks: list.slice(-300).reverse(), summary: blockSummary(list) });
   }
   if (p === '/paper/reset' && m === 'POST') {
