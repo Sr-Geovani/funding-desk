@@ -53,10 +53,9 @@ export function paperStep(paper, { cfg, mkt, now, units, limits }) {
   const want = !!(mkt && mkt.ok && mkt.green && !dailyHit);
   if (want) {
     if (!p.sess) { p.sess = { start: now, spendUsd: 0, lambda: 0 }; p.sessions++; }
-    if (!p.on) {
-      events.push(`Simulação: compraria ${target} PH/s a ${mkt.bidEH.toFixed(4)} BTC/EH/dia (margem ${mkt.edgeAtBidPct.toFixed(1)}%)`);
-      p.run = { start: now, ph: target, priceEH: mkt.bidEH, edgePct: mkt.edgeAtBidPct, spendUsd: 0, evUsd: 0, lambda: 0, hours: 0 };
-    }
+    if (!p.on) events.push(`Simulação: compraria ${target} PH/s a ${mkt.bidEH.toFixed(4)} BTC/EH/dia (margem ${mkt.edgeAtBidPct.toFixed(1)}%)`);
+    // !p.run com p.on: simulação criada antes do diário de operações; a operação passa a contar daqui
+    if (!p.on || !p.run) p.run = { start: now, ph: target, priceEH: mkt.bidEH, edgePct: mkt.edgeAtBidPct, spendUsd: 0, evUsd: 0, lambda: 0, hours: 0 };
     Object.assign(p, { on: true, ph: target, priceEH: mkt.bidEH, D: mkt.D, btcUsd: mkt.btcUsd, blockNetUsd: mkt.blockNetUsd });
   } else {
     if (p.on) {

@@ -559,3 +559,10 @@ test('mineração simulada: cada "compraria → pausaria" vira uma operação co
   assert.ok(r.paper.runs.some((x) => /stop-loss/.test(x.reason)));
   assert.ok(r.paper.run && r.paper.on, 'nova operação aberta');
 });
+
+test('mineração simulada: simulação antiga (sem diário) abre a operação no próximo ciclo', () => {
+  const T0 = Date.UTC(2026, 9, 31, 12);
+  const old = { since: T0 - 3600e3, lastTs: T0 - 180e3, on: true, ph: 10, priceEH: 0.4, D: 500e9, btcUsd: 77000, blockNetUsd: 900, spendUsd: 5, evUsd: 5.2, lambda: 0.01, hoursOn: 1, sessions: 1, stops: 0, sess: { start: T0 - 3600e3, spendUsd: 5, lambda: 0.01 }, days: {} };
+  const r = paperStep(old, { cfg: PCFG, mkt: pm(), now: T0, units: PU, limits: PL });
+  assert.deepEqual(r.events, []); assert.equal(r.paper.run.start, T0); assert.deepEqual(r.paper.runs, []);
+});
