@@ -73,6 +73,7 @@ servem para validar a conexão; a criação de ordens fica validada pelos testes
 | Painel diz "token inválido" | Token do aparelho diferente do `PANEL_TOKEN` do backend: abra o link de novo |
 | Painel diz "origem não permitida" | Painel aberto fora de `https://sr-geovani.github.io` (ajuste `ALLOWED_ORIGIN`) |
 | "A NiceHash não aceitou as chaves" | Chave não confirmada pelo e-mail, campos trocados, ou sem permissão de ver saldo |
+| Criar chave de API pede senha (conta entra pelo Google) | Saia e use "Esqueci a senha" com o mesmo e-mail para criar uma. Pela página de limites de segurança da NiceHash, isso trava chaves de API, saque para endereço novo e ordem para pool novo por 3 dias (72 h sem 2FA). Ligar a verificação em duas etapas trava 24 h; faça os dois juntos |
 | test.nicehash.com pede senha | É outro site, sem login pelo Google: use a conta real em Observar (recomendado) ou crie conta de teste com e-mail e senha |
 | Telegram: "falta mandar oi" | Mande qualquer mensagem para o seu bot e toque em Conectar de novo |
 | "Falta a chave de cifra (ENC_KEY)" | Backend publicado antes desta versão: rode o script ou o workflow de novo |
