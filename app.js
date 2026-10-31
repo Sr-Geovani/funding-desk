@@ -574,13 +574,11 @@ function renderMine(){
     :'<p class="note">Livro indisponível ('+(mine.err.book||'carregando')+'). Digite o preço em Planejar.</p>';
   renderNet(L);renderPlan();
 }
+// Indicador para leigos: valor + seta colorida + dica de quando é bom.
+function kvJ(label,value,tone,word,hint){return '<div><small>'+label+'</small><span>'+value+'</span>'+(word?'<span class="tone '+(tone||'neutral')+'">'+word+'</span>':'')+(hint?'<em class="hint">'+hint+'</em>':'')+'</div>'}
 function renderNet(L){
   var st=L.st;
-  $('n_kv').innerHTML=st?[
-    ['Altura',nf(st.last.height)],['Último bloco','<span data-ago="'+st.last.time+'">'+ago(st.last.time)+'</span>'],['Média 10 blocos',st.avg10.toFixed(1)+' min'],
-    ['Média '+st.n+' blocos',st.avgAll.toFixed(1)+' min'],['Dificuldade',nf(st.difficulty/1e9,2)+' G'],['vs média',pct(st.diffVsAvgPct,1)],
-    ['Taxas por bloco',usd(st.feesAvgUsd)],['Blocos 24h',mine.stats?mine.stats.blocks_24h:'—'],['Fonte','Blockchair']
-  ].map(function(x){return '<div><small>'+x[0]+'</small><span>'+x[1]+'</span></div>'}).join(''):'<div class="note">'+(mine.err.blocks?'Sem dados da rede ('+mine.err.blocks+').':'Carregando…')+'</div>';
+  renderNetCard(L);
   if(mine.blocks.length>1){
     var pts=mine.blocks.slice().reverse().map(function(b){return {t:b.time,v:b.difficulty/1e9}});
     $('n_chart').innerHTML=chartSVG(pts,NaN,function(v){return nf(v,1)+' G'},function(t){return t.toFixed(0)})+'<div class="tip" hidden></div>';
@@ -896,17 +894,34 @@ function renderAI(){
     '<details style="margin-top:6px"><summary>Como a IA aprende e ganha XP</summary><p class="note" style="margin:6px 0 0">A cada 3 min o servidor junta todos os sinais (DARR, margem, reajuste do BTC, BCH contra o BTC, blocos chegando, funding com 24 h estável e meia-vida, outras moedas) e transforma cada sinal numa previsão com prazo. Quando o prazo vence, ele confere com os dados reais: acerto vale até 15 XP (mais confiança, mais XP); erro vale 1. Não precisa que você execute: conta se a dica era boa. A confiança de cada tipo de previsão vem do histórico de acertos dele; tipos com 20+ conferidas e 60%+ de acerto viram "confiáveis" e as sugestões deles ficam mais assertivas. Níveis: Aprendiz → Analista (30 conferidas) → Estrategista (100, acerto ≥ 55%) → Mestre (300, acerto ≥ 60%).'+(nx?' Próximo nível: '+esc(nx.name)+' ('+A.resolved+' de '+nx.min+' conferidas'+(nx.hit?', acerto ≥ '+pctp(nx.hit*100,0):'')+').':'')+'</p></details>';
   card.innerHTML=h;
 }
-// Próximo bloco: tempo desde o último, média, mempool, dificuldade exata do próximo (ASERT). Sem "previsão de quando sai".
-function renderNext(){
-  var el=$('bl_next');if(!el)return;
-  var st=ops.status&&ops.status.state;if(!st||!st.lastBlockT){el.innerHTML='<h2>Próximo bloco</h2><p class="note">'+(settings.apiUrl?'Aguardando o servidor ver o próximo bloco.':'Precisa do backend conectado.')+'</p>';return}
-  var el2=Date.now()-st.lastBlockT,mp=st.mempool,D=(st.market||{}).D,avg=blk.sum&&blk.sum.dt?blk.sum.dt*1000:600e3;
-  var dNext=D?D*Math.pow(2,(600-el2/1000)/172800):null;
-  el.innerHTML='<div class="row between"><h2 style="margin:0">Próximo bloco</h2><span class="chip'+(el2>1800e3?' warn':'')+'">#'+((st.lastHeight||0)+1)+'</span></div>'+
-    '<div class="kv" style="margin-top:8px"><div><small>Desde o último</small><span>'+(el2<60e3?'<1 min':FDI.dur(el2))+'</span></div><div><small>Média recente</small><span>'+FDI.dur(avg)+'</span></div><div><small>Pendentes</small><span>'+(mp?mp.tx+' tx · '+nf(mp.bytes/1000,1)+' KB':'—')+'</span></div>'+
-    '<div><small>Dificuldade do próximo</small><span>'+(dNext?nf(dNext/1e9,2)+' G':'—')+'</span></div><div><small>Hash da rede</small><span>'+(D?nf(D*4294967296/600/1e18,2)+' EH/s':'—')+'</span></div><div><small>Blocos solo (registro)</small><span>'+(blk.sum&&blk.sum.n?Math.round(blk.sum.solo.n/blk.sum.n*100)+'%':'—')+'</span></div></div>'+
-    '<p class="note" style="margin:8px 0 0">"Atrasado" não existe: o próximo bloco não fica mais provável com o tempo (sorteio sem memória). O que muda é a dificuldade: no BCH ela cai devagar quando os blocos atrasam (−0,48% depois de 30 min).</p>';
+// Cartão único da rede: usa o bloco mais recente entre a Blockchair (painel) e o servidor, e julga cada número.
+function renderNetCard(L){
+  var el=$('n_kv');if(!el)return;
+  L=L||live();var st=L.st,sv=ops.status&&ops.status.state;
+  if(!st&&!(sv&&sv.lastBlockT)){el.innerHTML='<div class="note">'+(mine.err.blocks?'Sem dados da rede ('+mine.err.blocks+').':'Carregando…')+'</div>';return}
+  var h=st?st.last.height:0,t=st?st.last.time:0;
+  if(sv&&sv.lastHeight&&sv.lastHeight>h){h=sv.lastHeight;t=sv.lastBlockT||t}
+  var since=Date.now()-t,D=st?st.difficulty:(sv.market||{}).D,vs=st?st.diffVsAvgPct:null,mp=sv&&sv.mempool,b24=mine.stats?mine.stats.blocks_24h:null;
+  var dNext=D?D*Math.pow(2,(600-since/1000)/172800):null;
+  var avgJ=function(m,lo,hi){return m>hi?['good','↓ blocos lentos: dificuldade cai (bom)']:m<lo?['bad','↑ blocos rápidos: hash chegando (ruim)']:['neutral','→ normal (perto de 10 min)']};
+  var a10=st?avgJ(st.avg10,8,12):null,a25=st?avgJ(st.avgAll,9,11):null;
+  var dJ=vs===null?null:(vs<=-1?['good','↓ mais fácil que a média (bom)']:vs>=1?['bad','↑ mais difícil que a média (ruim)']:['neutral','→ na média']);
+  var bJ=b24===null?null:(b24<138?['good','↓ menos blocos: hash saiu do BCH (bom)']:b24>150?['bad','↑ mais blocos: hash chegou (ruim)']:['neutral','→ normal (144 por dia)']);
+  el.innerHTML=[
+    kvJ('Último bloco','#'+nf(h)+' · há <span data-ago="'+t+'">'+ago(t)+'</span>','neutral',since>1800e3?'→ demorando (sorte)':'→ sorte','tempo entre blocos é sorteio: de 1 a 30 min é normal'),
+    kvJ('Próximo bloco','#'+nf(h+1),'',null,'dificuldade dele: '+(dNext?nf(dNext/1e9,2)+' G':'—')),
+    kvJ('Média 10 blocos',st?st.avg10.toFixed(1).replace('.',',')+' min':'—',a10&&a10[0],a10&&a10[1],'ideal: acima de 10 min'),
+    kvJ('Média '+(st?st.n:25)+' blocos',st?st.avgAll.toFixed(1).replace('.',',')+' min':'—',a25&&a25[0],a25&&a25[1],'mais confiável que a de 10'),
+    kvJ('Dificuldade',D?nf(D/1e9,2)+' G':'—',dJ&&dJ[0],dJ&&(dJ[1]+(vs!==null?' '+pct(vs,1):'')),'menor é melhor: cada hash vale mais'),
+    kvJ('Hash da rede',D?nf(D*4294967296/600/1e18,2)+' EH/s':'—',dJ&&dJ[0],dJ&&(dJ[0]==='good'?'↓ menos concorrência':dJ[0]==='bad'?'↑ mais concorrência':'→ estável'),'potência total disputando cada bloco'),
+    kvJ('Blocos em 24 h',b24===null?'—':b24,bJ&&bJ[0],bJ&&bJ[1],'esperado: 144'),
+    kvJ('Pendentes',mp?mp.tx+' tx · '+nf(mp.bytes/1000,1)+' KB':'—','neutral','→ pouco efeito','mais transações, taxas um pouco maiores'),
+    kvJ('Taxas por bloco',st?usd(st.feesAvgUsd):'—','neutral','→ pouco efeito','irrelevante perto dos 3,125 BCH do bloco')
+  ].join('');
+  $('n_note').textContent='Fontes: Blockchair (blocos e médias) e o seu servidor (mempool e blocos ao vivo); vale o bloco mais recente das duas.';
 }
+// Próximo bloco: tempo desde o último, média, mempool, dificuldade exata do próximo (ASERT). Sem "previsão de quando sai".
+function renderNext(){renderNetCard()}
 /* ---------- janela do BCH: DARR e sinais além da sorte (docs/pesquisa-mineracao.md) ---------- */
 function renderWindow(){
   var el=$('m_window');if(!el)return;
@@ -916,7 +931,16 @@ function renderWindow(){
   var lvl=green?'favoravel':(d>=1?'neutro':'desfavoravel');el.className='card sig '+lvl;
   var title=green?'Janela aberta: o aluguel está abaixo do que o BCH paga':(d>=1?'Perto: o BCH paga mais que o BTC, mas a margem ainda não passou do seu mínimo':'Janela fechada: o BCH está pagando menos que o BTC');
   var rows=[];
-  rows.push('<div class="kv" style="margin-top:8px"><div><small>BCH paga (BTC/EH/dia)</small><span>'+D.hpBch.toFixed(4)+'</span></div><div><small>BTC paga</small><span>'+D.hpBtc.toFixed(4)+'</span></div><div><small>NiceHash cobra (lance)</small><span>'+(m.bidEH?m.bidEH.toFixed(4):'—')+(D.nhRatio?' <span class="note">('+nf(D.nhRatio,3)+'× o BTC)</span>':'')+'</span></div></div>');
+  var pf=(cfg.poolFeePct||2)/100,rf=(cfg.rentFeePct||3)/100,maxNH=D.hpBch*(1-pf)/(1+rf);
+  var dT=d>=1.05?['good','↑ BCH paga mais (bom)']:d>=1?['warn','→ quase: taxas comem a vantagem']:['bad','↓ BCH paga menos (ruim)'];
+  var eT=!isFinite(m.edgeAtBidPct)?null:(m.edgeAtBidPct>=(cfg.minEdgePct||3)?['good','↑ acima do seu mínimo (bom)']:m.edgeAtBidPct>=0?['warn','→ positiva, abaixo do mínimo']:['bad','↓ prejuízo médio (ruim)']);
+  rows.push('<div class="kv judged" style="margin-top:8px">'+
+    kvJ('DARR',nf(d,3),dT[0],dT[1],'bom acima de 1,05 (paga as taxas)')+
+    kvJ('Margem no lance',isFinite(m.edgeAtBidPct)?pct(m.edgeAtBidPct,1):'—',eT&&eT[0],eT&&eT[1],'o robô compra acima de '+nf(cfg.minEdgePct||3,1)+'%')+
+    kvJ('NiceHash cobra',m.bidEH?m.bidEH.toFixed(4):'—',m.bidEH?(m.bidEH<=maxNH?'good':'bad'):'',m.bidEH?(m.bidEH<=maxNH?'↓ abaixo do máximo (bom)':'↑ acima do máximo (ruim)'):null,'máximo que compensa: '+maxNH.toFixed(4))+
+    kvJ('BCH paga',D.hpBch.toFixed(4),'',null,'BTC por EH/s por dia')+
+    kvJ('BTC paga',D.hpBtc.toFixed(4),'',null,'a NiceHash cobra perto disto')+
+    kvJ('Aluguel ÷ BTC',D.nhRatio?nf(D.nhRatio,3)+'×':'—','',null,'perto de 1: aluguel segue o BTC')+'</div>');
   if(R)rows.push('<div class="box" style="margin-top:8px"><b>Próximo reajuste do BTC</b>'+(R.at?'Por volta de '+new Date(R.at).toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'})+' ('+(R.remainingBlocks||0)+' blocos). ':'')+'Estimativa '+pct(R.changePct,1)+' na dificuldade do BTC → o DARR vai para ~<strong>'+nf(R.darrAfter,3)+'</strong>'+(R.changePct>0?' (o BCH fica relativamente mais vantajoso).':' (o BCH fica relativamente menos vantajoso).')+'</div>');
   if(M)rows.push('<div class="box" style="margin-top:8px"><b>BCH contra o BTC</b>Preço '+pct(M.vsEmaPct,1)+' em relação à média de 2 dias'+(M.ret24Pct!==null?'; '+pct(M.ret24Pct,1)+' em 24 h':'')+'. '+(M.vsEmaPct>2?'O preço subiu antes da dificuldade reagir: costuma abrir janela nas próximas horas.':(M.vsEmaPct<-2?'O preço caiu antes da dificuldade: a janela tende a piorar.':'Sem sinal forte.'))+'</div>');
   if(W&&W.last24h)rows.push('<div class="box" style="margin-top:8px"><b>A janela está fechando?</b>Blocos na última hora: <strong>'+W.last1h+'</strong> (esperado 6); últimas 6 h: '+W.last6h+' (esperado 36). Pools grandes que trocam de moeda: '+(W.bigShare6h!==null?pctp(W.bigShare6h*100,0):'—')+' dos blocos das últimas 6 h ('+(W.bigShare24h!==null?pctp(W.bigShare24h*100,0):'—')+' em 24 h). '+
@@ -1017,8 +1041,13 @@ function renderOps(){
   $('o_status').className='card sig '+lvl;
   $('o_status').innerHTML='<div class="row" style="justify-content:space-between"><h2 style="margin:0">Robô</h2><span class="chip '+MODE_CHIP[cfg.mode]+'">'+MODE_TXT[cfg.mode]+'</span></div>'+
     (m.bidEH?'<div class="row" style="margin-top:10px;align-items:baseline"><span class="huge '+(m.green?'good':m.edgeAtBidPct>=0?'warn':'bad')+'">'+pct(m.edgeAtBidPct,1)+'</span><span class="note">margem no lance (servidor)</span></div>'+
-    '<div class="kv" style="margin-top:8px"><div><small>Lance</small><span>'+m.bidEH.toFixed(4)+'</span></div><div><small>Teto</small><span>'+m.capEH.toFixed(4)+'</span></div><div><small>Empate</small><span>'+m.breakEvenEH.toFixed(4)+'</span></div>'+
-    '<div><small>Custo/bloco</small><span>'+usd(m.costPerBlockUsd)+'</span></div><div><small>Gasto hoje</small><span>'+usd(s.dailyUsd||0)+'</span></div><div><small>Blocos achados</small><span>'+(s.myBlocks||[]).length+'</span></div></div>'+
+    '<div class="kv judged" style="margin-top:8px">'+
+      kvJ('Lance',m.bidEH.toFixed(4),m.bidEH<=m.capEH?'good':'bad',m.bidEH<=m.capEH?'↓ abaixo do teto: compra':'↑ acima do teto: pausa','preço que o robô pagaria agora')+
+      kvJ('Teto',m.capEH.toFixed(4),'',null,'máximo aceito (empate − sua margem)')+
+      kvJ('Empate',m.breakEvenEH.toFixed(4),'',null,'acima disto, prejuízo médio')+
+      kvJ('Custo por bloco',usd(m.costPerBlockUsd),m.blockNetUsd&&m.costPerBlockUsd<m.blockNetUsd?'good':'bad',m.blockNetUsd?(m.costPerBlockUsd<m.blockNetUsd?'↓ abaixo do valor do bloco':'↑ acima do valor do bloco'):null,m.blockNetUsd?'bloco vale ~'+usd(m.blockNetUsd,0):'')+
+      kvJ('Gasto hoje',usd(s.dailyUsd||0),(s.dailyUsd||0)>=(cfg.dailyBudgetUsd||1e9)?'bad':(s.dailyUsd||0)>=0.8*(cfg.dailyBudgetUsd||1e9)?'warn':'neutral',(s.dailyUsd||0)>=(cfg.dailyBudgetUsd||1e9)?'limite do dia atingido':'→ dentro do limite','limite diário: '+usd(cfg.dailyBudgetUsd||0,0))+
+      kvJ('Blocos achados',(s.myBlocks||[]).length,'',null,'pagos no seu endereço')+'</div>'+
     robotExplain(m,cfg)
     :'<p class="note">'+esc(m.reason||'Sem ciclo ainda. Toque em Rodar ciclo agora.')+'</p>')+
     '<div class="legs" style="margin-top:6px">Último ciclo: '+(s.lastTick?'<b data-ago="'+s.lastTick+'">'+ago(s.lastTick)+'</b> atrás':'nunca')+(s.lastHeight?' · bloco BCH '+s.lastHeight:'')+'</div>'+
