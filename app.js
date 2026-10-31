@@ -689,6 +689,17 @@ function robotExplain(m,cfg){
     '<dt>Custo/bloco</dt><dd>Quanto se gasta em média, nesse lance, para achar um bloco. Compare com o valor do bloco.</dd>'+
     '<dt>Margem</dt><dd>Empate ÷ lance − 1. É o "desconto" sobre o preço justo; não é probabilidade.</dd></dl></details>';
 }
+// Resultado como seria de verdade: gasto contra os blocos que saíram no sorteio pelos blocos reais da rede.
+function simResultHTML(p){
+  if(!(p.spendUsd>0))return '<p class="note">Sem compras simuladas ainda.</p>';
+  var won=p.wonUsd||0,res=won-p.spendUsd,n=p.blocks||0,dr=p.draws||0,pr=p.ph&&p.D?p.ph*1e15/(p.D*4294967296/600+p.ph*1e15):null;
+  return '<div class="kv"><div><small>Gasto (aluguel)</small><span>'+usd(p.spendUsd)+'</span></div><div><small>Blocos que seriam seus</small><span>'+n+'</span></div><div><small>Resultado simulado</small><span class="'+(res>=0?'good':'bad')+'">'+signUsd(res)+'</span></div></div>'+
+    '<div class="box" style="margin-top:8px"><b>Entrou em algum bloco?</b>'+
+    (dr?'Enquanto o robô estaria comprando, a rede BCH achou <strong>'+dr+' bloco'+(dr>1?'s':'')+'</strong>. Cada um seria seu com '+(pr?'~'+pctp(pr*100,2):'uma pequena')+' de chance (sua potência ÷ a da rede). ':'A rede ainda não achou nenhum bloco enquanto o robô estaria comprando. ')+
+    (n?'<span class="good">'+(n===1?'Saiu 1':'Saíram '+n)+' para você: '+(p.wins||[]).slice(-5).reverse().map(function(w){return 'bloco '+w.height+' ('+usd(w.usd,0)+')'}).join(', ')+'.</span> ':(dr?'Nenhum saiu para você até agora, então o aluguel foi todo perdido. ':''))+
+    'O sorteio usa o hash de cada bloco real, que ninguém controla: o resultado não pode ser escolhido depois.</div>'+
+    '<details style="margin-top:8px"><summary>Chance e média de longo prazo</summary>'+outcomesHTML(p.spendUsd,p.evUsd,p.lambda,p.blockNetUsd)+'</details>';
+}
 // Desfechos honestos de um período de aluguel: sem bloco (o mais comum) perde o gasto; com bloco ganha o bloco menos o gasto.
 // A média de longo prazo (receita esperada − gasto) só aparece repetindo muitas vezes.
 function outcomesHTML(spend,ev,lam,blk){
@@ -712,9 +723,9 @@ function renderPaper(st){
   el.innerHTML=head+
     '<p class="note" style="margin:6px 0">Desde '+new Date(p.since).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})+'. '+
     (cfg.mode!=='observe'?'<b>Parada</b>: o robô não está em Observar.':(p.on?'Agora: <b class="good">compraria</b> '+nf(p.ph,0)+' PH/s a '+(+p.priceEH).toFixed(4)+'.':'Agora: <b>pausado</b> (aluguel acima do teto ou limite do dia).'))+'</p>'+
-    outcomesHTML(p.spendUsd,p.evUsd,p.lambda,p.blockNetUsd)+
+    simResultHTML(p)+
     '<div class="kv" style="margin-top:8px"><div><small>Tempo comprando</small><span>'+nf(p.hoursOn,1)+' h</span></div><div><small>Sessões</small><span>'+p.sessions+'</span></div><div><small>Stop-loss</small><span>'+p.stops+'</span></div></div>'+
-    dayRows(p.days,[['Dia'],['Horas',function(d){return nf(d.hoursOn,1)}],['Gasto',function(d){return usd(d.spendUsd)}],['Chance',function(d){return pctp((1-Math.exp(-d.lambda))*100,0)}],['Sem bloco',function(d){return '−'+usd(d.spendUsd)}]])+
+    dayRows(p.days,[['Dia'],['Horas',function(d){return nf(d.hoursOn,1)}],['Gasto',function(d){return usd(d.spendUsd)}],['Blocos',function(d){return (d.blocks||0)+' de '+(d.draws||0)}],['Resultado',function(d){return signUsd((d.wonUsd||0)-d.spendUsd)}]])+
     '<p class="note" style="margin:8px 0 0">Acerto do robô = só comprar abaixo do empate (média de longo prazo positiva) sem estourar os limites. O dinheiro de verdade depende de sorte: a simulação não inventa blocos, mostra os dois desfechos e a chance de cada um.</p>'+
     '<div class="row" style="margin-top:8px"><button class="sm pri" data-go="diary:robo">Ver operações simuladas</button><button class="sm" id="o_paper_reset">Reiniciar simulação</button></div>';
   var real=s.real,re=$('o_real');
@@ -741,7 +752,7 @@ function renderRobo(){
   $('rb_head').innerHTML='<div class="eyebrow">Robô simulado</div><div class="lead">O que o robô teria feito, operação por operação</div>'+
     '<p class="note" style="margin:4px 0 10px">Regras fixas, registradas na hora da decisão, sem olhar o futuro. Nenhum dinheiro usado. As regras estão no fim da página.</p>'+
     '<div class="kv"><div><small>Funding fechadas</small><span>'+(fs?fs.closed:0)+'</span></div><div><small>Acerto</small><span>'+(fs&&fs.closed?fs.wins+' de '+fs.closed:'—')+'</span></div><div><small>Funding (fechadas)</small><span class="'+(fs&&fs.netUsd<0?'bad':'good')+'">'+(fs?signUsd(fs.netUsd):'—')+'</span></div>'+
-    '<div><small>Mineração: gasto</small><span>'+(mp?usd(mSpend):'—')+'</span></div><div><small>Sem bloco (mais provável)</small><span class="bad">'+(mp&&mSpend>0?'−'+usd(mSpend):'—')+'</span></div><div><small>Chance de ≥1 bloco</small><span>'+(mp?pctp((1-Math.exp(-mLam))*100,1):'—')+'</span></div></div>';
+    '<div><small>Mineração: gasto</small><span>'+(mp?usd(mSpend):'—')+'</span></div><div><small>Blocos que seriam seus</small><span>'+(mp?(mp.blocks||0)+' de '+(mp.draws||0):'—')+'</span></div><div><small>Resultado simulado</small><span class="'+(mp&&(mp.wonUsd||0)-mSpend<0?'bad':'good')+'">'+(mp?signUsd((mp.wonUsd||0)-mSpend):'—')+'</span></div></div>';
   // funding
   var fh='<div class="row between"><h2 style="margin:0">Funding</h2>'+(fs?'<span class="note">desde '+dt2(fs.since)+'</span>':'')+'</div>';
   if(!fp)fh+='<p class="note">Começa no próximo ciclo do servidor (até 3 min).</p>';
@@ -762,14 +773,14 @@ function renderRobo(){
   var mh='<div class="row between"><h2 style="margin:0">Mineração (BCH solo)</h2>'+(mp?'<span class="note">desde '+dt2(mp.since)+'</span>':'')+'</div>';
   if(!mp)mh+='<p class="note">'+(st.config.mode==='observe'?'Começa no próximo ciclo (até 3 min).':'Só roda com o robô em Observar (Mineração → Operar).')+'</p>';
   else{
-    mh+=cur?'<div class="box" style="margin:10px 0 0"><b>Comprando agora (simulado)</b>Desde '+dt2(cur.start)+' ('+ago(cur.start)+'): '+nf(cur.ph,0)+' PH/s a '+cur.priceEH.toFixed(4)+' (margem '+pct(cur.edgePct,1)+'). Gasto até agora '+usd(cur.spendUsd)+': sem bloco, −'+usd(cur.spendUsd)+'; chance de bloco até agora '+pctp((1-Math.exp(-cur.lambda))*100,1)+'.</div>'
+    mh+=cur?'<div class="box" style="margin:10px 0 0"><b>Comprando agora (simulado)</b>Desde '+dt2(cur.start)+' ('+ago(cur.start)+'): '+nf(cur.ph,0)+' PH/s a '+cur.priceEH.toFixed(4)+' (margem '+pct(cur.edgePct,1)+'). Gasto até agora '+usd(cur.spendUsd)+'. Blocos da rede nesse tempo: '+(cur.draws||0)+'; seus: '+(cur.blocks||0)+'.</div>'
       :'<p class="note" style="margin:10px 0 0">Agora: pausado (aluguel acima do teto, limite do dia ou sem dados).</p>';
     var rs=runs.slice().reverse(),showm=roboAll.m?rs:rs.slice(0,15);
-    mh+='<div class="eyebrow" style="margin:12px 0 6px">Operações encerradas ('+rs.length+')</div>'+(rs.length?'<div class="stack" style="gap:6px">'+showm.map(function(r){var res=r.evUsd-r.spendUsd;
-      return '<div class="trow"><div><b>'+nf(r.ph,0)+' PH/s</b> <span class="note">a '+r.priceEH.toFixed(4)+' (margem '+pct(r.edgePct,1)+')</span></div><div class="note">'+dt2(r.start)+' → '+dt2(r.end)+' · '+FDI.dur(r.end-r.start)+' · gasto '+usd(r.spendUsd)+' · chance de bloco '+pctp((1-Math.exp(-r.lambda))*100,1)+' · sem bloco <strong class="bad">−'+usd(r.spendUsd)+'</strong> · média '+signUsd(res)+'</div><div class="note">Saída: '+esc(r.reason)+'</div></div>'}).join('')+'</div>'+
+    mh+='<div class="eyebrow" style="margin:12px 0 6px">Operações encerradas ('+rs.length+')</div>'+(rs.length?'<div class="stack" style="gap:6px">'+showm.map(function(r){
+      return '<div class="trow"><div><b>'+nf(r.ph,0)+' PH/s</b> <span class="note">a '+r.priceEH.toFixed(4)+' (margem '+pct(r.edgePct,1)+')</span></div><div class="note">'+dt2(r.start)+' → '+dt2(r.end)+' · '+FDI.dur(r.end-r.start)+' · gasto '+usd(r.spendUsd)+' · blocos da rede '+(r.draws||0)+', seus '+(r.blocks||0)+' → <strong class="'+(((r.wonUsd||0)-r.spendUsd)>=0?'good':'bad')+'">'+signUsd((r.wonUsd||0)-r.spendUsd)+'</strong></div><div class="note">Saída: '+esc(r.reason)+'</div></div>'}).join('')+'</div>'+
       (rs.length>15?'<div style="margin-top:6px"><button class="sm" data-roboall="m">'+(roboAll.m?'Mostrar menos':'Ver todas ('+rs.length+')')+'</button></div>':'')
       :'<p class="note" style="margin:0">Nenhuma encerrada ainda.</p>');
-    mh+=outcomesHTML(mSpend,mEv,mLam,mp.blockNetUsd);
+    mh+=simResultHTML(mp);
   }
   mh+='<div class="row" style="margin-top:8px"><button class="sm" data-roboreset="funding">Reiniciar funding</button><button class="sm" data-roboreset="mining">Reiniciar mineração</button></div>';
   $('rb_mine').innerHTML=mh;

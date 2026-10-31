@@ -109,12 +109,14 @@ export async function tick(env, opts = {}) {
 
   // Blocos novos: confere se a recompensa caiu no endereço configurado.
   let blockEvent = null;
+  const newBlocks = []; // blocos novos da rede (para o sorteio da simulação)
   if (info.ok) {
     if (state.lastHeight == null || info.v.height - state.lastHeight > 50) state.lastHeight = info.v.height;
     const upto = Math.min(info.v.height, state.lastHeight + 5);
     for (let h = state.lastHeight + 1; h <= upto; h++) {
       const cb = await settle(chain.coinbase(h));
       if (!cb.ok) { errors.push('coinbase ' + h + ': ' + cb.e); break; }
+      newBlocks.push({ height: h, hash: cb.v.hash, difficulty: cb.v.difficulty, time: cb.v.time });
       const total = cb.v.outs.reduce((s, o) => s + o.value, 0);
       state.feesBch = state.feesBch == null ? Math.max(0, total - 3.125) : state.feesBch * 0.9 + Math.max(0, total - 3.125) * 0.1;
       const mine = cfg.payoutAddress ? paidTo(cb.v, cfg.payoutAddress) : 0;
@@ -143,7 +145,7 @@ export async function tick(env, opts = {}) {
   // Simulação (só no modo Observar) e resultado real (ordens gerenciadas + blocos).
   let paper = state.paper || null;
   if (cfg.mode === 'observe') {
-    const ps = paperStep(paper, { cfg, mkt, now, units, limits });
+    const ps = paperStep(paper, { cfg, mkt, now, units, limits, blocks: newBlocks });
     paper = ps.paper;
     for (const e of ps.events) log.push({ t: now, kind: 'simulado', text: e });
   } else if (paper) paper.lastTs = now; // fora do Observar a simulação fica parada

@@ -516,7 +516,8 @@ details.card>summary{color:var(--fg);font-size:15px}
         <ul class="note" style="margin:0;padding-left:18px">
           <li>Entra ("compraria") quando o lance fica abaixo do teto (empate − margem mínima); sai ("pausaria") quando passa do teto ou bate o limite do dia. Stop-loss da sessão encerra a operação.</li>
           <li>Gasto: potência alvo × lance × tempo + taxa da NiceHash. Receita média: blocos esperados × valor do bloco (sem taxa do pool).</li>
-          <li>Não sorteia blocos: com aluguel de hash o resultado real depende de sorte; a tela mostra a média e a chance de ter achado bloco.</li>
+          <li>Achou bloco? Cada bloco real da rede BCH achado enquanto o robô estaria comprando seria seu com chance = sua potência ÷ (potência da rede + a sua). O número sorteado vem do hash do próprio bloco, que ninguém controla: o resultado não pode ser escolhido depois. Com bloco, a operação encerra (como o robô real) e reabre se o mercado seguir favorável.</li>
+          <li>Pausa e volta: acima do teto, o robô real baixa a ordem para a potência mínima e desce o preço aos poucos; quando o preço volta para baixo do teto, sobe de novo para a potência alvo na mesma ordem. Na simulação isso aparece como uma operação que termina ("pausaria") e outra que começa ("compraria").</li>
         </ul>
       </details>
     </div>

@@ -595,3 +595,38 @@ test('integração: alerta de entrada de funding entra no placar', async () => {
     assert.equal(sc.open[0].legs, undefined);
   } finally { t.server.close(); }
 });
+
+test('mineração simulada: sorteio honesto pelos blocos reais da rede (hash do bloco)', () => {
+  const T0 = Date.UTC(2026, 9, 31, 12), D = 500e9;
+  const prob = 10e15 / (D * 4294967296 / 600 + 10e15);
+  let r = paperStep(null, { cfg: PCFG, mkt: pm({ D }), now: T0, units: PU, limits: PL, blocks: [{ height: 1, hash: 'ab00000000', difficulty: D }] });
+  assert.equal(r.paper.draws || 0, 0, 'antes de comprar não sorteia');
+  r = paperStep(r.paper, { cfg: PCFG, mkt: pm({ D }), now: T0 + 180e3, units: PU, limits: PL, blocks: [{ height: 2, hash: '00ffffffff', difficulty: D }] });
+  assert.equal(r.paper.draws, 1); assert.equal(r.paper.blocks || 0, 0, 'número sorteado alto: não é seu');
+  r = paperStep(r.paper, { cfg: PCFG, mkt: pm({ D }), now: T0 + 360e3, units: PU, limits: PL, blocks: [{ height: 3, hash: '0000000000', difficulty: D, time: T0 + 300e3 }] });
+  assert.equal(r.paper.blocks, 1); close(r.paper.wonUsd, 900);
+  assert.match(r.events[0], new RegExp('bloco 3 seria seu .*chance era ' + (prob * 100).toFixed(2).replace('.', '\\.') + '%'));
+  assert.equal(r.paper.runs.length, 1); assert.match(r.paper.runs[0].reason, /bloco achado: encerraria a ordem/);
+  assert.equal(r.paper.runs[0].blocks, 1); close(r.paper.runs[0].wonUsd, 900);
+  assert.ok(r.paper.on && r.paper.run && r.paper.run.start === T0 + 360e3, 'mercado favorável: abre outra operação');
+  assert.equal(r.paper.wins[0].height, 3);
+  // "continuar" não encerra a operação
+  const cfg = Object.assign({}, PCFG, { onBlock: 'continue' });
+  let c = paperStep(null, { cfg, mkt: pm({ D }), now: T0, units: PU, limits: PL });
+  c = paperStep(c.paper, { cfg, mkt: pm({ D }), now: T0 + 180e3, units: PU, limits: PL, blocks: [{ height: 9, hash: '00', difficulty: D }] });
+  assert.equal(c.paper.runs.length, 0); assert.equal(c.paper.run.blocks, 1);
+});
+
+test('integração: bloco real da rede sorteado como seu na simulação', async () => {
+  const t = await setup();
+  try {
+    await t.call('PUT', '/api/config', { mode: 'observe', targetPh: 20 });
+    await t.call('POST', '/api/tick');
+    await fetch(t.base + '/_set', { method: 'POST', body: JSON.stringify({ hashes: { [t.state.height + 1]: '00000000000000000000aa00000000' } }) });
+    await fetch(t.base + '/_mine', { method: 'POST', body: JSON.stringify({ address: 'qoutro' }) });
+    const r = await t.call('POST', '/api/tick');
+    assert.equal(r.body.paper.blocks, 1, JSON.stringify(r.body.paper));
+    const log = await t.call('GET', '/api/log');
+    assert.ok(log.body.log.some((l) => /seria seu \(sorteio pelo hash do bloco/.test(l.text)));
+  } finally { t.server.close(); }
+});

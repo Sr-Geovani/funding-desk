@@ -1,6 +1,7 @@
-// Simulação do modo Observar ("papel"): o que o robô teria comprado, quanto teria gasto e a receita MÉDIA esperada.
-// Não sorteia blocos: com hash alugado o resultado real depende de sorte; aqui fica a média (λ = blocos esperados)
-// e a chance de ter achado pelo menos um bloco (1 − e^−λ).
+// Simulação do modo Observar ("papel"): o que o robô teria comprado, quanto teria gasto e se teria achado bloco.
+// Sorteio honesto: cada bloco REAL da rede BCH achado enquanto o robô estaria comprando seria seu com chance
+// = sua potência ÷ (potência da rede + a sua). O número sorteado vem do próprio hash do bloco (ninguém controla),
+// então o resultado não pode ser escolhido depois. Também guarda a média (λ = blocos esperados) para comparação.
 // Resultado real (modo Ativo): gasto pago nas ordens gerenciadas e blocos que pagaram o seu endereço.
 const TWO32 = 4294967296;
 const MAX_GAP = 15 * 60e3; // intervalo maior que isso (backend parado) não conta
@@ -14,7 +15,7 @@ function trimDays(days) {
 }
 
 // paper: estado anterior (ou nada); devolve { paper, events } com eventos só quando liga, pausa ou para.
-export function paperStep(paper, { cfg, mkt, now, units, limits }) {
+export function paperStep(paper, { cfg, mkt, now, units, limits, blocks }) {
   const p = paper && paper.since ? JSON.parse(JSON.stringify(paper))
     : { since: now, lastTs: now, on: false, spendUsd: 0, evUsd: 0, lambda: 0, hoursOn: 0, sessions: 0, stops: 0, sess: null, days: {} };
   p.runs = p.runs || [];
@@ -38,6 +39,27 @@ export function paperStep(paper, { cfg, mkt, now, units, limits }) {
     for (const t of [p, d]) { t.spendUsd += cost; t.evUsd += ev; t.lambda += lam; t.hoursOn += secs / 3600; }
     if (p.sess) { p.sess.spendUsd += cost; p.sess.lambda += lam; }
     if (p.run) { p.run.spendUsd += cost; p.run.evUsd += ev; p.run.lambda += lam; p.run.hours += secs / 3600; }
+  }
+
+  // 1b) sorteio com os blocos reais achados pela rede enquanto o robô estaria comprando
+  if (p.on && p.ph > 0) for (const b of blocks || []) {
+    const D = b.difficulty || p.D;
+    if (!b.hash || !(D > 0)) continue;
+    const mine = p.ph * 1e15, prob = mine / (D * TWO32 / 600 + mine);
+    const u = parseInt(String(b.hash).slice(-8), 16) / TWO32;
+    p.draws = (p.draws || 0) + 1; d.draws = (d.draws || 0) + 1;
+    if (p.run) p.run.draws = (p.run.draws || 0) + 1;
+    if (!(u < prob)) continue;
+    const usd = p.blockNetUsd || 0;
+    for (const t of [p, d]) { t.blocks = (t.blocks || 0) + 1; t.wonUsd = (t.wonUsd || 0) + usd; }
+    if (p.run) { p.run.blocks = (p.run.blocks || 0) + 1; p.run.wonUsd = (p.run.wonUsd || 0) + usd; }
+    p.wins = (p.wins || []).concat({ height: b.height, t: b.time || now, usd, prob }).slice(-50);
+    events.push(`Simulação: o bloco ${b.height} seria seu (sorteio pelo hash do bloco; chance era ${(prob * 100).toFixed(2)}%): +US$${usd.toFixed(0)}`);
+    if (p.sess) p.sess = { start: now, spendUsd: 0, lambda: 0 }; // bloco zera a sessão do stop-loss
+    if (cfg.onBlock === 'cancel' || cfg.onBlock === 'min') {
+      closeRun(cfg.onBlock === 'cancel' ? 'bloco achado: encerraria a ordem' : 'bloco achado: reduziria à potência de pausa');
+      p.on = false; // se o mercado seguir favorável, a próxima linha abre outra (como "criar ordem sozinho")
+    }
   }
 
   // 2) o que o robô faria agora

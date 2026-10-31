@@ -57,7 +57,7 @@ export function createMock() {
     ]);
     if (p === '/bch/blockchain/getBlockchainInfo') return send(200, { blocks: s.height, difficulty: s.difficulty });
     let m = /^\/bch\/block\/detailsByHeight\/(\d+)$/.exec(p);
-    if (m) return send(200, { height: +m[1], time: Math.floor(Date.now() / 1000), difficulty: s.difficulty, tx: ['cb' + m[1]] });
+    if (m) return send(200, { height: +m[1], hash: (s.hashes && s.hashes[m[1]]) || crypto.createHash('sha256').update('bloco' + m[1]).digest('hex'), time: Math.floor(Date.now() / 1000), difficulty: s.difficulty, tx: ['cb' + m[1]] });
     m = /^\/bch\/transaction\/details\/cb(\d+)$/.exec(p);
     if (m) { const b = s.blocks[+m[1]] || { addr: 'qx', value: 3.125 }; return send(200, { vin: [{ coinbase: '00' }], vout: [{ value: b.value, scriptPubKey: { cashAddrs: ['bitcoincash:' + b.addr] } }] }); }
     // ---- NiceHash público ----

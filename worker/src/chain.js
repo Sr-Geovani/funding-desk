@@ -43,7 +43,7 @@ export function createChain({ base = DEFAULT_BCH_REST, priceUrl = DEFAULT_PRICE_
         value: parseFloat(o.value),
         addrs: ((o.scriptPubKey && (o.scriptPubKey.cashAddrs || o.scriptPubKey.addresses)) || []).map(normAddr)
       }));
-      return { height, time: b.time * 1000, difficulty: b.difficulty, txid: b.tx[0], outs };
+      return { height, hash: b.hash, time: b.time * 1000, difficulty: b.difficulty, txid: b.tx[0], outs };
     },
     prices: async () => {
       if (priceUrl !== DEFAULT_PRICE_URL) { // fonte fixa (testes ou configuração própria)

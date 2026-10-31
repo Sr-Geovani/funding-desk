@@ -46,6 +46,9 @@ sempre identificado; nada de prometer previsão de sorte (Poisson é sem memóri
   nas 4 execuções + 0,03%. Mineração: cada "compraria → pausaria" vira uma operação (gasto, receita média, chance).
 - Placar dos alertas de funding (`alertScoreStep`): cada alerta de entrada vira posição hipotética pelo prazo projetado
   (3 dias), sem saída antecipada; realizado = pagamentos − taxas; acerto = positivo. Em Diário → Robô e resumo no Radar.
+- Mineração simulada com sorteio honesto: cada bloco real da rede BCH achado enquanto o robô estaria comprando seria
+  "seu" com chance = potência ÷ (rede + potência); o número sorteado são os últimos 32 bits do hash do bloco (ninguém
+  controla). Bloco encerra a operação (como o robô real) e ela reabre se o mercado seguir favorável.
 - Mineração simulada mostra os desfechos reais: sem bloco (o mais provável) perde o aluguel; com bloco, bloco − aluguel;
   a média de longo prazo é separada. Simulação (Operar) e Diário usam os mesmos totais.
 - Ciclo do servidor: 3 min. Mínimo do Cloudflare é 1 min, mas o KV grátis aceita 1.000 gravações/dia e propaga em até
