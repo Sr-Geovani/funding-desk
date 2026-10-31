@@ -143,7 +143,7 @@ async function setup() {
   await new Promise((r) => server.listen(0, r));
   const base = 'http://127.0.0.1:' + server.address().port;
   const env = { FD_KV: memoryKV(), PANEL_TOKEN: 'token-de-teste-com-mais-de-24-chars', ALLOWED_ORIGIN: 'https://sr-geovani.github.io',
-    NH_BASE: base + '/nh', BCH_REST: base + '/bch', PRICE_URL: base + '/cg/x', HL_URL: base + '/hl/info', WTM_URL: base + '/wtm/asic.json', HP_URL: base + '/hp', MRR_URL: base + '/mrr', LIGHTER_URL: base + '/x', WTM_GPU_URL: base + '/x', BFX_URL: base + '/x', DERIBIT_URL: base + '/x', ETHENA_URL: base + '/x', HL_INFO_URL: base + '/x', ZPOOL_URL: base + '/x', MB_URL: base + '/x', BCB_PTAX_URL: base + '/x', BCB_SGS_URL: base + '/x', MEMPOOL_URL: base + '/mempool', KRAKEN_URL: base + '/kraken', NH_API_KEY: MOCK_KEYS.key, NH_API_SECRET: MOCK_KEYS.secret, NH_ORG_ID: MOCK_KEYS.org,
+    NH_BASE: base + '/nh', BCH_REST: base + '/bch', PRICE_URL: base + '/cg/x', HL_URL: base + '/hl/info', WTM_URL: base + '/wtm/asic.json', HP_URL: base + '/hp', MRR_URL: base + '/mrr', LIGHTER_URL: base + '/x', WTM_GPU_URL: base + '/x', UPBIT_URL: base + '/x', FX_URL: base + '/x', CRIPTOYA_URL: base + '/x', COINBASE_URL: base + '/x', OKX_URL: base + '/x', GATE_URL: base + '/x', BITGET_URL: base + '/x', GAMMA_URL: base + '/x', LLAMA_URL: base + '/x', BFX_URL: base + '/x', DERIBIT_URL: base + '/x', ETHENA_URL: base + '/x', HL_INFO_URL: base + '/x', ZPOOL_URL: base + '/x', MB_URL: base + '/x', BCB_PTAX_URL: base + '/x', BCB_SGS_URL: base + '/x', MEMPOOL_URL: base + '/mempool', KRAKEN_URL: base + '/kraken', NH_API_KEY: MOCK_KEYS.key, NH_API_SECRET: MOCK_KEYS.secret, NH_ORG_ID: MOCK_KEYS.org,
     MAX_ORDER_BTC: '0.01', MAX_LIMIT_PH: '100', MAX_DAILY_USD: '1000' };
   const call = async (method, path, body, token = env.PANEL_TOKEN) => {
     const r = await worker.fetch(new Request('https://api.example' + path, { method, headers: { Authorization: 'Bearer ' + token, Origin: 'https://sr-geovani.github.io', 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined }), env, {});
@@ -964,6 +964,21 @@ test('frentes: leitura das fontes reais e robô de funding com a Lighter (taxa z
   let pp = F.frontsPaperStep(null, { rates: { bfx: 10 }, cdi: 13.65, now: NOWF });
   pp = F.frontsPaperStep(pp, { rates: { bfx: 10 }, cdi: 13.65, now: NOWF + 3600e3 });
   close(pp.f.bfx.usd, 1000 * 0.10 / 8760, 1e-9); close(pp.f.bfx.cdiPct, (Math.pow(1.1365, 1 / 8760) - 1) * 100, 1e-9);
+});
+
+test('lastro de mercado: ágio por país, BTC entre corretoras, Polymarket e rendimentos de referência', async () => {
+  const F = await import('../worker/src/fronts.js');
+  const rd = (f) => JSON.parse(readFileSync(new URL('./fixtures/' + f, import.meta.url)));
+  const P = F.premiumsOf({ upbit: rd('upbit-ticker.real.json'), mb: rd('mercadobitcoin-btc.real.json'), kraken: rd('kraken-ticker.real.json'), fx: rd('frankfurter-usd.real.json'), ars: rd('criptoya-dolar.real.json') });
+  assert.equal(P.usdBtc, 77393.9);
+  assert.ok(P.kr.btcPct > 0.5 && P.kr.btcPct < 2 && P.kr.usdtPct > 0.5, JSON.stringify(P.kr));
+  assert.ok(Math.abs(P.br.btcPct) < 1 && P.br.usdtPct > 1, JSON.stringify(P.br));
+  assert.ok(P.ar.usdtPct > 4 && P.ar.usdtPct < 7, JSON.stringify(P.ar));
+  const S = F.spotSpreadOf([{ ex: 'A', quote: 'USD', px: 100 }, { ex: 'B', quote: 'USD', px: 100.3 }, { ex: 'C', quote: 'USDT', px: 99 }]);
+  close(S.usd.pct, 0.3, 1e-9); assert.equal(S.usd.high, 'B'); assert.equal(S.usdt, null, 'uma cotação só não forma diferença');
+  const pm = F.polymarketOf(rd('polymarket-gamma.real.json'));
+  assert.ok(pm.markets > 0 && pm.dailyUsd > 0 && pm.top[0].aprMax >= pm.top[pm.top.length - 1].aprMax);
+  const y = F.llamaOf(rd('defillama-steth.real.json')); assert.equal(y.project, 'lido'); assert.ok(y.apy > 2 && y.apy < 5);
 });
 
 test('auditoria IA: mesma régua do robô, reajuste real, funding acompanhado e grupo de controle', () => {

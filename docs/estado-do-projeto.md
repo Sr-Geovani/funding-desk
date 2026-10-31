@@ -121,6 +121,12 @@ sempre identificado; nada de prometer previsão de sorte (Poisson é sem memóri
   frentes ganhou ASIC próprio (`asicOf`: hashprice e lucro/dia por preço de energia) e GPU (`gpuOf`: moedas que mais
   pagam por placa, WhatToMine `coins.json`). MiningRigRentals passou a ler o SHA-256 AsicBoost (`sha256ab`), o mercado
   certo (o simples é pequeno e mais caro).
+- Lastro neutro (31/10): catálogo sem veredito nem filtro (`docs/catalogo-frentes-cripto.md`, ~70 frentes com número,
+  requisitos, variáveis e acesso como informação). `market2` (a cada 30 min, num ciclo livre): ágio local (Coreia/Upbit,
+  Brasil/Mercado Bitcoin, Argentina/CriptoYa) sobre BTC/USD da Kraken e câmbio do BCE (Frankfurter); BTC entre 7
+  cotações (Kraken, Coinbase, Bitfinex, OKX, Gate, Bitget); Polymarket (recompensa de liquidez, 20 mercados de maior
+  volume); rendimentos de referência da DefiLlama (stETH, jitoSOL, Aave USDC/USDT, sUSDS). O cartão das frentes não dá
+  veredito: mostra os números e a distância até o CDI.
 - Ciclo do servidor: 3 min. Mínimo do Cloudflare é 1 min, mas o KV grátis aceita 1.000 gravações/dia e propaga em até
   60 s; abaixo de 3 min exige plano pago + Durable Objects. Atraso de 3 min custa < US$1 com 10 PH/s.
 

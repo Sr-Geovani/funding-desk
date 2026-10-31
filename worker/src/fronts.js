@@ -138,3 +138,39 @@ export function gpuOf(wtm, btcUsd, minVolBtc = 2) {
   const ref = all.find((c) => c.tag === 'RVN');
   return { top: ok.slice(0, 5).map(({ name, tag, algo, usdDay, vol }) => ({ name, tag, algo, usdDay, vol })), rvnUsdDay: ref ? ref.usdDay : null };
 }
+
+/* ---------- lastro de mercado (dados para comparar, sem filtro) ---------- */
+// Ágio do mercado local sobre o dólar: Coreia (Upbit, "kimchi premium"), Brasil (Mercado Bitcoin) e Argentina (dólar
+// cripto × oficial, CriptoYa). Referência: BTC/USD na Kraken e câmbio do BCE (Frankfurter).
+export function premiumsOf({ upbit, mb, kraken, fx, ars }) {
+  const usdBtc = kraken && kraken.result ? +Object.values(kraken.result).find((v) => v && v.c).c[0] : null;
+  const r = (fx && fx.rates) || {}, out = { usdBtc, fxDate: fx && fx.date };
+  const u = (m) => (Array.isArray(upbit) ? upbit.find((x) => x.market === m) : null);
+  const p = (x, ref) => (x > 0 && ref > 0 ? (x / ref - 1) * 100 : null);
+  if (r.KRW) out.kr = { btcPct: p(u('KRW-BTC') && u('KRW-BTC').trade_price, usdBtc * r.KRW), usdtPct: p(u('KRW-USDT') && u('KRW-USDT').trade_price, r.KRW) };
+  const m = (pair) => (Array.isArray(mb) ? mb.find((x) => x.pair === pair) : null);
+  if (r.BRL) out.br = { btcPct: p(m('BTC-BRL') && +m('BTC-BRL').last, usdBtc * r.BRL), usdtPct: p(m('USDT-BRL') && +m('USDT-BRL').last, r.BRL) };
+  if (ars && ars.oficial && ars.cripto && ars.cripto.usdt) out.ar = { usdtPct: p(+ars.cripto.usdt.ask, +ars.oficial.price), bluePct: ars.blue ? p(+ars.blue.ask, +ars.oficial.price) : null };
+  return out;
+}
+// Mesmo BTC em corretoras diferentes: maior diferença entre as cotações (em USD e em USDT separadas). Ida e volta a
+// mercado custa ~0,2% (2 × 0,1%) mais a transferência.
+export function spotSpreadOf(quotes) {
+  const g = (q) => { const v = (quotes || []).filter((x) => x.quote === q && x.px > 0); if (v.length < 2) return null;
+    const lo = v.reduce((a, b) => (b.px < a.px ? b : a)), hi = v.reduce((a, b) => (b.px > a.px ? b : a));
+    return { low: lo.ex, high: hi.ex, pct: (hi.px / lo.px - 1) * 100, n: v.length }; };
+  return { usd: g('USD'), usdt: g('USDT'), roundTripPct: 0.2 };
+}
+// Polymarket: recompensa diária de liquidez nos mercados de maior volume e o rendimento bruto máximo (recompensa ÷
+// liquidez no livro, se toda a liquidez dividisse o prêmio; quem fica mais perto do meio do livro leva mais).
+export function polymarketOf(markets) {
+  const rows = (markets || []).map((m) => {
+    const rate = (m.clobRewards || []).reduce((a, r) => a + (+r.rewardsDailyRate || 0), 0), liq = +m.liquidityNum || 0;
+    return { q: String(m.question || '').slice(0, 90), rate, liq, aprMax: liq > 0 ? rate / liq * 365 * 100 : null, spread: +m.rewardsMaxSpread || null };
+  }).filter((x) => x.rate > 0);
+  return { dailyUsd: rows.reduce((a, x) => a + x.rate, 0), markets: rows.length, total: (markets || []).length, top: rows.sort((a, b) => (b.aprMax || 0) - (a.aprMax || 0)).slice(0, 5) };
+}
+// Rendimentos de referência (DefiLlama, pool por pool): staking e empréstimo de stablecoin.
+export const LLAMA_POOLS = { stEth: '747c1d2a-c668-4682-b9f9-296708a3dd90', jitoSol: '0e7d0722-9054-4907-8593-567b353c0900',
+  aaveUsdc: 'aa70268e-4b52-42bf-a116-608b370f9501', aaveUsdt: 'f981a304-bb6c-45b8-b0c5-fd2f515ad23a', sUsds: 'd8c4eff5-c8a9-46fc-a888-057c4c668e72' };
+export function llamaOf(j) { const p = j && Array.isArray(j.data) ? j.data[0] : null; return p && isFinite(+p.apy) ? { apy: +p.apy, tvlUsd: +p.tvlUsd || null, project: p.project, symbol: p.symbol } : null; }

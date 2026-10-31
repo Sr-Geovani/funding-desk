@@ -11,3 +11,6 @@
 - Frentes (31/10/2026): `lighter-funding.real.json` (recortado), `bitfinex-funding-tickers.real.json`, `deribit-btc-futures.real.json`,
   `ethena-yield.real.json`, `zpool-status.real.json` (sha256 e scrypt), `mercadobitcoin-tickers.real.json`, `bcb-ptax.real.json`.
 - `wtm-gpu.real.json`: WhatToMine `coins.json` (GPU), recortado (31/10/2026).
+- Lastro de mercado (31/10/2026): `upbit-ticker.real.json`, `mercadobitcoin-btc.real.json`, `kraken-ticker.real.json`,
+  `frankfurter-usd.real.json`, `criptoya-dolar.real.json`, `polymarket-gamma.real.json` (6 mercados, campos usados),
+  `defillama-steth.real.json`.

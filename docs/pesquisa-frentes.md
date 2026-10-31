@@ -7,8 +7,8 @@ afiliados foram tratadas como fracas: os números abaixo são os medidos aqui, s
 **Régua**: CDI 13,65% a.a. (BCB, série 4389, 29/10/2026). Frente em dólar só ganha do CDI se render mais que ele menos
 a alta esperada do dólar. Juros do Tesouro americano de 2 anos ~3,8%.
 
-## Ranking
-| # | Frente | Exploração | Número medido agora | Encaixe no painel | Veredito |
+## Frentes medidas na primeira rodada (a lista completa e neutra está em docs/catalogo-frentes-cripto.md)
+| # | Frente | Exploração | Número medido agora | Encaixe no painel | Situação |
 |---|---|---|---|---|---|
 | 1 | **Funding com uma perna em DEX de taxa zero (Lighter)** | muito explorada na Ásia; quase nada no Brasil | Lighter cobra 0% maker e taker (confirmado na API). Empate cai de ~12,2% (HL + Binance, maker) para ~7,3% (Lighter + HL) e 8,5% (Lighter + Binance/Bybit). Agora: 76 pares de 46 moedas cripto (OI ≥ US$300 mil) acima do empate | Alto: mesma regra validada; o endpoint da Lighter traz Binance, Bybit e Hyperliquid juntos (o servidor nos EUA passa a ler Binance/Bybit) | **Monitorar e simular já** (robô simulado ligado) |
 | 2 | Câmbio para os aportes (ágio USDT/USDC × PTAX) | conhecida, pouco medida | USDC +0,65% e USDT +2,19% sobre a PTAX no Mercado Bitcoin | Alto | **Monitorar**: economia em cada aporte, sem risco |
@@ -29,9 +29,9 @@ a alta esperada do dólar. Juros do Tesouro americano de 2 anos ~3,8%.
 - **DOGE bloco a bloco** (1.370 blocos em 24 h): um minerador constante ganhou US$362,8/TH/dia; a conta pela
   dificuldade do momento daria US$509 (+40%, ilusão). Ver `docs/auditoria-ia-e-simulacoes.md`.
 
-## Descartadas
-- **Polymarket/Kalshi** (recompensas de liquidez ~US$41 mil/dia só nos 100 mercados de maior volume): proibidas no
-  Brasil (CMN 5.298/2026, bloqueio da Anatel); a Polymarket restringe novas posições do Brasil.
+## Outras frentes levantadas (dados, sem filtro)
+- **Polymarket/Kalshi** (recompensas de liquidez ~US$41 mil/dia só nos 100 mercados de maior volume): acesso
+  restrito no Brasil (CMN 5.298/2026, bloqueio da Anatel); a Polymarket restringe novas posições do Brasil.
 - **Surebet em casas de aposta**: não é crime, mas os termos proíbem e as casas limitam a conta (Portaria SPA/MF
   1.231/2024, art. 46). Fora de cripto.
 - **Arbitragem à vista entre corretoras / triangular**: dominada por robôs de baixa latência.

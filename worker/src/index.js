@@ -13,7 +13,7 @@ import FD from '../../core.js';
 import FDR from '../../radar.js';
 import { algoPaperStep } from './paperalgo.js';
 import { braiinsOf, mrrOf, stratumCheck } from './hashmarkets.js';
-import { bitfinexOf, deribitBasisOf, ethenaOf, hlpOf, zpoolOf, brlOf, cdiOf, lighterTable, lighterRows, lighterOi, lighterPairs, streakStep, frontsPaperStep, asicOf, gpuOf, LT_FEES } from './fronts.js';
+import { bitfinexOf, deribitBasisOf, ethenaOf, hlpOf, zpoolOf, brlOf, cdiOf, lighterTable, lighterRows, lighterOi, lighterPairs, streakStep, frontsPaperStep, asicOf, gpuOf, premiumsOf, spotSpreadOf, polymarketOf, llamaOf, LLAMA_POOLS, LT_FEES } from './fronts.js';
 import { FUND_MODEL } from './fundmodel.js';
 import { updateHistory, pickCoins, scorePairs, stablePairs, pairStatsOf } from './fundai.js';
 import { blockRecord, blockSummary, poolOf } from './blocks.js';
@@ -330,8 +330,9 @@ export async function tick(env, opts = {}) {
 
   // Frentes em observação (docs/pesquisa-frentes.md): dados públicos a cada 15 min, fora do ciclo que já leu o mapa de
   // mineração (limite de 50 chamadas externas por ciclo). Funding com perna na Lighter (taxa zero) vira um robô simulado.
-  let fronts = state.fronts || null, frontsPaper = state.frontsPaper || null, ltStreak = state.ltStreak || null, fundPaperLT = state.fundPaperLT || null;
+  let fronts = state.fronts || null, frontsPaper = state.frontsPaper || null, ltStreak = state.ltStreak || null, fundPaperLT = state.fundPaperLT || null, frontsRan = false;
   if (cfg.fronts !== false && !algoRan && (!fronts || now - (fronts.at || 0) >= 15 * 60e3)) {
+    frontsRan = true;
     const getJ = (u, o) => fetchFn(u, Object.assign({ headers: { accept: 'application/json', 'user-agent': 'funding-desk/1.0' } }, o || {})).then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
     const U = (k, d) => (env[k] || d).replace(/\/$/, '');
     const day = (t) => { const d = new Date(t); return String(d.getUTCMonth() + 1).padStart(2, '0') + '-' + String(d.getUTCDate()).padStart(2, '0') + '-' + d.getUTCFullYear(); };
@@ -381,6 +382,38 @@ export async function tick(env, opts = {}) {
     fronts.hist = H;
   }
 
+  // Lastro de mercado (a cada 30 min, num ciclo sem as outras leituras): ágio por país, BTC entre corretoras, recompensas
+  // de liquidez da Polymarket e rendimentos de referência (DefiLlama). Só dados, sem filtro: a análise é do usuário.
+  let market2 = state.market2 || null;
+  if (cfg.fronts !== false && !algoRan && !frontsRan && (!market2 || now - (market2.at || 0) >= 30 * 60e3)) {
+    const getJ = (u) => fetchFn(u, { headers: { accept: 'application/json', 'user-agent': 'funding-desk/1.0' } }).then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
+    const E = (k, d) => (env[k] || d).replace(/\/$/, '');
+    const llamaKeys = Object.keys(LLAMA_POOLS);
+    const R = await Promise.all([
+      getJ(E('UPBIT_URL', 'https://api.upbit.com') + '/v1/ticker?markets=KRW-BTC,KRW-USDT'),
+      getJ(E('MB_URL', 'https://api.mercadobitcoin.net') + '/api/v4/tickers?symbols=BTC-BRL,USDT-BRL'),
+      getJ(E('KRAKEN_URL', 'https://api.kraken.com') + '/0/public/Ticker?pair=XBTUSD'),
+      getJ(E('FX_URL', 'https://api.frankfurter.dev') + '/v1/latest?base=USD&symbols=KRW,BRL'),
+      getJ(E('CRIPTOYA_URL', 'https://criptoya.com') + '/api/dolar'),
+      getJ(E('COINBASE_URL', 'https://api.exchange.coinbase.com') + '/products/BTC-USD/ticker'),
+      getJ(E('BFX_URL', 'https://api-pub.bitfinex.com') + '/v2/tickers?symbols=tBTCUSD,tBTCUST'),
+      getJ(E('OKX_URL', 'https://www.okx.com') + '/api/v5/market/ticker?instId=BTC-USDT'),
+      getJ(E('GATE_URL', 'https://api.gateio.ws') + '/api/v4/spot/tickers?currency_pair=BTC_USDT'),
+      getJ(E('BITGET_URL', 'https://api.bitget.com') + '/api/v2/spot/market/tickers?symbol=BTCUSDT'),
+      getJ(E('GAMMA_URL', 'https://gamma-api.polymarket.com') + '/markets?active=true&closed=false&limit=20&order=volume24hr&ascending=false')
+    ].concat(llamaKeys.map((k) => getJ(E('LLAMA_URL', 'https://yields.llama.fi') + '/poolsEnriched?pool=' + LLAMA_POOLS[k]))).map(settle));
+    const [up, mb2, kr, fx, ar, cb, bf2, ok2, gt, bg, gm] = R, ll = R.slice(11), old = market2 || {}, V = (r) => (r.ok ? r.v : null);
+    const krPx = V(kr) && V(kr).result ? +Object.values(V(kr).result)[0].c[0] : null, bfx2 = V(bf2) || [];
+    const bfPx = (sym) => { const t = bfx2.find((x) => Array.isArray(x) && x[0] === sym); return t ? +t[7] : null; };
+    const quotes = [{ ex: 'Kraken', quote: 'USD', px: krPx }, { ex: 'Coinbase', quote: 'USD', px: V(cb) ? +V(cb).price : null }, { ex: 'Bitfinex', quote: 'USD', px: bfPx('tBTCUSD') },
+      { ex: 'Bitfinex', quote: 'USDT', px: bfPx('tBTCUST') }, { ex: 'OKX', quote: 'USDT', px: V(ok2) && V(ok2).data ? +V(ok2).data[0].last : null },
+      { ex: 'Gate', quote: 'USDT', px: V(gt) && V(gt)[0] ? +V(gt)[0].last : null }, { ex: 'Bitget', quote: 'USDT', px: V(bg) && V(bg).data ? +V(bg).data[0].lastPr : null }];
+    const yields = {}; llamaKeys.forEach((k, i) => { yields[k] = ll[i].ok ? llamaOf(ll[i].v) : (old.yields || {})[k] || null; });
+    market2 = { at: now, prem: up.ok || mb2.ok ? premiumsOf({ upbit: V(up), mb: V(mb2), kraken: V(kr), fx: V(fx), ars: V(ar) }) : old.prem || null,
+      spot: spotSpreadOf(quotes), poly: gm.ok ? polymarketOf(V(gm)) : old.poly || null, yields,
+      err: [['Upbit', up], ['Mercado Bitcoin', mb2], ['Kraken', kr], ['Câmbio', fx], ['CriptoYa', ar], ['Polymarket', gm]].filter(([, r]) => !r.ok).map(([n, r]) => n + ': ' + r.e) };
+  }
+
   // Placar: cada alerta de entrada de funding vira uma posição hipotética acompanhada pelo prazo projetado.
   const byKey = {}; for (const b of (funding && funding.best) || []) byKey[b.key] = b;
   const entries = newAlerts.filter((a) => a.area === 'funding' && a.kind === 'entrada' && /^fe:/.test(a.key || '')).map((a) => {
@@ -409,7 +442,7 @@ export async function tick(env, opts = {}) {
   const mempool = mpR.ok ? Object.assign({ at: now }, mpR.v) : state.mempool || null;
 
   const next = Object.assign({}, dec.state, alertState, {
-    lastTick: now, verified: Object.fromEntries(Object.entries(verified).filter(([, x]) => now - x.at <= 6 * 3600e3)), ai: br.ai, aiAnalysis, plan, acct, algoMap, mempool, stable24, pairStats, msig, darr, recentBlocks, nhWeek, paper, paperBurst, paperPlan, paperAlways, hashMkts, fronts, frontsPaper, ltStreak, fundPaperLT, blockBuf, blockFlush, lastBlockT, real, fundPaper, alertScore, algoPaper, algoTs, aiScores, fundPaperAI, fhistHour, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig,
+    lastTick: now, verified: Object.fromEntries(Object.entries(verified).filter(([, x]) => now - x.at <= 6 * 3600e3)), ai: br.ai, aiAnalysis, plan, acct, algoMap, mempool, stable24, pairStats, msig, darr, recentBlocks, nhWeek, paper, paperBurst, paperPlan, paperAlways, hashMkts, fronts, frontsPaper, ltStreak, fundPaperLT, market2, blockBuf, blockFlush, lastBlockT, real, fundPaper, alertScore, algoPaper, algoTs, aiScores, fundPaperAI, fhistHour, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig,
     market: mkt.ok ? { breakEvenEH: mkt.breakEvenEH, capEH: mkt.capEH, fillEH: mkt.fillEH, medianEH: mkt.medianEH, bidEH: mkt.bidEH,
       edgeAtBidPct: mkt.edgeAtBidPct, green: mkt.green, D: mkt.D, bookTotalPH: book ? book.totalPH : 0, bchUsd: mkt.bchUsd, btcUsd: mkt.btcUsd, costPerBlockUsd: mkt.costPerBlockUsd,
       hashpriceNet: mkt.hashpriceNet, blockNetUsd: mkt.blockNetUsd, phDaysPerBlock: mkt.phDaysPerBlock, market: mkt.market } : { ok: false, reason: mkt.reason },
@@ -519,7 +552,7 @@ async function api(req, env, url, fetchFn) {
       telegram: !!(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID), creds: credStatus(env), limits, config: cfg,
       state: { lastTick: state.lastTick, lastHeight: state.lastHeight, market: state.market, myBlocks: state.myBlocks || [], dailyUsd: state.dailyUsd || 0,
         errors: state.errors || [], edgeHist: state.edgeHist || [], alerts: (state.alerts || []).slice(-30).reverse(),
-        paper: state.paper || null, paperBurst: state.paperBurst || null, paperPlan: state.paperPlan || null, paperAlways: state.paperAlways || null, hashMkts: state.hashMkts || null, fronts: state.fronts || null, frontsPaper: state.frontsPaper || null,
+        paper: state.paper || null, paperBurst: state.paperBurst || null, paperPlan: state.paperPlan || null, paperAlways: state.paperAlways || null, hashMkts: state.hashMkts || null, fronts: state.fronts || null, frontsPaper: state.frontsPaper || null, market2: state.market2 || null,
         fundPaperLT: state.fundPaperLT ? { summary: fundPaperSummary(state.fundPaperLT, LT_FEES), open: state.fundPaperLT.open, closed: state.fundPaperLT.closed.slice(-50).reverse() } : null, opLog: (state.opLog || []).slice(-20).reverse(), real: state.real ? Object.assign({}, state.real, { paid: undefined }) : null,
         fundPaper: state.fundPaper ? { summary: fundPaperSummary(state.fundPaper, FD.DEFAULT_FEES), open: state.fundPaper.open, closed: state.fundPaper.closed.slice(-100).reverse() } : null,
         algoPaper: state.algoPaper || null,
