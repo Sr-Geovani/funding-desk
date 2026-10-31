@@ -13,6 +13,18 @@ function legsFeePct(fees, s, l) {
   return t(s) + t(l); // % do tamanho, numa ponta (entrada ou saída)
 }
 
+// Pagamentos vencidos desde o último ciclo (short recebe a taxa; long paga), com a taxa da última leitura antes do horário.
+function creditLegs(o, cr, notional, now) {
+  for (const side of ['s', 'l']) {
+    const leg = o.legs[side], cur = cr[leg.venue];
+    if (leg.next && now >= leg.next && leg.next > (leg.paidAt || 0)) {
+      o.fundingUsd += notional * leg.rate / 100 * (side === 's' ? 1 : -1); o.payments++; leg.paidAt = leg.next;
+    }
+    if (cur) { leg.rate = cur.rate; leg.next = cur.next; }
+  }
+}
+function newLegs(rs, rl, s, l) { return { s: { venue: s, rate: rs.rate, next: rs.next }, l: { venue: l, rate: rl.rate, next: rl.next } }; }
+
 // pf: estado anterior; rows: rows[moeda][exchange] = { rate (% por intervalo), apr, hours, next };
 // best: oportunidades "Compensa" (key, coin, s, l, spread), já ordenadas. Devolve { pf, events }.
 export function fundPaperStep(pf, { rows, best, now, fees, rules = FUND_RULES }) {
@@ -25,14 +37,7 @@ export function fundPaperStep(pf, { rows, best, now, fees, rules = FUND_RULES })
   const still = [];
   for (const o of p.open) {
     const cr = rows[o.coin] || {};
-    for (const side of ['s', 'l']) {
-      const leg = o.legs[side], cur = cr[leg.venue];
-      if (leg.next && now >= leg.next && leg.next > (leg.paidAt || 0)) {
-        const usd = notional * leg.rate / 100 * (side === 's' ? 1 : -1);
-        o.fundingUsd += usd; o.payments++; leg.paidAt = leg.next;
-      }
-      if (cur) { leg.rate = cur.rate; leg.next = cur.next; }
-    }
+    creditLegs(o, cr, notional, now);
     const rs = cr[o.legs.s.venue], rl = cr[o.legs.l.venue];
     const spread = rs && rl ? rs.apr - rl.apr : null;
     o.spreadNow = spread;
@@ -62,7 +67,7 @@ export function fundPaperStep(pf, { rows, best, now, fees, rules = FUND_RULES })
     const entryFee = notional * (legsFeePct(fees, b.s, b.l) + rules.slipPct / 2) / 100;
     p.open.push({ id: p.nextId++, key: b.key, coin: b.coin, s: b.s, l: b.l, openedAt: now, notional, entrySpread: rs.apr - rl.apr, spreadNow: rs.apr - rl.apr,
       feesUsd: entryFee, fundingUsd: 0, payments: 0, neg: 0, missing: 0,
-      legs: { s: { venue: b.s, rate: rs.rate, next: rs.next }, l: { venue: b.l, rate: rl.rate, next: rl.next } } });
+      legs: newLegs(rs, rl, b.s, b.l) });
     events.push(`Funding simulado: entrou em ${b.coin} (short ${b.s}, long ${b.l}) com diferença de ${(rs.apr - rl.apr).toFixed(1)}% a.a.`);
   }
   p.closed = p.closed.slice(-rules.keepClosed);
@@ -76,4 +81,37 @@ export function fundPaperSummary(p) {
   const net = c.reduce((a, x) => a + x.netUsd, 0), hours = c.reduce((a, x) => a + (x.closedAt - x.openedAt) / 3600e3, 0);
   const openNet = (p.open || []).reduce((a, x) => a + x.fundingUsd - x.feesUsd, 0);
   return { since: p.since, closed: c.length, wins, netUsd: net, avgHours: c.length ? hours / c.length : 0, open: (p.open || []).length, openNetUsd: openNet };
+}
+
+/* ---------- placar dos alertas de funding ----------
+   Cada alerta de entrada vira uma posição hipotética aberta na hora do alerta, mantida pelo prazo que o alerta
+   projetou (ciclo, ex.: 3 dias), sem regra de saída: assim dá para comparar o projetado com o que de fato pagou.
+   Acerto = terminou o prazo no positivo depois de todas as taxas. */
+export function alertScoreStep(sc, { rows, entries, now, fees, holdDays = 3, rules = FUND_RULES }) {
+  const p = sc && sc.since ? JSON.parse(JSON.stringify(sc)) : { since: now, open: [], done: [] };
+  const notional = rules.capital / 2 * rules.lev, H = holdDays * 864e5;
+  const still = [];
+  for (const o of p.open) {
+    if (rows) creditLegs(o, rows[o.coin] || {}, notional, now);
+    if (now < o.t + H) { still.push(o); continue; }
+    const costs = notional * (2 * legsFeePct(fees, o.s, o.l) + rules.slipPct) / 100;
+    const d = Object.assign({}, o, { endedAt: now, costsUsd: costs, netUsd: o.fundingUsd - costs });
+    d.hit = d.netUsd > 0; delete d.legs;
+    p.done.push(d);
+  }
+  p.open = still;
+  for (const e of entries || []) {
+    const cr = rows && rows[e.coin], rs = cr && cr[e.s], rl = cr && cr[e.l];
+    if (!rs || !rl || p.open.length >= 60) continue;
+    p.open.push({ key: e.key, coin: e.coin, s: e.s, l: e.l, t: now, holdDays, projUsd: e.projUsd, entrySpread: rs.apr - rl.apr,
+      fundingUsd: 0, payments: 0, legs: newLegs(rs, rl, e.s, e.l) });
+  }
+  p.done = p.done.slice(-300);
+  return p;
+}
+
+export function alertScoreSummary(p) {
+  if (!p) return null;
+  const d = p.done || [], proj = d.reduce((a, x) => a + (x.projUsd || 0), 0), real = d.reduce((a, x) => a + x.netUsd, 0);
+  return { since: p.since, scored: d.length, hits: d.filter((x) => x.hit).length, projUsd: proj, realUsd: real, open: (p.open || []).length };
 }

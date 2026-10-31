@@ -8,7 +8,7 @@ import { createChain, paidTo, DEFAULT_BCH_REST, DEFAULT_PRICE_URL } from './chai
 import { DEFAULT_CONFIG, sanitizeConfig, parseBook, computeMarket, decide, limitsFromEnv } from './bot.js';
 import { fundingSnapshot, runAlerts } from './alerts.js';
 import { paperStep, realStep } from './paper.js';
-import { fundPaperStep, fundPaperSummary } from './paperfund.js';
+import { fundPaperStep, fundPaperSummary, alertScoreStep, alertScoreSummary } from './paperfund.js';
 import FD from '../../core.js';
 import { withCreds, reloadCreds, saveCreds, credStatus, parseNiceHash, TG_TOKEN_RE, chatFromUpdates } from './creds.js';
 
@@ -209,8 +209,15 @@ export async function tick(env, opts = {}) {
     alertState.digest = queue.slice(-30); alertState.lastDigest = lastDigest;
   }
 
+  // Placar: cada alerta de entrada de funding vira uma posição hipotética acompanhada pelo prazo projetado.
+  const byKey = {}; for (const b of (funding && funding.best) || []) byKey[b.key] = b;
+  const entries = newAlerts.filter((a) => a.area === 'funding' && a.kind === 'entrada' && /^fe:/.test(a.key || '')).map((a) => {
+    const b = byKey[a.key.slice(3)]; return b ? { key: b.key, coin: b.coin, s: b.s, l: b.l, projUsd: b.netUsd } : null;
+  }).filter(Boolean);
+  const alertScore = alertScoreStep(state.alertScore, { rows: funding && funding.rows, entries, now, fees: FD.DEFAULT_FEES, holdDays: cfg.alertHold || 3 });
+
   const next = Object.assign({}, dec.state, alertState, {
-    lastTick: now, paper, real, fundPaper, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig,
+    lastTick: now, paper, real, fundPaper, alertScore, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig,
     market: mkt.ok ? { breakEvenEH: mkt.breakEvenEH, capEH: mkt.capEH, fillEH: mkt.fillEH, medianEH: mkt.medianEH, bidEH: mkt.bidEH,
       edgeAtBidPct: mkt.edgeAtBidPct, green: mkt.green, D: mkt.D, bchUsd: mkt.bchUsd, btcUsd: mkt.btcUsd, costPerBlockUsd: mkt.costPerBlockUsd,
       hashpriceNet: mkt.hashpriceNet, blockNetUsd: mkt.blockNetUsd, phDaysPerBlock: mkt.phDaysPerBlock, market: mkt.market } : { ok: false, reason: mkt.reason },
@@ -321,7 +328,8 @@ async function api(req, env, url, fetchFn) {
       state: { lastTick: state.lastTick, lastHeight: state.lastHeight, market: state.market, myBlocks: state.myBlocks || [], dailyUsd: state.dailyUsd || 0,
         errors: state.errors || [], edgeHist: state.edgeHist || [], alerts: (state.alerts || []).slice(-30).reverse(),
         paper: state.paper || null, real: state.real ? Object.assign({}, state.real, { paid: undefined }) : null,
-        fundPaper: state.fundPaper ? { summary: fundPaperSummary(state.fundPaper), open: state.fundPaper.open, closed: state.fundPaper.closed.slice(-100).reverse() } : null } });
+        fundPaper: state.fundPaper ? { summary: fundPaperSummary(state.fundPaper), open: state.fundPaper.open, closed: state.fundPaper.closed.slice(-100).reverse() } : null,
+        alertScore: state.alertScore ? { summary: alertScoreSummary(state.alertScore), open: state.alertScore.open.map((o) => Object.assign({}, o, { legs: undefined })), done: state.alertScore.done.slice(-100).reverse() } : null } });
   }
   if (p === '/config' && m === 'PUT') {
     const { config, errors } = sanitizeConfig(body, await getConfig(env), limits);

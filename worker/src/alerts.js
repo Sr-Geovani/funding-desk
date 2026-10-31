@@ -12,7 +12,7 @@ export function fundingSnapshot(predicted, cfg, now) {
     execShort: 'taker', execLong: 'taker', slipPct: 0.03, rebalUsd: 1, sort: 'net', now };
   const best = FD.opportunities(rows, params).slice(0, 20).map((o) => {
     const v = FDC.fundingVerdict(o, { hold, aprCap: 150 });
-    return { key: o.coin + '|' + o.s + '|' + o.l, coin: o.coin, s: o.s, l: o.l, spread: o.spread, title: 'short ' + o.s + ', long ' + o.l, level: v.level,
+    return { key: o.coin + '|' + o.s + '|' + o.l, coin: o.coin, s: o.s, l: o.l, spread: o.spread, netUsd: o.m.netUsd, title: 'short ' + o.s + ', long ' + o.l, level: v.level,
       netTxt: '~' + FDC.money(o.m.netUsd) + ' em ' + hold + ' dias com ' + FDC.money(o.m.notional, 0) + ' por perna' };
   }).filter((b) => b.level === 'go').slice(0, 5);
   return { best, rows, sent: FDR.sentiment(rows, Object.keys(p)) };

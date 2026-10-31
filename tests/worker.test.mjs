@@ -11,7 +11,7 @@ import { createMock, MOCK_KEYS } from '../worker/dev/mock.mjs';
 import { memoryKV } from '../worker/dev/server.mjs';
 import { seal, unseal, chatFromUpdates, parseNiceHash } from '../worker/src/creds.js';
 import { paperStep, realStep } from '../worker/src/paper.js';
-import { fundPaperStep, fundPaperSummary } from '../worker/src/paperfund.js';
+import { fundPaperStep, fundPaperSummary, alertScoreStep, alertScoreSummary } from '../worker/src/paperfund.js';
 const FDM = createRequire(import.meta.url)('../mining.js');
 
 const close = (a, b, eps = 1e-9, msg = '') => assert.ok(Math.abs(a - b) <= eps, `${msg} esperado ${b}, veio ${a}`);
@@ -565,4 +565,33 @@ test('mineração simulada: simulação antiga (sem diário) abre a operação n
   const old = { since: T0 - 3600e3, lastTs: T0 - 180e3, on: true, ph: 10, priceEH: 0.4, D: 500e9, btcUsd: 77000, blockNetUsd: 900, spendUsd: 5, evUsd: 5.2, lambda: 0.01, hoursOn: 1, sessions: 1, stops: 0, sess: { start: T0 - 3600e3, spendUsd: 5, lambda: 0.01 }, days: {} };
   const r = paperStep(old, { cfg: PCFG, mkt: pm(), now: T0, units: PU, limits: PL });
   assert.deepEqual(r.events, []); assert.equal(r.paper.run.start, T0); assert.deepEqual(r.paper.runs, []);
+});
+
+test('placar dos alertas: acompanha o prazo projetado e compara com o que pagou', () => {
+  const T0 = Date.UTC(2026, 9, 31, 12), H = 36e5, fees = { Bybit: { taker: 0.055 }, Hyperliquid: { taker: 0.045 } };
+  const rows = (next) => ({ ENA: { Bybit: { rate: 0.05, apr: 54.75, hours: 8, next }, Hyperliquid: { rate: 0, apr: 0, hours: 1, next: T0 + 999 * H } } });
+  const e = [{ key: 'ENA|Bybit|Hyperliquid', coin: 'ENA', s: 'Bybit', l: 'Hyperliquid', projUsd: 2.2 }];
+  let sc = alertScoreStep(null, { rows: rows(T0 + 8 * H), entries: e, now: T0, fees, holdDays: 1 });
+  assert.equal(sc.open.length, 1);
+  sc = alertScoreStep(sc, { rows: rows(T0 + 16 * H), entries: [], now: T0 + 8 * H + 60e3, fees, holdDays: 1 });
+  sc = alertScoreStep(sc, { rows: rows(T0 + 24 * H), entries: [], now: T0 + 16 * H + 60e3, fees, holdDays: 1 });
+  sc = alertScoreStep(sc, { rows: rows(T0 + 32 * H), entries: [], now: T0 + 24 * H + 60e3, fees, holdDays: 1 });
+  assert.equal(sc.open.length, 0); assert.equal(sc.done.length, 1);
+  const d = sc.done[0];
+  assert.equal(d.payments, 3); close(d.fundingUsd, 1.5, 1e-9);
+  close(d.costsUsd, 1000 * (2 * 0.1 + 0.03) / 100, 1e-9); close(d.netUsd, 1.5 - 2.3, 1e-9); assert.equal(d.hit, false);
+  const sum = alertScoreSummary(sc);
+  assert.deepEqual([sum.scored, sum.hits], [1, 0]); close(sum.projUsd, 2.2); close(sum.realUsd, -0.8, 1e-9);
+});
+
+test('integração: alerta de entrada de funding entra no placar', async () => {
+  const t = await setup();
+  try {
+    await t.call('POST', '/api/tick'); const r = await t.call('POST', '/api/tick');
+    assert.ok(r.body.alerts.some((a) => /ENA/.test(a.title)));
+    const st = await t.call('GET', '/api/status');
+    const sc = st.body.state.alertScore;
+    assert.equal(sc.summary.open, 1); assert.equal(sc.open[0].coin, 'ENA'); assert.ok(sc.open[0].projUsd > 0);
+    assert.equal(sc.open[0].legs, undefined);
+  } finally { t.server.close(); }
 });

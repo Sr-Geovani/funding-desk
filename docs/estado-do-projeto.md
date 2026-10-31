@@ -44,6 +44,10 @@ sempre identificado; nada de prometer previsão de sorte (Poisson é sem memóri
   Funding (`worker/src/paperfund.js`): entra após 2 leituras "Compensa" (até 3, uma por moeda, US$1.000, 2x),
   recebe/paga nos horários de cada exchange com a taxa prevista, sai com diferença ≤ 0 em 2 leituras; taxas taker
   nas 4 execuções + 0,03%. Mineração: cada "compraria → pausaria" vira uma operação (gasto, receita média, chance).
+- Placar dos alertas de funding (`alertScoreStep`): cada alerta de entrada vira posição hipotética pelo prazo projetado
+  (3 dias), sem saída antecipada; realizado = pagamentos − taxas; acerto = positivo. Em Diário → Robô e resumo no Radar.
+- Mineração simulada mostra os desfechos reais: sem bloco (o mais provável) perde o aluguel; com bloco, bloco − aluguel;
+  a média de longo prazo é separada. Simulação (Operar) e Diário usam os mesmos totais.
 - Ciclo do servidor: 3 min. Mínimo do Cloudflare é 1 min, mas o KV grátis aceita 1.000 gravações/dia e propaga em até
   60 s; abaixo de 3 min exige plano pago + Durable Objects. Atraso de 3 min custa < US$1 com 10 PH/s.
 
