@@ -52,6 +52,25 @@ export function stablePairs(fh, { fees, slipPct = 0.03, hours = 24 }) {
   return out;
 }
 
+// Meia-vida (AR(1)) e captura esperada em 72 h dos pares com spread positivo agora (% do tamanho).
+export function pairStatsOf(fh, FDI) {
+  const out = {};
+  if (!fh || !fh.coins || !FDI) return out;
+  for (const [c, e] of Object.entries(fh.coins)) {
+    const vs = Object.keys(e.v);
+    for (const A of vs) for (const B of vs) {
+      if (A === B) continue;
+      const a = e.v[A], b = e.v[B], n = Math.min(a.length, b.length), sp = [];
+      for (let i = 0; i < n; i++) { const x = a[a.length - n + i], y = b[b.length - n + i]; if (x !== null && y !== null) sp.push(x - y); }
+      if (sp.length < 12 || sp[sp.length - 1] <= 0) continue;
+      const m = FDI.ar1(sp);
+      if (!m) continue;
+      out[c + '|' + A + '|' + B] = { phi: +m.phi.toFixed(3), halfLifeH: +m.halfLifeH.toFixed(1), mu: +m.mu.toFixed(1), exp72: +FDI.expectedCapturePct(m, sp[sp.length - 1], 72).toFixed(4), n: sp.length };
+    }
+  }
+  return out;
+}
+
 // Nota de cada par (short A, long B) com spread acima do empate agora. fees: % taker por exchange.
 export function scorePairs(fh, { model, fees, slipPct = 0.03 }) {
   const out = {};

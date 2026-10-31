@@ -52,6 +52,11 @@ export function createMock() {
     if (p === '/wtm/asic.json') return send(200, s.wtm || { coins: {
       Litecoin: { tag: 'LTC', algorithm: 'Scrypt', block_time: '150', block_reward: 6.25, nethash: 2e15, exchange_rate: 0.0008, exchange_rate_vol: 500 },
       BitcoinCash: { tag: 'BCH', algorithm: 'SHA-256', block_time: '600', block_reward: 3.125, nethash: 4e18, exchange_rate: 0.0037, exchange_rate_vol: 300 } } });
+    // ---- mempool.space e Kraken (MEMPOOL_URL=<mock>/mempool, KRAKEN_URL=<mock>/kraken) ----
+    if (p === '/mempool/api/v1/difficulty-adjustment') return send(200, { progressPercent: 60, difficultyChange: 4, estimatedRetargetDate: Date.now() + 5 * 864e5, remainingBlocks: 800 });
+    if (p === '/mempool/api/v1/mining/hashrate/3d') return send(200, { currentDifficulty: 148e12, currentHashrate: 1.06e21 });
+    if (p === '/mempool/api/v1/mining/reward-stats/144') return send(200, { startBlock: 1, endBlock: 144, totalReward: '45347559570', totalFee: '347559570' });
+    if (p === '/kraken/0/public/OHLC') return send(200, { error: [], result: { BCHXBT: Array.from({ length: 100 }, (_, i) => [i, '0', '0', '0', String(i < 76 ? 0.0037 : 0.0039), '0', '1', 1]), last: 1 } });
     // ---- cotações e BCH ----
     if (p.startsWith('/cg/')) return send(200, { bitcoin: { usd: s.btcUsd }, 'bitcoin-cash': { usd: s.bchUsd } });
     // previsto de funding da Hyperliquid: ENA com 0,1%/8 h na Bybit e 0,00125%/h na HL (≈ 98% a.a. de diferença)

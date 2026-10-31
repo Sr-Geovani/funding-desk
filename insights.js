@@ -276,11 +276,30 @@ function executionSteps(o, p) {
   ];
 }
 
+/* ---------- funding: meia-vida do spread (AR(1)) ---------- */
+// series: spread por hora (% a.a.), mais antigo primeiro. Modelo: x(t) − μ = φ·(x(t−1) − μ) + ruído.
+// Meia-vida = horas para a distância até a média cair pela metade. Captura esperada em H horas, partindo de s0.
+function ar1(series) {
+  var x = (series || []).filter(function (v) { return v !== null && isFinite(v); });
+  if (x.length < 12) return null;
+  var n = x.length, mu = x.reduce(function (a, v) { return a + v; }, 0) / n, num = 0, den = 0;
+  for (var i = 1; i < n; i++) { num += (x[i] - mu) * (x[i - 1] - mu); den += (x[i - 1] - mu) * (x[i - 1] - mu); }
+  var phi = den > 0 ? Math.max(0, Math.min(0.999, num / den)) : 0;
+  return { phi: phi, mu: mu, n: n, halfLifeH: phi > 0 ? Math.log(0.5) / Math.log(phi) : 0 };
+}
+// Soma do spread esperado nas próximas H horas (% a.a. × horas) → % do tamanho recebido no período.
+function expectedCapturePct(m, s0, H) {
+  if (!m) return null;
+  var sum = 0, d = s0 - m.mu, f = m.phi;
+  for (var k = 1; k <= H; k++) { sum += m.mu + d * Math.pow(f, k); }
+  return sum / 8760;
+}
+
 var FDI = {
   dur: dur, fundingPlan: fundingPlan, planText: planText, capitalForTarget: capitalForTarget,
   backtestFunding: backtestFunding, backtestText: backtestText, nextBlockChance: nextBlockChance,
   poolOf: poolOf, networkSplit: networkSplit, lastBlockStory: lastBlockStory, miningOutlook: miningOutlook, allocation: allocation,
-  legCost: legCost, shortTerm: shortTerm, stayAdvice: stayAdvice, switchAdvice: switchAdvice, fundingFromHistory: fundingFromHistory, executionSteps: executionSteps
+  legCost: legCost, shortTerm: shortTerm, stayAdvice: stayAdvice, switchAdvice: switchAdvice, fundingFromHistory: fundingFromHistory, executionSteps: executionSteps, ar1: ar1, expectedCapturePct: expectedCapturePct
 };
 if (typeof module !== 'undefined' && module.exports) module.exports = FDI;
 else root.FDI = FDI;

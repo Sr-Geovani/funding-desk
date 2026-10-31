@@ -69,6 +69,13 @@ sempre identificado; nada de prometer previsão de sorte (Poisson é sem memóri
   histórico horário próprio (`fhist`), precisa de 24 h; `fundStable24` na config desliga. Simulações e placar com taxa maker.
 - Mineração: abas em grade 3 × 2; Rede com uma lista só de blocos (servidor; Blockchair sem backend) e cartão de padrões.
 - iPhone: barra inferior reancorada pelo visualViewport ao voltar do segundo plano.
+- Sinais além da sorte (`worker/src/signals.js`, pesquisa em `docs/pesquisa-mineracao.md`): DARR (BCH paga por hash ÷
+  BTC paga) a cada ciclo, com dificuldade e taxas do BTC (mempool.space) e BCH/BTC horário (Kraken) a cada 15 min;
+  reajuste do BTC com DARR previsto; BCH/BTC contra a média de 2 dias; medidor "janela fechando" (blocos/hora e fatia
+  dos pools que trocam de moeda); gravador do livro da NiceHash por hora da semana (`nhWeek`) e preço FIXED.
+  Tela: Mineração → Agora ("Janela do BCH"); Rede: mapa hora × dia e auditoria dos pools solo.
+- Funding: meia-vida (AR(1)) da diferença no histórico de 72 h; "Compensa" exige também esperado positivo pela meia-vida.
+  Servidor guarda `pairStats` dos pares acompanhados.
 - Ciclo do servidor: 3 min. Mínimo do Cloudflare é 1 min, mas o KV grátis aceita 1.000 gravações/dia e propaga em até
   60 s; abaixo de 3 min exige plano pago + Durable Objects. Atraso de 3 min custa < US$1 com 10 PH/s.
 

@@ -178,3 +178,14 @@ test('passo a passo de execução: pernas, tamanho, prazo do pagamento', () => {
   assert.match(sp[1], /à vista e abra SHORT do mesmo tamanho no perpétuo ENA-USDT da Bybit/);
   assert.match(sp[2], /antes do próximo pagamento/);
 });
+
+test('meia-vida do spread (AR(1)) e captura esperada', () => {
+  // série que volta à média 10 com φ = 0,8
+  const s = [100]; for (let i = 1; i < 72; i++) s.push(10 + (s[i - 1] - 10) * 0.8);
+  const m = I.ar1(s);
+  close(m.phi, 0.8, 0.05); close(m.halfLifeH, Math.log(0.5) / Math.log(m.phi), 1e-9);
+  assert.ok(m.halfLifeH > 2.5 && m.halfLifeH < 4);
+  const cap = I.expectedCapturePct(m, 100, 72), naive = 100 * 72 / 8760;
+  assert.ok(cap < naive * 0.5, 'spread que reverte captura bem menos que a projeção ingênua');
+  assert.equal(I.ar1([1, 2, 3]), null, 'pouco histórico');
+});

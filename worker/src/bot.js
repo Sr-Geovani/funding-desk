@@ -79,7 +79,9 @@ export function parseBook(d) {
   const tot = paying.reduce((a, o) => a + o.speed, 0);
   let acc = 0, med = null;
   for (const o of paying) { acc += o.speed; if (acc >= tot / 2) { med = o.price; break; } }
-  return { market: mk, fillEH: paying.length ? paying[0].price : null, medianEH: med, totalPH: tot, payingOrders: paying.length };
+  // menor preço entre ordens FIXED (preço garantido, costuma sair mais caro que a STANDARD)
+  const fixed = (s.orders || []).filter((o) => o.alive !== false && /FIXED/i.test(String((o.type && o.type.code) || o.type || ''))).map((o) => parseFloat(o.price) * toEH).filter(isFinite);
+  return { market: mk, fillEH: paying.length ? paying[0].price : null, medianEH: med, totalPH: tot, payingOrders: paying.length, fixedEH: fixed.length ? Math.min(...fixed) : null };
 }
 
 const ceil4 = (x) => Math.ceil(x * 1e4 - 1e-9) / 1e4;

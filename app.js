@@ -347,7 +347,7 @@ function stabOf(o){var x=stabMap[oppKey(o)];return x?x.stab:null}
 function fundFor(mode){
   var p=scanParams();p.mode=mode;
   var ops=FD.opportunities(state.rows,p),c=verdictCtx(p);
-  var vs=ops.map(function(o){var x=stabMap[oppKey(o)];return FDC.fundingVerdict(o,Object.assign({stab:stabOf(o),requireStable24:true,stable24:x?x.stable24:undefined},c))});
+  var vs=ops.map(function(o){var x=stabMap[oppKey(o)];return FDC.fundingVerdict(o,Object.assign({stab:stabOf(o),requireStable24:true,stable24:x?x.stable24:undefined,expNet:x?x.expNet:undefined,halfLifeH:x?x.halfLifeH:null},c))});
   return {ops:ops,vs:vs,sum:FDC.fundingSummary(ops,vs,{hold:p.hold})};
 }
 // Nota da IA do servidor para o par (se ele acompanha esse par há pelo menos 6 h).
@@ -427,7 +427,10 @@ function ensureStability(list){
       // 24 h seguidas acima do empate (regra validada no histórico)
       var d24=full.filter(function(x){return x.t>=Date.now()-24*36e5});
       var s24=d24.length>=3&&d24[0].t<=Date.now()-20*36e5?d24.every(function(x){return x.apr>=o.m.beApr}):false;
-      stabMap[oppKey(o)]={at:Date.now(),stab:FDC.stability(FD.seriesStats(sp,o.m.beApr)),bt:bt,stable24:s24};
+      // meia-vida (AR(1)) da diferença e o esperado no ciclo por ela (pesquisa: o que decide é quanto tempo dura)
+      var ar=FDI.ar1(full.map(function(x){return x.apr})),cap=ar?FDI.expectedCapturePct(ar,o.spread,hold()*24):null;
+      var expNet=cap===null?null:o.m.notional*cap/100-o.m.cost;
+      stabMap[oppKey(o)]={at:Date.now(),stab:FDC.stability(FD.seriesStats(sp,o.m.beApr)),bt:bt,stable24:s24,expNet:expNet,halfLifeH:ar?ar.halfLifeH:null};
     }).catch(function(){stabMap[oppKey(o)]={at:Date.now(),stab:null}});
   })).then(function(){stabPending=false;renderScan();renderHome()});
 }
@@ -680,7 +683,7 @@ function loadOps(){
     if(r[2].ok)ops.bal=r[2].v;else ops.err.bal=r[2].e.message;
     if(r[3].ok)ops.pools=r[3].v.list||[];else ops.err.pools=r[3].e.message;
     if(r[4].ok)ops.log=r[4].v.log||[];
-    renderOps();renderHome();renderMine();renderAcct();renderRadar();renderRobo();
+    renderOps();renderHome();renderMine();renderAcct();renderRadar();renderRobo();renderWindow();renderHeat();
   });
 }
 setInterval(function(){if(document.visibilityState==='visible'&&!$('mine-ops').hidden&&!$('tab-mine').hidden)loadOps()},30000);
@@ -710,7 +713,8 @@ function simResultHTML(p){
     '<div class="box" style="margin-top:8px"><b>Entrou em algum bloco?</b>'+
     (dr?'Enquanto o robô estaria comprando, a rede BCH achou <strong>'+dr+' bloco'+(dr>1?'s':'')+'</strong>. Cada um seria seu com '+(pr?'~'+pctp(pr*100,2):'uma pequena')+' de chance (sua potência ÷ a da rede). ':'A rede ainda não achou nenhum bloco enquanto o robô estaria comprando. ')+
     (n?'<span class="good">'+(n===1?'Saiu 1':'Saíram '+n)+' para você: '+(p.wins||[]).slice(-5).reverse().map(function(w){return 'bloco '+w.height+' ('+usd(w.usd,0)+')'}).join(', ')+'.</span> ':(dr?'Nenhum saiu para você até agora, então o aluguel foi todo perdido. ':''))+
-    'O sorteio usa o hash de cada bloco real, que ninguém controla: o resultado não pode ser escolhido depois.</div>'+
+    'O sorteio usa o hash de cada bloco real, que ninguém controla: o resultado não pode ser escolhido depois.'+
+    (p.lambda>0?' <strong>Sorte:</strong> esperado '+nf(p.lambda,2)+' bloco'+(p.lambda>=1.5?'s':'')+'; normal entre '+Math.max(0,Math.floor(p.lambda-2*Math.sqrt(p.lambda)))+' e '+Math.ceil(p.lambda+2*Math.sqrt(p.lambda))+'; saíram '+n+(n>p.lambda+2*Math.sqrt(p.lambda)?' (sorte acima do normal)':(n===0&&p.lambda>3?' (azar acima do normal)':'')):'')+'</div>'+
     '<details style="margin-top:8px"><summary>Chance e média de longo prazo</summary>'+outcomesHTML(p.spendUsd,p.evUsd,p.lambda,p.blockNetUsd)+'</details>';
 }
 // Contínuo (sua configuração) × rajada de 50 PH/s parando no bloco (método do vídeo): mesmos blocos e sorteio.
@@ -869,6 +873,39 @@ document.addEventListener('click',function(e){
   if(!confirm('Zerar as operações simuladas de '+({funding:'funding',algos:'outras moedas'}[r.dataset.roboreset]||'mineração')+' e começar de agora?'))return;
   apiCall('POST','/paper/reset',{what:r.dataset.roboreset}).then(function(){loadOps()},function(err){alert('Erro: '+err.message)});
 });
+/* ---------- janela do BCH: DARR e sinais além da sorte (docs/pesquisa-mineracao.md) ---------- */
+function renderWindow(){
+  var el=$('m_window');if(!el)return;
+  var st=ops.status&&ops.status.state,D=st&&st.darr;
+  if(!D){el.className='card';el.innerHTML='<div class="eyebrow">Janela do BCH</div><p class="note" style="margin:4px 0 0">'+(settings.apiUrl?'Calculando no servidor (até 15 min).':'Precisa do backend conectado: ele calcula o DARR a cada 3 min.')+'</p>';return}
+  var m=st.market||{},cfg=ops.status.config||{},green=m.green,d=D.v,R=st.retarget,M=st.momentum,W=st.window;
+  var lvl=green?'favoravel':(d>=1?'neutro':'desfavoravel');el.className='card sig '+lvl;
+  var title=green?'Janela aberta: o aluguel está abaixo do que o BCH paga':(d>=1?'Perto: o BCH paga mais que o BTC, mas a margem ainda não passou do seu mínimo':'Janela fechada: o BCH está pagando menos que o BTC');
+  var rows=[];
+  rows.push('<div class="kv" style="margin-top:8px"><div><small>BCH paga (BTC/EH/dia)</small><span>'+D.hpBch.toFixed(4)+'</span></div><div><small>BTC paga</small><span>'+D.hpBtc.toFixed(4)+'</span></div><div><small>NiceHash cobra (lance)</small><span>'+(m.bidEH?m.bidEH.toFixed(4):'—')+(D.nhRatio?' <span class="note">('+nf(D.nhRatio,3)+'× o BTC)</span>':'')+'</span></div></div>');
+  if(R)rows.push('<div class="box" style="margin-top:8px"><b>Próximo reajuste do BTC</b>'+(R.at?'Por volta de '+new Date(R.at).toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'})+' ('+(R.remainingBlocks||0)+' blocos). ':'')+'Estimativa '+pct(R.changePct,1)+' na dificuldade do BTC → o DARR vai para ~<strong>'+nf(R.darrAfter,3)+'</strong>'+(R.changePct>0?' (o BCH fica relativamente mais vantajoso).':' (o BCH fica relativamente menos vantajoso).')+'</div>');
+  if(M)rows.push('<div class="box" style="margin-top:8px"><b>BCH contra o BTC</b>Preço '+pct(M.vsEmaPct,1)+' em relação à média de 2 dias'+(M.ret24Pct!==null?'; '+pct(M.ret24Pct,1)+' em 24 h':'')+'. '+(M.vsEmaPct>2?'O preço subiu antes da dificuldade reagir: costuma abrir janela nas próximas horas.':(M.vsEmaPct<-2?'O preço caiu antes da dificuldade: a janela tende a piorar.':'Sem sinal forte.'))+'</div>');
+  if(W&&W.last24h)rows.push('<div class="box" style="margin-top:8px"><b>A janela está fechando?</b>Blocos na última hora: <strong>'+W.last1h+'</strong> (esperado 6); últimas 6 h: '+W.last6h+' (esperado 36). Pools grandes que trocam de moeda: '+(W.bigShare6h!==null?pctp(W.bigShare6h*100,0):'—')+' dos blocos das últimas 6 h ('+(W.bigShare24h!==null?pctp(W.bigShare24h*100,0):'—')+' em 24 h). '+
+    (W.last6h>42||(W.bigShare6h!==null&&W.bigShare24h!==null&&W.bigShare6h>W.bigShare24h+0.1)?'Hash grande chegando: a dificuldade vai subir e a janela tende a fechar em horas.':'Sem sinal de hash grande chegando.')+'</div>');
+  el.innerHTML='<div class="row between"><div class="eyebrow">Janela do BCH</div><span class="chip '+(green?'ok':(d>=1?'warn':'bad'))+'">DARR '+nf(d,3)+'</span></div><div class="lead">'+esc(title)+'</div>'+
+    '<p class="note" style="margin:4px 0 0">DARR = quanto o BCH paga por hash ÷ quanto o BTC paga. Agora: '+esc(FDS.band(d))+'.</p>'+rows.join('')+
+    '<details style="margin-top:8px"><summary>Como ler o DARR</summary><p class="note" style="margin:6px 0 0">Blocos saem o tempo todo, com DARR alto ou baixo: o DARR não muda a chance de achar bloco. Ele mede se o aluguel compensa. A NiceHash cobra pelo valor do hash no BTC (o maior mercado). Se o BCH paga menos que o BTC (DARR abaixo de 1), você paga mais pelo hash do que ele rende em média no BCH: cada bloco que você acha sai caro. Acima de ~1,04, o BCH paga mais que o aluguel com as taxas, e cada bloco sai mais barato que o valor dele. Nos últimos 6 meses a média foi 0,94 e ficou acima de 1,04 só em 0,5% das horas, em janelas de poucas horas. O robô já compra só quando a margem no lance passa do seu mínimo: é a mesma conta, feita com o preço real da NiceHash.</p></details>';
+}
+// Referência do DARR (180 dias até 30/10/2026; pesquisa) para o texto da faixa.
+var FDS={band:function(d){var A=[[1.05,'0,1'],[1.04,'0,5'],[1.03,'1,3'],[1.0,'10,3']];for(var i=0;i<A.length;i++)if(d>=A[i][0])return 'acima de '+nf(A[i][0],2)+', o que aconteceu em só '+A[i][1]+'% das horas nos últimos 6 meses';return d>=0.94?'acima da média dos últimos 6 meses (0,94), mas abaixo de 1':'abaixo da média dos últimos 6 meses (0,94)'}};
+// Mapa hora × dia da margem do aluguel gravada pelo servidor (horário local).
+function renderHeat(){
+  var el=$('bl_heat');if(!el)return;
+  var W=ops.status&&ops.status.state&&ops.status.state.nhWeek;
+  if(!W){el.innerHTML='<h2>Aluguel por hora e dia</h2><p class="note">O servidor grava o livro da NiceHash a cada 3 min; o mapa aparece com o backend conectado.</p>';return}
+  var tot=W.reduce(function(a,b){return a+b[0]},0),days=['dom','seg','ter','qua','qui','sex','sáb'],off=-new Date().getTimezoneOffset()/60;
+  var cell=function(dl,hl){var hu=((hl-off)%24+24)%24,du=(dl+Math.floor((hl-off)/24)+7)%7,b=W[du*24+hu];return b&&b[0]?b[1]/b[0]:null};
+  var col=function(v){if(v===null)return 'transparent';var a=Math.min(.6,.12+Math.abs(v)/12);return v>=0?'rgba(46,125,50,'+a+')':'rgba(198,40,40,'+a+')'};
+  var h='<h2>Margem do aluguel por hora e dia</h2><p class="note" style="margin:4px 0 8px">Média da margem no lance (%) gravada pelo servidor, no horário local. '+tot+' leituras de 3 min'+(tot<2000?': ainda pouco; o mapa fica confiável com 4 a 8 semanas.':'.')+' Verde = aluguel barato; vermelho = caro.</p>'+
+    '<div class="scroll"><table class="heat" style="font-size:11px"><tr><th>h</th>'+days.map(function(d){return '<th>'+d+'</th>'}).join('')+'</tr>';
+  for(var hl=0;hl<24;hl++){h+='<tr><td class="mono">'+('0'+hl).slice(-2)+'</td>';for(var dl=0;dl<7;dl++){var v=cell(dl,hl);h+='<td class="mono" style="text-align:center;background:'+col(v)+'">'+(v===null?'':nf(v,1))+'</td>'}h+='</tr>'}
+  el.innerHTML=h+'</table></div>';
+}
 /* ---------- registro dos blocos da rede (servidor) ---------- */
 var blk={list:[],sum:null,at:0,err:null};
 function loadBlocksLog(force){
@@ -897,6 +934,7 @@ function renderBlocksLog(){
       'Assinatura: '+esc(b.tag||'—'),b.backfill?'Buscado depois: sem dados de mercado do momento.':''].filter(Boolean);
     return '<details class="trow"><summary style="list-style:none;cursor:pointer"><div>'+head+'</div><div class="note">'+line+'</div></summary><div class="note" style="margin-top:4px">'+det.join('<br>')+'</div></details>'}).join('')+'</div>'+
     (L.length>40?'<p class="note">Mostrando 40 de '+L.length+'. O CSV tem todos.</p>':'');
+  renderAudit(L);
   if(!S){$('bl_sum').innerHTML='';return}
   var lh=new Array(24).fill(0);S.solo.hoursUtc.forEach(function(n,h){var d=new Date(Date.UTC(2026,0,1,h));lh[d.getHours()]+=n});
   var top=lh.map(function(n,h){return [h,n]}).filter(function(x){return x[1]>0}).sort(function(a,b){return b[1]-a[1]}).slice(0,4);
@@ -908,6 +946,16 @@ function renderBlocksLog(){
     (S.solo.edge!==null?'Margem média do aluguel quando saíram: '+pct(S.solo.edge,1)+' (outros blocos: '+(S.other.edge!==null?pct(S.other.edge,1):'—')+'). ':'')+
     (top.length?'Horários (local) com mais blocos solo: '+top.map(function(x){return ('0'+x[0]).slice(-2)+'h ('+x[1]+')'}).join(', ')+'. ':'')+
     'Intervalos: '+pctp(S.n?S.fast/S.n*100:0,0)+' abaixo de 2 min e '+pctp(S.n?S.slow/S.n*100:0,0)+' acima de 30 min (sorteio puro daria ~18% e ~5%).</div>';
+}
+// Auditoria dos pools solo pela própria blockchain: quantos blocos, a fatia que o pool tirou e quantas saídas.
+function renderAudit(L){
+  var el=$('bl_audit');if(!el)return;
+  var by={};(L||[]).filter(function(b){return b.solo}).forEach(function(b){var e=by[b.pool]||(by[b.pool]={n:0,fees:[],outs:[]});e.n++;if(b.poolFeePct!==null&&b.poolFeePct!==undefined)e.fees.push(b.poolFeePct);e.outs.push(b.outs)});
+  var ks=Object.keys(by).sort(function(a,b){return by[b].n-by[a].n});
+  if(!ks.length){el.innerHTML='<h2>Auditoria dos pools solo</h2><p class="note">Sem blocos solo no registro ainda.</p>';return}
+  var med=function(a){if(!a.length)return null;var x=a.slice().sort(function(p,q){return p-q});return x[Math.floor(x.length/2)]};
+  el.innerHTML='<h2>Auditoria dos pools solo</h2><p class="note" style="margin:4px 0 8px">Lido de cada bloco: a recompensa vai direto para o minerador e o pool fica com uma fatia. Fatia diferente da anunciada ou bloco sem pagamento ao minerador é sinal de alerta (há golpes de pools "solo" que desviam o hash).</p>'+
+    '<div class="scroll"><table><tr><th>Pool</th><th>Blocos</th><th>Fatia do pool</th><th>Saídas</th></tr>'+ks.map(function(k){var e=by[k],f=med(e.fees);return '<tr><td>'+esc(k)+'</td><td>'+e.n+'</td><td>'+(f===null?'não separada':nf(f,1)+'%')+'</td><td>'+med(e.outs)+'</td></tr>'}).join('')+'</table></div>';
 }
 $('bl_csv').addEventListener('click',function(){
   if(!blk.list.length)return;
@@ -1481,7 +1529,8 @@ function subTab(t,sub){
   var cfg=SUBS[t];
   if(t==='mine'&&sub==='algos'){loadMarketMap();renderAlgos()}
   if(t==='mine'&&sub==='ops')loadOps();
-  if(t==='mine'&&sub==='net')loadBlocksLog();
+  if(t==='mine'&&sub==='net'){loadBlocksLog();renderHeat()}
+  if(t==='mine'&&sub==='now')renderWindow();
   if(t==='diary'&&sub==='robo'){renderRobo();if(settings.apiUrl&&Date.now()-(ops.at||0)>60000)loadOps()}
   cfg[1].forEach(function(x){$(t+'-'+x).hidden=x!==sub});
   document.querySelectorAll('#'+cfg[0]+' button').forEach(function(b){b.setAttribute('aria-pressed',b.dataset.sub===sub?'true':'false')});

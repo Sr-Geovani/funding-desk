@@ -13,8 +13,10 @@ import FD from '../../core.js';
 import FDR from '../../radar.js';
 import { algoPaperStep } from './paperalgo.js';
 import { FUND_MODEL } from './fundmodel.js';
-import { updateHistory, pickCoins, scorePairs, stablePairs } from './fundai.js';
+import { updateHistory, pickCoins, scorePairs, stablePairs, pairStatsOf } from './fundai.js';
 import { blockRecord, blockSummary, poolOf } from './blocks.js';
+import { darrOf, retargetOf, momentumOf, windowMeter, weekAdd } from './signals.js';
+import FDI from '../../insights.js';
 import { withCreds, reloadCreds, saveCreds, credStatus, parseNiceHash, TG_TOKEN_RE, chatFromUpdates } from './creds.js';
 
 export const VERSION = '1.0.0';
@@ -173,6 +175,27 @@ export async function tick(env, opts = {}) {
       blockBuf = []; blockFlush = now;
     }
   }
+  // Sinais além da sorte (docs/pesquisa-mineracao.md): dados do BTC e BCH/BTC a cada 15 min; DARR, gravador e medidor a cada ciclo.
+  let msig = state.msig || {}, recentBlocks = state.recentBlocks, nhWeek = state.nhWeek;
+  if (now - (msig.at || 0) >= 15 * 60e3) {
+    const mp = (env.MEMPOOL_URL || 'https://mempool.space').replace(/\/$/, ''), kr = (env.KRAKEN_URL || 'https://api.kraken.com').replace(/\/$/, '');
+    const getJ = (u) => fetchFn(u, { headers: { accept: 'application/json', 'user-agent': 'funding-desk/1.0' } }).then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
+    const [adj, hr, rw, oh] = await Promise.all([getJ(mp + '/api/v1/difficulty-adjustment'), getJ(mp + '/api/v1/mining/hashrate/3d'), getJ(mp + '/api/v1/mining/reward-stats/144'),
+      getJ(kr + '/0/public/OHLC?pair=BCHXBT&interval=60')].map(settle));
+    const closes = oh.ok && oh.v.result ? (Object.entries(oh.v.result).find(([k]) => k !== 'last') || [null, []])[1].map((c) => +c[4]) : null;
+    msig = { at: now, adj: adj.ok ? adj.v : msig.adj, dBtc: hr.ok ? hr.v.currentDifficulty : msig.dBtc,
+      feesBtc: rw.ok ? (+rw.v.totalFee / Math.max(1, rw.v.endBlock - rw.v.startBlock + 1)) / 1e8 : msig.feesBtc,
+      mom: closes ? momentumOf(closes) : msig.mom };
+    if (!adj.ok || !hr.ok) errors.push('dados do BTC (mempool.space): ' + (adj.ok ? hr.e : adj.e));
+  }
+  const bchBtc = prices.ok && prices.v.btcUsd ? prices.v.bchUsd / prices.v.btcUsd : null;
+  const dr = info.ok ? darrOf({ dBch: info.v.difficulty, feesBch: state.feesBch || 0, bchBtc, dBtc: msig.dBtc, feesBtc: msig.feesBtc || 0 }) : null;
+  const darr = dr ? { v: dr.darr, hpBch: dr.hpBch, hpBtc: dr.hpBtc, nhRatio: mkt.ok && mkt.bidEH ? mkt.bidEH / dr.hpBtc : null, at: now } : state.darr || null;
+  if (recentBlocks === undefined) recentBlocks = (await kvGet(env, 'blocks', [])).slice(-200).map((b) => ({ t: b.t, pool: poolOf(b.tag).pool, solo: poolOf(b.tag).solo }));
+  for (const b of newBlocks) { const p = poolOf(b.tag); recentBlocks.push({ t: b.time, pool: p.pool, solo: p.solo }); }
+  recentBlocks = recentBlocks.filter((b) => now - b.t <= 26 * 3600e3);
+  if (mkt.ok) nhWeek = weekAdd(nhWeek, now, { edge: mkt.edgeAtBidPct, price: mkt.bidEH, ph: book ? book.totalPH : 0, darr: dr ? dr.darr : NaN });
+
   // Variante "rajada" (método do vídeo): 50 PH/s, para no bloco; mesmos blocos reais, mesmo sorteio, mesmos limites.
   let paperBurst = state.paperBurst || null;
   if (cfg.mode === 'observe') paperBurst = paperStep(paperBurst, { cfg: Object.assign({}, cfg, { targetPh: 50, onBlock: 'cancel' }), mkt, now, units, limits, blocks: newBlocks }).paper;
@@ -224,7 +247,7 @@ export async function tick(env, opts = {}) {
     for (const e of fp.events) log.push({ t: now, kind: 'simulado', text: e });
   }
   // IA (modo sombra): histórico horário próprio + nota dos pares; robô "Regras + IA" ao lado do "Regras".
-  let aiScores = state.aiScores || {}, fundPaperAI = state.fundPaperAI || null, fhistHour = state.fhistHour, stable24 = state.stable24 || {};
+  let aiScores = state.aiScores || {}, fundPaperAI = state.fundPaperAI || null, fhistHour = state.fhistHour, stable24 = state.stable24 || {}, pairStats = state.pairStats || {};
   if (funding && FUND_MODEL) {
     const hour = Math.floor(now / 3600e3);
     if (hour !== fhistHour) {
@@ -233,6 +256,7 @@ export async function tick(env, opts = {}) {
       await kvPut(env, 'fhist', fh);
       aiScores = scorePairs(fh, { model: FUND_MODEL, fees: FD.DEFAULT_FEES });
       stable24 = stablePairs(fh, { fees: FD.DEFAULT_FEES });
+      pairStats = pairStatsOf(fh, FDI);
       fhistHour = hour;
     }
     const okBest = (funding.best || []).filter((b) => aiScores[b.key] && aiScores[b.key].p >= FUND_MODEL.threshold);
@@ -282,7 +306,7 @@ export async function tick(env, opts = {}) {
   const alertScore = alertScoreStep(state.alertScore, { rows: funding && funding.rows, entries, now, fees: FD.DEFAULT_FEES, holdDays: cfg.alertHold || 3 });
 
   const next = Object.assign({}, dec.state, alertState, {
-    lastTick: now, stable24, paper, paperBurst, blockBuf, blockFlush, lastBlockT, real, fundPaper, alertScore, algoPaper, algoTs, aiScores, fundPaperAI, fhistHour, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig,
+    lastTick: now, stable24, pairStats, msig, darr, recentBlocks, nhWeek, paper, paperBurst, blockBuf, blockFlush, lastBlockT, real, fundPaper, alertScore, algoPaper, algoTs, aiScores, fundPaperAI, fhistHour, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig,
     market: mkt.ok ? { breakEvenEH: mkt.breakEvenEH, capEH: mkt.capEH, fillEH: mkt.fillEH, medianEH: mkt.medianEH, bidEH: mkt.bidEH,
       edgeAtBidPct: mkt.edgeAtBidPct, green: mkt.green, D: mkt.D, bchUsd: mkt.bchUsd, btcUsd: mkt.btcUsd, costPerBlockUsd: mkt.costPerBlockUsd,
       hashpriceNet: mkt.hashpriceNet, blockNetUsd: mkt.blockNetUsd, phDaysPerBlock: mkt.phDaysPerBlock, market: mkt.market } : { ok: false, reason: mkt.reason },
@@ -290,7 +314,7 @@ export async function tick(env, opts = {}) {
   });
   // Histórico curto da margem (para achar horários baratos), um ponto a cada ~15 min.
   const hist = next.edgeHist = (state.edgeHist || []);
-  if (mkt.ok && (!hist.length || now - hist[hist.length - 1][0] >= 15 * 60e3)) hist.push([now, +mkt.edgeAtBidPct.toFixed(2), +mkt.bidEH.toFixed(4)]);
+  if (mkt.ok && (!hist.length || now - hist[hist.length - 1][0] >= 15 * 60e3)) hist.push([now, +mkt.edgeAtBidPct.toFixed(2), +mkt.bidEH.toFixed(4), darr ? +darr.v.toFixed(4) : null, book ? Math.round(book.totalPH) : null, book && book.fixedEH ? +book.fixedEH.toFixed(4) : null]);
   next.edgeHist = hist.slice(-672); // 7 dias
   await kvPut(env, 'state', next);
   await appendLog(env, log);
@@ -396,7 +420,9 @@ async function api(req, env, url, fetchFn) {
         fundPaper: state.fundPaper ? { summary: fundPaperSummary(state.fundPaper), open: state.fundPaper.open, closed: state.fundPaper.closed.slice(-100).reverse() } : null,
         algoPaper: state.algoPaper || null,
         fundPaperAI: state.fundPaperAI ? { summary: fundPaperSummary(state.fundPaperAI), open: state.fundPaperAI.open, closed: state.fundPaperAI.closed.slice(-100).reverse() } : null,
-        aiScores: state.aiScores || {}, stable24: Object.keys(state.stable24 || {}),
+        aiScores: state.aiScores || {}, stable24: Object.keys(state.stable24 || {}), pairStats: state.pairStats || {},
+        darr: state.darr || null, retarget: state.msig && state.darr ? retargetOf(state.msig.adj, state.darr.v) : null, momentum: state.msig ? state.msig.mom : null,
+        window: windowMeter(state.recentBlocks || [], Date.now()), nhWeek: state.nhWeek || null,
         model: FUND_MODEL ? { threshold: FUND_MODEL.threshold, report: FUND_MODEL.report } : null,
         alertScore: state.alertScore ? { summary: alertScoreSummary(state.alertScore, FUND_MODEL ? FUND_MODEL.threshold : 0.5), open: state.alertScore.open.map((o) => Object.assign({}, o, { legs: undefined })), done: state.alertScore.done.slice(-100).reverse() } : null } });
   }

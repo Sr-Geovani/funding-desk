@@ -77,9 +77,14 @@ function fundingVerdict(o, ctx) {
         ? ' Mas a diferença não ficou acima do empate nas últimas 24 h seguidas: nos últimos 90 dias, entrar assim perdeu dinheiro na maioria das vezes.'
         : ' Conferindo se a diferença ficou acima do empate nas últimas 24 h seguidas.';
       action = 'Espere 24 h de diferença estável acima do empate; entre com ordem limite (maker) nas duas pernas.';
+    } else if (ctx.expNet !== undefined && ctx.expNet !== null && ctx.expNet <= 0) {
+      // estável, mas a diferença costuma voltar rápido: pela meia-vida, o esperado no ciclo não paga as taxas
+      level = 'maybe';
+      why += ' Ficou acima do empate nas últimas 24 h, mas pela meia-vida da diferença (~' + nf(ctx.halfLifeH || 0, 0) + ' h) o esperado em ' + hold + ' dias (~' + money(ctx.expNet) + ') não paga as taxas.';
+      action = 'Espere a diferença ficar mais firme (meia-vida maior) ou um spread maior; entre com ordem limite (maker).';
     } else {
       action = action.replace(' Registre no Diário.', ' Use ordem limite (maker) nas duas pernas. Registre no Diário.');
-      why += ' Ficou acima do empate nas últimas 24 h seguidas.';
+      why += ' Ficou acima do empate nas últimas 24 h seguidas' + (ctx.expNet !== undefined && ctx.expNet !== null ? '; pela meia-vida (~' + nf(ctx.halfLifeH || 0, 0) + ' h), o esperado em ' + hold + ' dias é ~' + money(ctx.expNet) : '') + '.';
     }
   }
   return { level: level, title: title, why: why, action: action, risks: risks };

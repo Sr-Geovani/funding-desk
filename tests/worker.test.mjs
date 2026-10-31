@@ -129,7 +129,7 @@ async function setup() {
   await new Promise((r) => server.listen(0, r));
   const base = 'http://127.0.0.1:' + server.address().port;
   const env = { FD_KV: memoryKV(), PANEL_TOKEN: 'token-de-teste-com-mais-de-24-chars', ALLOWED_ORIGIN: 'https://sr-geovani.github.io',
-    NH_BASE: base + '/nh', BCH_REST: base + '/bch', PRICE_URL: base + '/cg/x', HL_URL: base + '/hl/info', WTM_URL: base + '/wtm/asic.json', NH_API_KEY: MOCK_KEYS.key, NH_API_SECRET: MOCK_KEYS.secret, NH_ORG_ID: MOCK_KEYS.org,
+    NH_BASE: base + '/nh', BCH_REST: base + '/bch', PRICE_URL: base + '/cg/x', HL_URL: base + '/hl/info', WTM_URL: base + '/wtm/asic.json', MEMPOOL_URL: base + '/mempool', KRAKEN_URL: base + '/kraken', NH_API_KEY: MOCK_KEYS.key, NH_API_SECRET: MOCK_KEYS.secret, NH_ORG_ID: MOCK_KEYS.org,
     MAX_ORDER_BTC: '0.01', MAX_LIMIT_PH: '100', MAX_DAILY_USD: '1000' };
   const call = async (method, path, body, token = env.PANEL_TOKEN) => {
     const r = await worker.fetch(new Request('https://api.example' + path, { method, headers: { Authorization: 'Bearer ' + token, Origin: 'https://sr-geovani.github.io', 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined }), env, {});
@@ -807,5 +807,40 @@ test('funding: regra validada exige 24 h seguidas acima do empate (ordem limite)
     await t.call('PUT', '/api/config', { fundStable24: true });
     await t.call('POST', '/api/tick'); const r = await t.call('POST', '/api/tick');
     assert.equal(r.body.alerts.filter((a) => a.kind === 'entrada' && a.area === 'funding').length, 0);
+  } finally { t.server.close(); }
+});
+
+/* ---------- sinais de mineração (DARR etc.) ---------- */
+import { hashpriceEH, darrOf, darrBand, retargetOf, momentumOf, windowMeter, weekAdd } from '../worker/src/signals.js';
+test('DARR: BCH paga por hash ÷ BTC paga por hash', () => {
+  const hp = hashpriceEH(1e12, 3.125, 1);
+  close(hp, 86400 * 1e18 / (1e12 * 4294967296) * 3.125, 1e-9);
+  // mesma dificuldade relativa e BCH a 1/150 do BTC com dificuldade 150x menor → DARR 1
+  const r = darrOf({ dBch: 1e12, bchBtc: 1 / 150, dBtc: 150e12 });
+  close(r.darr, 1, 1e-12);
+  assert.match(darrBand(1.06), /só 0,1% das horas/); assert.match(darrBand(0.9), /abaixo da média/);
+  const rt = retargetOf({ difficultyChange: 5, estimatedRetargetDate: 1, remainingBlocks: 10, progressPercent: 99 }, 0.97);
+  close(rt.darrAfter, 0.97 * 1.05, 1e-12);
+  const m = momentumOf(new Array(100).fill(0.004).concat(new Array(24).fill(0.0044)));
+  assert.ok(m.vsEmaPct > 0 && m.ret24Pct > 9);
+  const now = Date.UTC(2026, 9, 31, 12), rec = [];
+  for (let i = 0; i < 10; i++) rec.push({ t: now - i * 300e3, pool: i < 6 ? 'ViaBTC' : 'CKPool Solo', solo: i >= 6 });
+  const w = windowMeter(rec, now);
+  assert.deepEqual([w.last1h, w.solo6h], [10, 4]); close(w.bigShare6h, 0.6);
+  let wk = weekAdd(null, now, { edge: 2, price: 0.42, ph: 19000, darr: 1.01 });
+  wk = weekAdd(wk, now, { edge: 4, price: 0.40, ph: 19000, darr: 1.03 });
+  const b = wk[new Date(now).getUTCDay() * 24 + 12]; assert.equal(b[0], 2); close(b[1] / b[0], 3);
+});
+
+test('integração: DARR, reajuste do BTC, BCH/BTC contra a média e medidor no status', async () => {
+  const t = await setup();
+  try {
+    await t.call('POST', '/api/tick');
+    const st = (await t.call('GET', '/api/status')).body.state;
+    assert.ok(st.darr && st.darr.v > 0, JSON.stringify(st.darr));
+    close(st.retarget.darrAfter, st.darr.v * 1.04, 1e-9);
+    assert.ok(st.momentum.vsEmaPct > 0 && st.momentum.ret24Pct > 0);
+    assert.equal(st.window.exp1h, 6); assert.equal(st.nhWeek.length, 168);
+    assert.ok(st.edgeHist.length && st.edgeHist[0].length >= 4);
   } finally { t.server.close(); }
 });

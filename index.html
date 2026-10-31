@@ -338,6 +338,7 @@ details.card>summary{color:var(--fg);font-size:15px}
       <button data-sub="net" aria-pressed="false">Rede</button>
     </div>
     <div id="mine-now" class="stack">
+      <div class="card sig" id="m_window"></div>
       <div class="card sig" id="m_sig"></div>
       <div class="card" id="m_out"></div>
       <div class="card"><div class="eyebrow">Comparar</div><div class="lead">Onde o hash alugado rende mais hoje</div>
@@ -481,6 +482,8 @@ details.card>summary{color:var(--fg);font-size:15px}
         <div class="row" style="margin-top:10px"><button class="sm" id="bl_csv">Exportar CSV</button><button class="sm" id="bl_more">Buscar blocos anteriores</button></div>
       </div>
       <div class="card" id="bl_sumcard"><h2>Padrões dos blocos</h2><div id="bl_sum"><p class="note">Precisa do backend conectado.</p></div></div>
+      <div class="card" id="bl_heat"></div>
+      <div class="card" id="bl_audit"></div>
       <div class="card"><h3 style="margin-bottom:8px">Dificuldade nos últimos blocos (G)</h3><div class="chart" id="n_chart"></div>
         <p class="note" style="margin:6px 0 0">O BCH reajusta a dificuldade a cada bloco (ASERT, meia-vida de 2 dias). Blocos atrasados baixam a dificuldade do próximo; isso deixa o hash um pouco mais rentável, não "mais perto" de achar.</p></div>
     </div>
