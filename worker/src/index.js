@@ -162,7 +162,8 @@ export async function tick(env, opts = {}) {
     for (const b of newBlocks) {
       const on = cfg.mode === 'observe' && !!(sp && sp.on && sp.ph > 0);
       const prob = on && b.difficulty ? sp.ph * 1e15 / (b.difficulty * 4294967296 / 600 + sp.ph * 1e15) : 0;
-      blockBuf.push(blockRecord(b, { prevT: lastBlockT, mkt, book, sim: { ph: on ? sp.ph : 0, prob, won: won.has(b.height) }, mineBch: b.mine }));
+      const realPH = orders.filter((o) => o.alive && (cfg.managed || []).includes(o.id)).reduce((x, o) => x + (o.speedPH || 0), 0);
+      blockBuf.push(blockRecord(b, { prevT: lastBlockT, mkt, book, sim: { ph: on ? sp.ph : 0, prob, won: won.has(b.height) }, mineBch: b.mine, realPH }));
       lastBlockT = b.time;
     }
     if (blockBuf.length && now - blockFlush >= 20 * 60e3) {

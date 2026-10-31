@@ -889,6 +889,7 @@ function renderBlocksLog(){
   $('bl_list').innerHTML='<div class="stack" style="gap:6px;margin-top:10px">'+L.slice(0,40).map(function(b){
     var ctx=b.netPH?'Rede '+nf(b.netPH,0)+' PH/s':'';
     if(b.nhPH)ctx+=' · NiceHash '+nf(b.nhPH,0)+' PH/s alugados'+(b.nhBid?' a '+b.nhBid.toFixed(4):'')+(b.be?' (empate '+b.be.toFixed(4)+', margem '+pct(b.edge,1)+')':'');
+    if(b.realPH)ctx+=' · <b>Suas ordens: '+nf(b.realPH,2)+' PH/s (chance '+pctp(b.realProb*100,2)+')</b>';
     var sim=b.simPH?' · Simulação: '+nf(b.simPH,0)+' PH/s, chance '+pctp(b.simProb*100,2)+', '+(b.simWon?'<b class="good">seria seu</b>':'não saiu'):'';
     return '<div class="trow"><div><b>'+b.h+'</b> <span class="note">'+hhU(b.t)+'</span> · <b>'+esc(b.pool)+'</b>'+(b.solo?' <span class="chip ok">solo</span>':'')+(b.mine?' <span class="chip ok">seu bloco</span>':'')+(b.dt!==null&&b.dt!==undefined?' <span class="note">'+(b.dt<60?'menos de 1 min':FDI.dur(b.dt*1000))+' após o anterior</span>':'')+'</div>'+
       '<div class="note">'+(b.txs?b.txs+' transações · ':'')+(b.size?nf(b.size/1000,1)+' KB · ':'')+'recompensa '+b.reward.toFixed(4)+' BCH'+(b.usd?' ('+usd(b.usd,0)+')':'')+' · taxas '+b.fees.toFixed(4)+(b.poolFeePct!==null&&b.poolFeePct!==undefined?' · pool '+nf(b.poolFeePct,1)+'%':'')+'</div>'+
@@ -896,7 +897,7 @@ function renderBlocksLog(){
 }
 $('bl_csv').addEventListener('click',function(){
   if(!blk.list.length)return;
-  var cols=['h','t','dt','pool','solo','tag','txs','size','reward','fees','poolFeePct','usd','bchUsd','D','netPH','nhPH','nhBid','nhMedian','be','edge','simPH','simProb','simWon','mine','backfill'];
+  var cols=['h','t','dt','pool','solo','tag','txs','size','reward','fees','poolFeePct','usd','bchUsd','D','netPH','nhPH','nhBid','nhMedian','be','edge','realPH','realProb','simPH','simProb','simWon','mine','backfill'];
   var csv=['altura,hora_utc,'+cols.slice(2).join(',')].concat(blk.list.map(function(b){return [b.h,new Date(b.t).toISOString()].concat(cols.slice(2).map(function(c){var v=b[c];return v===undefined||v===null?'':String(v).replace(/,/g,' ')})).join(',')})).join('\n');
   saveFile('blocos-bch-'+stamp()+'.csv',csv,'text/csv');
 });

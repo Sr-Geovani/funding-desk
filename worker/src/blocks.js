@@ -23,7 +23,7 @@ export function poolOf(tag) {
 }
 
 // b: bloco do REST (com outs, size, txs, tag); ctx: mercado e simulação naquele ciclo.
-export function blockRecord(b, { prevT, mkt, book, sim, mineBch }) {
+export function blockRecord(b, { prevT, mkt, book, sim, mineBch, realPH }) {
   const reward = b.outs.reduce((s, o) => s + o.value, 0), outs = b.outs.map((o) => o.value).sort((x, y) => y - x);
   const p = poolOf(b.tag);
   const r = {
@@ -37,6 +37,7 @@ export function blockRecord(b, { prevT, mkt, book, sim, mineBch }) {
   if (book) r.nhPH = +book.totalPH.toFixed(1);
   if (sim) Object.assign(r, { simPH: sim.ph || 0, simProb: sim.prob ? +sim.prob.toFixed(5) : 0, simWon: !!sim.won });
   if (mineBch > 0) r.mine = mineBch;
+  if (realPH > 0 && b.difficulty) { r.realPH = +realPH.toFixed(2); r.realProb = +(realPH * 1e15 / (b.difficulty * TWO32 / 600 + realPH * 1e15)).toFixed(5); } // suas ordens reais (modo Ativo)
   return r;
 }
 
