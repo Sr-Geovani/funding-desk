@@ -40,6 +40,12 @@ sempre identificado; nada de prometer previsão de sorte (Poisson é sem memóri
   esperada (λ × valor do bloco) e a chance de ≥1 bloco; não sorteia blocos. Resultado real (Ativo): gasto pago nas
   ordens gerenciadas + blocos no endereço. Ambos por dia (30 dias), em Operar.
 - Alertas do servidor entram no histórico do Radar de cada aparelho (Safari, atalho e outros ficam iguais).
+- Diário → Robô (simulado): operações simuladas com regras fixas, registradas na hora (sem olhar o futuro).
+  Funding (`worker/src/paperfund.js`): entra após 2 leituras "Compensa" (até 3, uma por moeda, US$1.000, 2x),
+  recebe/paga nos horários de cada exchange com a taxa prevista, sai com diferença ≤ 0 em 2 leituras; taxas taker
+  nas 4 execuções + 0,03%. Mineração: cada "compraria → pausaria" vira uma operação (gasto, receita média, chance).
+- Ciclo do servidor: 3 min. Mínimo do Cloudflare é 1 min, mas o KV grátis aceita 1.000 gravações/dia e propaga em até
+  60 s; abaixo de 3 min exige plano pago + Durable Objects. Atraso de 3 min custa < US$1 com 10 PH/s.
 
 ## Estado e pendências
 - [x] Painel publicado; dados ao vivo validados do Brasil (Binance/Bybit diretos no iPhone).

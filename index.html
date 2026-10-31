@@ -51,7 +51,7 @@ h3{font:700 14px/1.2 var(--f-display);margin:0}
 a{color:var(--accent)}
 .chip{display:inline-block;font:600 11px/1 var(--f-mono);padding:5px 8px;border-radius:99px;border:1px solid var(--line);color:var(--mute);white-space:nowrap;vertical-align:middle}
 .chip.live,.chip.ok{color:var(--good);border-color:var(--good)} .chip.demo,.chip.warn{color:var(--warn);border-color:var(--warn)}
-.chip.bad{color:var(--bad);border-color:var(--bad)} .chip:empty{display:none}
+.chip.bad{color:var(--bad);border-color:var(--bad)} .chip:empty{display:none} .trow{padding:8px 0;border-bottom:1px solid var(--line)} .trow:last-child{border-bottom:0}
 .mono,.kv span,.big,input{font-variant-numeric:tabular-nums}
 .mono{font-family:var(--f-mono)}
 .mute{color:var(--mute)} .good{color:var(--good)} .bad{color:var(--bad)} .warn{color:var(--warn)}
@@ -470,6 +470,7 @@ details.card>summary{color:var(--fg);font-size:15px}
     <div class="seg" id="diarySeg" style="margin-bottom:12px">
       <button data-sub="pos" aria-pressed="true">Funding</button>
       <button data-sub="mine" aria-pressed="false">Mineração</button>
+      <button data-sub="robo" aria-pressed="false">Robô (simulado)</button>
     </div>
     <div id="diary-pos">
       <p class="note" style="margin:0 0 10px">Seu histórico de funding: registre a entrada pelo scanner e, ao fechar, copie do extrato o funding recebido e as taxas.</p>
@@ -490,6 +491,28 @@ details.card>summary{color:var(--fg);font-size:15px}
         <p class="note" style="margin:8px 0 0">O break-even vem do scanner ao tocar em Registrar posição. Abaixo dele, o alerta da posição fica vermelho.</p>
       </div>
       <div id="p_list" style="display:grid;gap:10px"></div>
+    </div>
+    <div id="diary-robo" class="stack" hidden>
+      <div class="card" id="rb_head"></div>
+      <div class="card" id="rb_fund"></div>
+      <div class="card" id="rb_mine"></div>
+      <details class="card"><summary>Regras do robô simulado (fixas, sem olhar o futuro)</summary>
+        <p class="note" style="margin:8px 0 4px"><b>Sem viés:</b> cada operação é registrada no ciclo em que a decisão acontece (a cada 3 min), só com os dados daquele momento. Toda oportunidade que passa nas regras entra; nada é escolhido ou apagado depois. Nenhum dinheiro é usado.</p>
+        <p class="note" style="margin:8px 0 4px"><b>Funding (Perp × Perp)</b></p>
+        <ul class="note" style="margin:0;padding-left:18px">
+          <li>Entra quando a oportunidade fica em "Compensa" em 2 leituras seguidas. Até 3 abertas, uma por moeda, pela ordem do maior líquido projetado.</li>
+          <li>US$1.000 por operação, 2x: US$1.000 por perna. Taxa taker nas 4 execuções + 0,03% de deslize.</li>
+          <li>Recebe ou paga no horário de cada exchange, com a taxa prevista na última leitura antes do horário (short recebe, long paga).</li>
+          <li>Sai quando a diferença de funding fica ≤ 0 em 2 leituras seguidas (ou a moeda some dos dados). Não há prazo fixo.</li>
+          <li>Exchanges: Binance, Bybit e Hyperliquid (o que o servidor lê de qualquer região).</li>
+        </ul>
+        <p class="note" style="margin:8px 0 4px"><b>Mineração (BCH solo, modo Observar)</b></p>
+        <ul class="note" style="margin:0;padding-left:18px">
+          <li>Entra ("compraria") quando o lance fica abaixo do teto (empate − margem mínima); sai ("pausaria") quando passa do teto ou bate o limite do dia. Stop-loss da sessão encerra a operação.</li>
+          <li>Gasto: potência alvo × lance × tempo + taxa da NiceHash. Receita média: blocos esperados × valor do bloco (sem taxa do pool).</li>
+          <li>Não sorteia blocos: com aluguel de hash o resultado real depende de sorte; a tela mostra a média e a chance de ter achado bloco.</li>
+        </ul>
+      </details>
     </div>
     <div id="diary-mine" class="stack" hidden>
       <p class="note" style="margin:0">Seu histórico de mineração. Registre todas as sessões, inclusive as que perderam: é assim que se mede a sorte real e se testa cada tese.</p>

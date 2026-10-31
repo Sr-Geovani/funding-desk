@@ -11,6 +11,7 @@ import { createMock, MOCK_KEYS } from '../worker/dev/mock.mjs';
 import { memoryKV } from '../worker/dev/server.mjs';
 import { seal, unseal, chatFromUpdates, parseNiceHash } from '../worker/src/creds.js';
 import { paperStep, realStep } from '../worker/src/paper.js';
+import { fundPaperStep, fundPaperSummary } from '../worker/src/paperfund.js';
 const FDM = createRequire(import.meta.url)('../mining.js');
 
 const close = (a, b, eps = 1e-9, msg = '') => assert.ok(Math.abs(a - b) <= eps, `${msg} esperado ${b}, veio ${a}`);
@@ -498,4 +499,63 @@ test('integração: modo Observar registra a simulação e mostra no status', as
     assert.equal((await t.call('POST', '/api/paper/reset')).status, 200);
     assert.equal((await t.call('GET', '/api/status')).body.state.paper, null);
   } finally { t.server.close(); }
+});
+
+test('funding simulado: entra após 2 leituras, recebe nos horários de cada exchange, sai quando vira contra', () => {
+  const T0 = Date.UTC(2026, 9, 31, 12), M = 60e3;
+  const fees = { Bybit: { taker: 0.055 }, Hyperliquid: { taker: 0.045 } };
+  const rows = (sBy, nBy, sHl, nHl) => ({ ENA: { Bybit: { rate: sBy, apr: sBy * 3 * 365, hours: 8, next: nBy }, Hyperliquid: { rate: sHl, apr: sHl * 24 * 365, hours: 1, next: nHl } } });
+  const best = [{ key: 'ENA|Bybit|Hyperliquid', coin: 'ENA', s: 'Bybit', l: 'Hyperliquid' }];
+  let r = fundPaperStep(null, { rows: rows(0.1, T0 + 60 * M, 0.00125, T0 + 10 * M), best, now: T0, fees });
+  assert.equal(r.pf.open.length, 0, 'uma leitura só não entra');
+  r = fundPaperStep(r.pf, { rows: rows(0.1, T0 + 60 * M, 0.00125, T0 + 10 * M), best, now: T0 + 3 * M, fees });
+  assert.equal(r.pf.open.length, 1); assert.match(r.events[0], /entrou em ENA \(short Bybit, long Hyperliquid\)/);
+  close(r.pf.open[0].feesUsd, 1000 * (0.055 + 0.045 + 0.015) / 100);
+  r = fundPaperStep(r.pf, { rows: rows(0.1, T0 + 60 * M, 0.00125, T0 + 70 * M), best, now: T0 + 15 * M, fees });
+  close(r.pf.open[0].fundingUsd, -0.0125, 1e-12, 'long na HL paga a taxa');
+  r = fundPaperStep(r.pf, { rows: rows(0.1, T0 + 60 * M, 0.00125, T0 + 70 * M), best, now: T0 + 18 * M, fees });
+  assert.equal(r.pf.open[0].payments, 1, 'não paga duas vezes o mesmo horário');
+  r = fundPaperStep(r.pf, { rows: rows(0.1, T0 + 540 * M, 0.00125, T0 + 70 * M), best, now: T0 + 61 * M, fees });
+  close(r.pf.open[0].fundingUsd, 1 - 0.0125, 1e-12, 'short na Bybit recebe 0,1%');
+  // diferença vira negativa duas vezes: sai
+  r = fundPaperStep(r.pf, { rows: rows(-0.01, T0 + 540 * M, 0.00125, T0 + 130 * M), best: [], now: T0 + 64 * M, fees });
+  assert.equal(r.pf.open.length, 1, 'uma leitura negativa ainda não sai');
+  r = fundPaperStep(r.pf, { rows: rows(-0.01, T0 + 540 * M, 0.00125, T0 + 130 * M), best: [], now: T0 + 67 * M, fees });
+  assert.equal(r.pf.open.length, 0); assert.equal(r.pf.closed.length, 1);
+  const c = r.pf.closed[0];
+  close(c.netUsd, 1 - 0.0125 - 2 * 1.15, 1e-9); assert.match(c.reason, /virou contra/); assert.match(r.events[0], /saiu de ENA .* −US\$1\.31/);
+  const sum = fundPaperSummary(r.pf);
+  assert.deepEqual([sum.closed, sum.wins, sum.open], [1, 0, 0]);
+});
+
+test('funding simulado: no máximo 3 abertas, uma por moeda; moeda que some fecha', () => {
+  const T0 = Date.UTC(2026, 9, 31, 12), fees = {};
+  const coins = ['A', 'B', 'C', 'D'], rows = {}, best = [];
+  for (const c of coins) { rows[c] = { Bybit: { rate: 0.05, apr: 54.75, hours: 8, next: T0 + 36e5 }, Binance: { rate: 0.01, apr: 10.95, hours: 8, next: T0 + 36e5 } }; best.push({ key: c + '|Bybit|Binance', coin: c, s: 'Bybit', l: 'Binance' }); }
+  best.push({ key: 'A|Bybit|Hyperliquid', coin: 'A', s: 'Bybit', l: 'Hyperliquid' });
+  let r = fundPaperStep(null, { rows, best, now: T0, fees });
+  r = fundPaperStep(r.pf, { rows, best, now: T0 + 18e4, fees });
+  assert.deepEqual(r.pf.open.map((o) => o.coin), ['A', 'B', 'C']);
+  const rows2 = Object.assign({}, rows); delete rows2.B;
+  r = fundPaperStep(r.pf, { rows: rows2, best: [], now: T0 + 36e4, fees });
+  r = fundPaperStep(r.pf, { rows: rows2, best: [], now: T0 + 54e4, fees });
+  assert.equal(r.pf.closed[0].coin, 'B'); assert.match(r.pf.closed[0].reason, /saiu dos dados/);
+});
+
+test('mineração simulada: cada "compraria → pausaria" vira uma operação com resultado', () => {
+  const T0 = Date.UTC(2026, 9, 31, 12);
+  let r = paperStep(null, { cfg: PCFG, mkt: pm(), now: T0, units: PU, limits: PL });
+  assert.equal(r.paper.run.ph, 10);
+  r = paperStep(r.paper, { cfg: PCFG, mkt: pm(), now: T0 + 600e3, units: PU, limits: PL });
+  r = paperStep(r.paper, { cfg: PCFG, mkt: pm({ green: false, bidEH: 0.45 }), now: T0 + 1200e3, units: PU, limits: PL });
+  assert.equal(r.paper.runs.length, 1); assert.equal(r.paper.run, null);
+  const run = r.paper.runs[0];
+  close(run.spendUsd, 10 * 0.40 / 1000 * 77000 * 1.03 * 1200 / 86400, 1e-9); assert.match(run.reason, /acima do teto/);
+  close(run.hours, 1200 / 3600, 1e-9);
+  // stop-loss fecha a operação e, se continuar verde, abre outra
+  const cfg = Object.assign({}, PCFG, { targetPh: 100, sessionBudgetUsd: 30 });
+  r = paperStep(null, { cfg, mkt: pm(), now: T0, units: PU, limits: PL });
+  for (let i = 1; i <= 8; i++) r = paperStep(r.paper, { cfg, mkt: pm(), now: T0 + i * 180e3, units: PU, limits: PL });
+  assert.ok(r.paper.runs.some((x) => /stop-loss/.test(x.reason)));
+  assert.ok(r.paper.run && r.paper.on, 'nova operação aberta');
 });

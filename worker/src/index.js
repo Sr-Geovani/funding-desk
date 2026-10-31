@@ -8,6 +8,8 @@ import { createChain, paidTo, DEFAULT_BCH_REST, DEFAULT_PRICE_URL } from './chai
 import { DEFAULT_CONFIG, sanitizeConfig, parseBook, computeMarket, decide, limitsFromEnv } from './bot.js';
 import { fundingSnapshot, runAlerts } from './alerts.js';
 import { paperStep, realStep } from './paper.js';
+import { fundPaperStep, fundPaperSummary } from './paperfund.js';
+import FD from '../../core.js';
 import { withCreds, reloadCreds, saveCreds, credStatus, parseNiceHash, TG_TOKEN_RE, chatFromUpdates } from './creds.js';
 
 export const VERSION = '1.0.0';
@@ -182,9 +184,16 @@ export async function tick(env, opts = {}) {
 
   // Alertas (entrada/saída/risco) com aviso no Telegram; não dependem do modo do robô.
   let newAlerts = [], alertState = { alertPrev: state.alertPrev, alertMem: state.alertMem, alerts: state.alerts };
+  const funding = predR.ok ? fundingSnapshot(predR.v, cfg, now) : null;
+  if (!predR.ok) errors.push('funding (Hyperliquid): ' + predR.e);
+  // Operações simuladas de funding: rodam sempre (o funding ainda é manual; isto mostra o que um robô com regras fixas faria).
+  let fundPaper = state.fundPaper || null;
+  if (funding) {
+    const fp = fundPaperStep(fundPaper, { rows: funding.rows, best: funding.best, now, fees: FD.DEFAULT_FEES });
+    fundPaper = fp.pf;
+    for (const e of fp.events) log.push({ t: now, kind: 'simulado', text: e });
+  }
   if (cfg.alerts !== false) {
-    const funding = predR.ok ? fundingSnapshot(predR.v, cfg, now) : null;
-    if (!predR.ok) errors.push('funding (Hyperliquid): ' + predR.e);
     const ra = runAlerts({ state, funding, edges: mkt.ok ? { BCH: mkt.edgeAtBidPct } : {}, now, minEdgePct: cfg.minEdgePct });
     newAlerts = ra.alerts; alertState = ra.state;
     for (const a of newAlerts) log.push({ t: now, kind: 'alerta', text: a.title + ': ' + a.text });
@@ -201,7 +210,7 @@ export async function tick(env, opts = {}) {
   }
 
   const next = Object.assign({}, dec.state, alertState, {
-    lastTick: now, paper, real, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig,
+    lastTick: now, paper, real, fundPaper, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig,
     market: mkt.ok ? { breakEvenEH: mkt.breakEvenEH, capEH: mkt.capEH, fillEH: mkt.fillEH, medianEH: mkt.medianEH, bidEH: mkt.bidEH,
       edgeAtBidPct: mkt.edgeAtBidPct, green: mkt.green, D: mkt.D, bchUsd: mkt.bchUsd, btcUsd: mkt.btcUsd, costPerBlockUsd: mkt.costPerBlockUsd,
       hashpriceNet: mkt.hashpriceNet, blockNetUsd: mkt.blockNetUsd, phDaysPerBlock: mkt.phDaysPerBlock, market: mkt.market } : { ok: false, reason: mkt.reason },
@@ -311,7 +320,8 @@ async function api(req, env, url, fetchFn) {
       telegram: !!(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID), creds: credStatus(env), limits, config: cfg,
       state: { lastTick: state.lastTick, lastHeight: state.lastHeight, market: state.market, myBlocks: state.myBlocks || [], dailyUsd: state.dailyUsd || 0,
         errors: state.errors || [], edgeHist: state.edgeHist || [], alerts: (state.alerts || []).slice(-30).reverse(),
-        paper: state.paper || null, real: state.real ? Object.assign({}, state.real, { paid: undefined }) : null } });
+        paper: state.paper || null, real: state.real ? Object.assign({}, state.real, { paid: undefined }) : null,
+        fundPaper: state.fundPaper ? { summary: fundPaperSummary(state.fundPaper), open: state.fundPaper.open, closed: state.fundPaper.closed.slice(-100).reverse() } : null } });
   }
   if (p === '/config' && m === 'PUT') {
     const { config, errors } = sanitizeConfig(body, await getConfig(env), limits);
@@ -324,8 +334,9 @@ async function api(req, env, url, fetchFn) {
   if (p === '/tick' && m === 'POST') return json(await tick(env, { fetchFn }));
   if (p === '/paper/reset' && m === 'POST') {
     const st = await kvGet(env, 'state', {});
-    st.paper = null; await kvPut(env, 'state', st);
-    await appendLog(env, [{ t: Date.now(), kind: 'config', text: 'simulação reiniciada' }]);
+    if (body.what === 'funding') st.fundPaper = null; else if (body.what === 'all') { st.paper = null; st.fundPaper = null; } else st.paper = null;
+    await kvPut(env, 'state', st);
+    await appendLog(env, [{ t: Date.now(), kind: 'config', text: 'simulação reiniciada (' + (body.what === 'funding' ? 'funding' : body.what === 'all' ? 'tudo' : 'mineração') + ')' }]);
     return json({ ok: true });
   }
   if (p === '/credentials' && m === 'GET') return json(credStatus(env));

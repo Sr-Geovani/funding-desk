@@ -17,6 +17,13 @@ function trimDays(days) {
 export function paperStep(paper, { cfg, mkt, now, units, limits }) {
   const p = paper && paper.since ? JSON.parse(JSON.stringify(paper))
     : { since: now, lastTs: now, on: false, spendUsd: 0, evUsd: 0, lambda: 0, hoursOn: 0, sessions: 0, stops: 0, sess: null, days: {} };
+  p.runs = p.runs || [];
+  // Operação simulada = trecho em que o robô estaria comprando, do "compraria" ao "pausaria" (ou stop-loss).
+  const closeRun = (reason) => {
+    if (!p.run) return;
+    p.runs.push(Object.assign(p.run, { end: now, reason }));
+    p.runs = p.runs.slice(-100); p.run = null;
+  };
   const events = [];
   const dt = Math.min(Math.max(0, now - (p.lastTs || now)), MAX_GAP);
   const day = utcDay(now);
@@ -30,6 +37,7 @@ export function paperStep(paper, { cfg, mkt, now, units, limits }) {
     const ev = lam * (p.blockNetUsd || 0);
     for (const t of [p, d]) { t.spendUsd += cost; t.evUsd += ev; t.lambda += lam; t.hoursOn += secs / 3600; }
     if (p.sess) { p.sess.spendUsd += cost; p.sess.lambda += lam; }
+    if (p.run) { p.run.spendUsd += cost; p.run.evUsd += ev; p.run.lambda += lam; p.run.hours += secs / 3600; }
   }
 
   // 2) o que o robô faria agora
@@ -39,16 +47,24 @@ export function paperStep(paper, { cfg, mkt, now, units, limits }) {
     p.stops++;
     events.push(`Simulação: stop-loss da sessão (US$${p.sess.spendUsd.toFixed(2)} gastos; chance de ter achado bloco nela: ${((1 - Math.exp(-p.sess.lambda)) * 100).toFixed(0)}%)`);
     p.sess = null;
+    closeRun('stop-loss da sessão'); p.on = false; // como cancelar a ordem: se continuar verde, abre outra
   }
   const dailyHit = cfg.dailyBudgetUsd > 0 && d.spendUsd >= cfg.dailyBudgetUsd;
   const want = !!(mkt && mkt.ok && mkt.green && !dailyHit);
   if (want) {
     if (!p.sess) { p.sess = { start: now, spendUsd: 0, lambda: 0 }; p.sessions++; }
-    if (!p.on) events.push(`Simulação: compraria ${target} PH/s a ${mkt.bidEH.toFixed(4)} BTC/EH/dia (margem ${mkt.edgeAtBidPct.toFixed(1)}%)`);
+    if (!p.on) {
+      events.push(`Simulação: compraria ${target} PH/s a ${mkt.bidEH.toFixed(4)} BTC/EH/dia (margem ${mkt.edgeAtBidPct.toFixed(1)}%)`);
+      p.run = { start: now, ph: target, priceEH: mkt.bidEH, edgePct: mkt.edgeAtBidPct, spendUsd: 0, evUsd: 0, lambda: 0, hours: 0 };
+    }
     Object.assign(p, { on: true, ph: target, priceEH: mkt.bidEH, D: mkt.D, btcUsd: mkt.btcUsd, blockNetUsd: mkt.blockNetUsd });
   } else {
-    if (p.on) events.push(dailyHit ? `Simulação: pausaria (limite diário de US$${cfg.dailyBudgetUsd} atingido)`
-      : mkt && mkt.ok ? `Simulação: pausaria (aluguel ${mkt.bidEH.toFixed(4)} acima do teto ${mkt.capEH.toFixed(4)})` : 'Simulação: pausaria (sem dados de mercado)');
+    if (p.on) {
+      const why = dailyHit ? `limite diário de US$${cfg.dailyBudgetUsd} atingido`
+        : mkt && mkt.ok ? `aluguel ${mkt.bidEH.toFixed(4)} acima do teto ${mkt.capEH.toFixed(4)}` : 'sem dados de mercado';
+      events.push(`Simulação: pausaria (${why})`);
+      closeRun(why);
+    }
     p.on = false;
   }
   p.lastTs = now;

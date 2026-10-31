@@ -357,7 +357,8 @@ function renderScan(){
   $('f_mode').textContent=state.mode==='pp'?'Short numa exchange e long em outra: você ganha a diferença de funding entre elas.':'Compra à vista e short no perpétuo da mesma exchange: você ganha o funding positivo.';
   $('best').innerHTML='<div class="row between"><div class="eyebrow">Resumo</div>'+chip(sum.level)+'</div><div class="lead">'+esc(sum.title)+'</div><p class="why">'+esc(sum.text)+'</p>'+
     (state.live?'':'<p class="note warn">Exemplo: sem dados ao vivo agora.</p>')+
-    '<p class="note" style="margin:0">'+(state.updated?'Atualizado às '+hhmm(state.updated)+'. ':'')+'A taxa é a prevista para o próximo pagamento; valores em US$ são projeção.</p>';
+    '<p class="note" style="margin:0">'+(state.updated?'Atualizado às '+hhmm(state.updated)+'. ':'')+'A taxa é a prevista para o próximo pagamento; valores em US$ são projeção.</p>'+
+    '<div class="row" style="margin-top:8px"><button class="sm" data-go="diary:robo">O que o robô teria feito (simulado)</button></div>';
   var html='',LV={go:'g',maybe:'w',no:'r',none:''};
   ops.slice(0,30).forEach(function(o,i){
     var key=oppKey(o),v=vs[i],st=stabOf(o),pending=i<5&&state.live&&!stabMap[key];
@@ -666,7 +667,7 @@ function loadOps(){
     if(r[2].ok)ops.bal=r[2].v;else ops.err.bal=r[2].e.message;
     if(r[3].ok)ops.pools=r[3].v.list||[];else ops.err.pools=r[3].e.message;
     if(r[4].ok)ops.log=r[4].v.log||[];
-    renderOps();renderHome();renderMine();renderAcct();renderRadar();
+    renderOps();renderHome();renderMine();renderAcct();renderRadar();renderRobo();
   });
 }
 setInterval(function(){if(document.visibilityState==='visible'&&!$('mine-ops').hidden&&!$('tab-mine').hidden)loadOps()},30000);
@@ -708,7 +709,7 @@ function renderPaper(st){
     dayRows(p.days,[['Dia'],['Horas',function(d){return nf(d.hoursOn,1)}],['Gasto',function(d){return usd(d.spendUsd)}],['Receita',function(d){return usd(d.evUsd)}],['Chance',function(d){return pctp((1-Math.exp(-d.lambda))*100,0)}]])+
     '<p class="note" style="margin:8px 0 0">A simulação não sorteia blocos: mostra a média. Acerto = comprar abaixo do empate (resultado médio positivo) sem estourar os limites. '+
     'O resultado real depende de sorte: com '+nf(p.lambda,2)+' blocos esperados, a chance de não ter saído nenhum é de '+pctp((1-ch)*100,0)+'.</p>'+
-    '<div class="row" style="margin-top:8px"><button class="sm" id="o_paper_reset">Reiniciar simulação</button></div>';
+    '<div class="row" style="margin-top:8px"><button class="sm pri" data-go="diary:robo">Ver operações simuladas</button><button class="sm" id="o_paper_reset">Reiniciar simulação</button></div>';
   var real=s.real,re=$('o_real');
   re.hidden=!(real&&(real.spendUsd>0||real.blocks>0||cfg.mode==='active'));
   if(!re.hidden){var rr=(real.revenueUsd||0)-(real.spendUsd||0);
@@ -717,6 +718,60 @@ function renderPaper(st){
       dayRows(real.days,[['Dia'],['Gasto',function(d){return usd(d.spendUsd)}],['Blocos',function(d){return d.blocks}],['Recebido',function(d){return usd(d.revenueUsd)}]])+
       '<p class="note" style="margin:8px 0 0">Desde '+new Date(real.since).toLocaleDateString('pt-BR')+'. Conta só ordens marcadas "robô gerencia"; o extrato da NiceHash é o registro oficial.</p>';}
 }
+/* ---------- diário do robô simulado ---------- */
+function dt2(ms){return new Date(ms).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})}
+function signUsd(x){return (x>=0?'+':'')+usd(x)}
+var roboAll={f:false,m:false};
+function renderRobo(){
+  if(!$('rb_head'))return;
+  var st=ops.status,s=st&&st.state||{},fp=s.fundPaper,mp=s.paper;
+  if(!settings.apiUrl||!st){
+    $('rb_head').innerHTML='<div class="eyebrow">Robô simulado</div><div class="lead">O que o robô teria feito</div><p class="note">'+(settings.apiUrl?esc(ops.err.status||'Carregando do servidor…'):'Ele roda no servidor 24 h. Conecte o backend em Ajustes para ver.')+'</p>';
+    $('rb_fund').innerHTML='';$('rb_mine').innerHTML='';return;
+  }
+  var fs=fp&&fp.summary,runs=(mp&&mp.runs)||[],cur=mp&&mp.run;
+  var mAll=runs.concat(cur?[cur]:[]),mSpend=mAll.reduce(function(a,r){return a+r.spendUsd},0),mEv=mAll.reduce(function(a,r){return a+r.evUsd},0),mLam=mAll.reduce(function(a,r){return a+r.lambda},0);
+  $('rb_head').innerHTML='<div class="eyebrow">Robô simulado</div><div class="lead">O que o robô teria feito, operação por operação</div>'+
+    '<p class="note" style="margin:4px 0 10px">Regras fixas, registradas na hora da decisão, sem olhar o futuro. Nenhum dinheiro usado. As regras estão no fim da página.</p>'+
+    '<div class="kv"><div><small>Funding fechadas</small><span>'+(fs?fs.closed:0)+'</span></div><div><small>Acerto</small><span>'+(fs&&fs.closed?fs.wins+' de '+fs.closed:'—')+'</span></div><div><small>Funding (fechadas)</small><span class="'+(fs&&fs.netUsd<0?'bad':'good')+'">'+(fs?signUsd(fs.netUsd):'—')+'</span></div>'+
+    '<div><small>Mineração (operações)</small><span>'+mAll.length+'</span></div><div><small>Resultado médio</small><span class="'+(mEv-mSpend<0?'bad':'good')+'">'+(mAll.length?signUsd(mEv-mSpend):'—')+'</span></div><div><small>Chance de ≥1 bloco</small><span>'+(mAll.length?pctp((1-Math.exp(-mLam))*100,0):'—')+'</span></div></div>';
+  // funding
+  var fh='<div class="row between"><h2 style="margin:0">Funding</h2>'+(fs?'<span class="note">desde '+dt2(fs.since)+'</span>':'')+'</div>';
+  if(!fp)fh+='<p class="note">Começa no próximo ciclo do servidor (até 3 min).</p>';
+  else{
+    fh+='<div class="eyebrow" style="margin:10px 0 6px">Abertas agora ('+fp.open.length+')</div>'+(fp.open.length?'<div class="stack" style="gap:8px">'+fp.open.map(function(o){var acc=o.fundingUsd-o.feesUsd;
+      return '<div class="box" style="margin:0"><b>'+esc(o.coin)+' · short '+esc(o.s)+', long '+esc(o.l)+'</b>Desde '+dt2(o.openedAt)+' ('+ago(o.openedAt)+'). '+o.payments+' pagamento'+(o.payments===1?'':'s')+': recebido '+signUsd(o.fundingUsd)+', custos até agora '+usd(o.feesUsd)+' → <strong class="'+(acc>=0?'good':'bad')+'">'+signUsd(acc)+'</strong> (falta o custo de saída). Diferença: '+pct(o.entrySpread,1)+' a.a. na entrada, '+(o.spreadNow===null||o.spreadNow===undefined?'sem dado':pct(o.spreadNow,1)+' a.a.')+' agora.</div>'}).join('')+'</div>'
+      :'<p class="note" style="margin:0">Nenhuma: nada passou nas regras de entrada agora.</p>');
+    var cl=fp.closed||[],show=roboAll.f?cl:cl.slice(0,15);
+    fh+='<div class="eyebrow" style="margin:12px 0 6px">Fechadas ('+cl.length+(fs&&fs.closed>cl.length?' de '+fs.closed:'')+')</div>'+(cl.length?'<div class="stack" style="gap:6px">'+show.map(function(c){
+      return '<div class="trow"><div><b>'+esc(c.coin)+'</b> <span class="note">short '+esc(c.s)+', long '+esc(c.l)+'</span></div><div class="note">'+dt2(c.openedAt)+' → '+dt2(c.closedAt)+' · '+FDI.dur(c.closedAt-c.openedAt)+' · '+c.payments+' pagto'+(c.payments===1?'':'s')+' · <strong class="'+(c.netUsd>=0?'good':'bad')+'">'+signUsd(c.netUsd)+'</strong> ('+pct(c.retPct,2)+')</div><div class="note">Saída: '+esc(c.reason)+'</div></div>'}).join('')+'</div>'+
+      (cl.length>15?'<div style="margin-top:6px"><button class="sm" data-roboall="f">'+(roboAll.f?'Mostrar menos':'Ver todas ('+cl.length+')')+'</button></div>':'')
+      :'<p class="note" style="margin:0">Nenhuma ainda. Uma operação fecha quando o funding vira contra; pode levar horas ou dias.</p>');
+    if(fs&&fs.closed)fh+='<p class="note" style="margin:8px 0 0">Média de '+FDI.dur(fs.avgHours*3600e3)+' por operação. Acerto = fechou no positivo depois de todas as taxas.</p>';
+  }
+  $('rb_fund').innerHTML=fh;
+  // mineração
+  var mh='<div class="row between"><h2 style="margin:0">Mineração (BCH solo)</h2>'+(mp?'<span class="note">desde '+dt2(mp.since)+'</span>':'')+'</div>';
+  if(!mp)mh+='<p class="note">'+(st.config.mode==='observe'?'Começa no próximo ciclo (até 3 min).':'Só roda com o robô em Observar (Mineração → Operar).')+'</p>';
+  else{
+    mh+=cur?'<div class="box" style="margin:10px 0 0"><b>Comprando agora (simulado)</b>Desde '+dt2(cur.start)+' ('+ago(cur.start)+'): '+nf(cur.ph,0)+' PH/s a '+cur.priceEH.toFixed(4)+' (margem '+pct(cur.edgePct,1)+'). Gasto '+usd(cur.spendUsd)+', receita média '+usd(cur.evUsd)+', chance de bloco até agora '+pctp((1-Math.exp(-cur.lambda))*100,0)+'.</div>'
+      :'<p class="note" style="margin:10px 0 0">Agora: pausado (aluguel acima do teto, limite do dia ou sem dados).</p>';
+    var rs=runs.slice().reverse(),showm=roboAll.m?rs:rs.slice(0,15);
+    mh+='<div class="eyebrow" style="margin:12px 0 6px">Operações encerradas ('+rs.length+')</div>'+(rs.length?'<div class="stack" style="gap:6px">'+showm.map(function(r){var res=r.evUsd-r.spendUsd;
+      return '<div class="trow"><div><b>'+nf(r.ph,0)+' PH/s</b> <span class="note">a '+r.priceEH.toFixed(4)+' (margem '+pct(r.edgePct,1)+')</span></div><div class="note">'+dt2(r.start)+' → '+dt2(r.end)+' · '+FDI.dur(r.end-r.start)+' · gasto '+usd(r.spendUsd)+' · receita média '+usd(r.evUsd)+' → <strong class="'+(res>=0?'good':'bad')+'">'+signUsd(res)+'</strong> · chance de bloco '+pctp((1-Math.exp(-r.lambda))*100,0)+'</div><div class="note">Saída: '+esc(r.reason)+'</div></div>'}).join('')+'</div>'+
+      (rs.length>15?'<div style="margin-top:6px"><button class="sm" data-roboall="m">'+(roboAll.m?'Mostrar menos':'Ver todas ('+rs.length+')')+'</button></div>':'')
+      :'<p class="note" style="margin:0">Nenhuma encerrada ainda.</p>');
+    mh+='<p class="note" style="margin:8px 0 0">Resultado médio = receita média − gasto. O resultado real dependeria de sorte (achar ou não o bloco).</p>';
+  }
+  mh+='<div class="row" style="margin-top:8px"><button class="sm" data-roboreset="funding">Reiniciar funding</button><button class="sm" data-roboreset="mining">Reiniciar mineração</button></div>';
+  $('rb_mine').innerHTML=mh;
+}
+document.addEventListener('click',function(e){
+  var a=e.target.closest('[data-roboall]');if(a){roboAll[a.dataset.roboall]=!roboAll[a.dataset.roboall];renderRobo();return}
+  var r=e.target.closest('[data-roboreset]');if(!r)return;
+  if(!confirm('Zerar as operações simuladas de '+(r.dataset.roboreset==='funding'?'funding':'mineração')+' e começar de agora?'))return;
+  apiCall('POST','/paper/reset',{what:r.dataset.roboreset}).then(function(){loadOps()},function(err){alert('Erro: '+err.message)});
+});
 function renderOps(){
   var c=apiCfg(),st=ops.status;
   if(!c.url){
@@ -1271,11 +1326,12 @@ function tab(t,sub){
   if((t==='mine'||t==='home')&&(!mine.at||Date.now()-mine.at>300000))loadMining();
   window.scrollTo(0,0);
 }
-var SUBS={fund:['fundSeg',['scan','journey','calc']],mine:['mineSeg',['now','journey','plan','algos','ops','net']],diary:['diarySeg',['pos','mine']]};
+var SUBS={fund:['fundSeg',['scan','journey','calc']],mine:['mineSeg',['now','journey','plan','algos','ops','net']],diary:['diarySeg',['pos','mine','robo']]};
 function subTab(t,sub){
   var cfg=SUBS[t];
   if(t==='mine'&&sub==='algos'){loadMarketMap();renderAlgos()}
   if(t==='mine'&&sub==='ops')loadOps();
+  if(t==='diary'&&sub==='robo'){renderRobo();if(settings.apiUrl&&Date.now()-(ops.at||0)>60000)loadOps()}
   cfg[1].forEach(function(x){$(t+'-'+x).hidden=x!==sub});
   document.querySelectorAll('#'+cfg[0]+' button').forEach(function(b){b.setAttribute('aria-pressed',b.dataset.sub===sub?'true':'false')});
 }
