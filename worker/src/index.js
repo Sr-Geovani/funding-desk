@@ -13,6 +13,7 @@ import FD from '../../core.js';
 import FDR from '../../radar.js';
 import { algoPaperStep } from './paperalgo.js';
 import { braiinsOf, mrrOf, stratumCheck } from './hashmarkets.js';
+import { bitfinexOf, deribitBasisOf, ethenaOf, hlpOf, zpoolOf, brlOf, cdiOf, lighterTable, lighterRows, lighterOi, lighterPairs, streakStep, frontsPaperStep, LT_FEES } from './fronts.js';
 import { FUND_MODEL } from './fundmodel.js';
 import { updateHistory, pickCoins, scorePairs, stablePairs, pairStatsOf } from './fundai.js';
 import { blockRecord, blockSummary, poolOf } from './blocks.js';
@@ -298,7 +299,7 @@ export async function tick(env, opts = {}) {
   }
 
   // Outras moedas (simulado, pool PPS): a cada 15 min, com o mapa de mineração (a mesma conta do painel).
-  let algoPaper = state.algoPaper || null, algoTs = state.algoTs || 0, algoMap = state.algoMap || [];
+  let algoPaper = state.algoPaper || null, algoTs = state.algoTs || 0, algoMap = state.algoMap || [], algoRan = false;
   if (cfg.algoPaper !== false && prices.ok && now - algoTs >= 15 * 60e3) {
     const pub = (env.NH_BASE || 'https://api2.nicehash.com').replace(/\/$/, '');
     const getJ = (u) => fetchFn(u, { headers: { accept: 'application/json', 'user-agent': 'funding-desk/1.0' } }).then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
@@ -309,7 +310,8 @@ export async function tick(env, opts = {}) {
       const books = {};
       algos.forEach((a, i) => { if (res[i + 1].ok) books[a] = res[i + 1].v; });
       const map = FDR.miningMap(res[0].v, books, { btcUsd: prices.v.btcUsd, minEdgePct: cfg.minEdgePct, rentFeePct: cfg.rentFeePct, poolFeePct: cfg.poolFeePct });
-      algoMap = map.map((m) => ({ algo: m.algo, label: m.label, coins: m.coins, edgePct: m.edgePct, level: m.level, capBtcPerUnit: m.capBtcPerUnit, unit: m.unit }));
+      algoMap = map.map((m) => ({ algo: m.algo, label: m.label, coins: m.coins, edgePct: m.edgePct, level: m.level, capBtcPerUnit: m.capBtcPerUnit, unit: m.unit, rentBtcPerH: m.rentBtcPerH }));
+      algoRan = true;
       const ap = algoPaperStep(algoPaper, { map, now });
       algoPaper = ap.pa; algoTs = now;
       for (const e of ap.events) log.push({ t: now, kind: 'simulado', text: e });
@@ -324,6 +326,56 @@ export async function tick(env, opts = {}) {
     const [hb, hs, mi] = await Promise.all([getJ(hp + '/v1/spot/orderbook'), getJ(hp + '/v1/spot/stats'), getJ(mr + '/api/v2/info/algos/sha256?currency=BTC')].map(settle));
     hashMkts = { at: now, braiins: hb.ok ? braiinsOf(hb.v, hs.ok ? hs.v : null) : (hashMkts && hashMkts.braiins) || null,
       mrr: mi.ok ? mrrOf(mi.v) : (hashMkts && hashMkts.mrr) || null, err: [hb.ok ? null : 'Braiins: ' + hb.e, mi.ok ? null : 'MRR: ' + mi.e].filter(Boolean) };
+  }
+
+  // Frentes em observação (docs/pesquisa-frentes.md): dados públicos a cada 15 min, fora do ciclo que já leu o mapa de
+  // mineração (limite de 50 chamadas externas por ciclo). Funding com perna na Lighter (taxa zero) vira um robô simulado.
+  let fronts = state.fronts || null, frontsPaper = state.frontsPaper || null, ltStreak = state.ltStreak || null, fundPaperLT = state.fundPaperLT || null;
+  if (cfg.fronts !== false && !algoRan && (!fronts || now - (fronts.at || 0) >= 15 * 60e3)) {
+    const getJ = (u, o) => fetchFn(u, Object.assign({ headers: { accept: 'application/json', 'user-agent': 'funding-desk/1.0' } }, o || {})).then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
+    const U = (k, d) => (env[k] || d).replace(/\/$/, '');
+    const day = (t) => { const d = new Date(t); return String(d.getUTCMonth() + 1).padStart(2, '0') + '-' + String(d.getUTCDate()).padStart(2, '0') + '-' + d.getUTCFullYear(); };
+    const [lt, lo, bf, db, et, hl, zp, mb, px, cd] = await Promise.all([
+      getJ(U('LIGHTER_URL', 'https://mainnet.zklighter.elliot.ai') + '/api/v1/funding-rates'),
+      getJ(U('LIGHTER_URL', 'https://mainnet.zklighter.elliot.ai') + '/api/v1/orderBooks'),
+      getJ(U('BFX_URL', 'https://api-pub.bitfinex.com') + '/v2/tickers?symbols=fUST,fUSD'),
+      getJ(U('DERIBIT_URL', 'https://www.deribit.com') + '/api/v2/public/get_book_summary_by_currency?currency=BTC&kind=future'),
+      getJ(U('ETHENA_URL', 'https://ethena.fi') + '/api/yields/protocol-and-staking-yield'),
+      getJ(U('HL_INFO_URL', 'https://api.hyperliquid.xyz') + '/info', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ type: 'vaultDetails', vaultAddress: '0xdfc24b077bc1425ad1dea75bcb6f8158e10df303' }) }),
+      getJ(U('ZPOOL_URL', 'https://www.zpool.ca') + '/api/status'),
+      getJ(U('MB_URL', 'https://api.mercadobitcoin.net') + '/api/v4/tickers?symbols=USDT-BRL,USDC-BRL'),
+      getJ(U('BCB_PTAX_URL', 'https://olinda.bcb.gov.br') + "/olinda/servico/PTAX/versao/v1/odata/CotacaoDolarPeriodo(dataInicial=@dataInicial,dataFinalCotacao=@dataFinalCotacao)?@dataInicial='" + day(now - 7 * 864e5) + "'&@dataFinalCotacao='" + day(now) + "'&$format=json&$select=cotacaoVenda,dataHoraCotacao"),
+      getJ(U('BCB_SGS_URL', 'https://api.bcb.gov.br') + '/dados/serie/bcdata.sgs.4389/dados/ultimos/1?formato=json')
+    ].map(settle));
+    const old = fronts || {}, v = (r, f, k) => (r.ok ? f(r.v) : old[k] || null);
+    fronts = { at: now, bfx: v(bf, bitfinexOf, 'bfx'), basis: db.ok ? deribitBasisOf(db.v && db.v.result, now) : old.basis || null, ethena: v(et, ethenaOf, 'ethena'), hlp: v(hl, hlpOf, 'hlp'),
+      zpool: v(zp, zpoolOf, 'zpool'), brl: mb.ok || px.ok ? brlOf(mb.ok ? mb.v : null, px.ok ? px.v : null) : old.brl || null, cdi: cd.ok ? cdiOf(cd.v) : old.cdi || null,
+      err: [['Lighter', lt], ['Bitfinex', bf], ['Deribit', db], ['Ethena', et], ['Hyperliquid', hl], ['zpool', zp], ['Mercado Bitcoin', mb], ['PTAX', px], ['CDI', cd]].filter(([, r]) => !r.ok).map(([n, r]) => n + ': ' + r.e) };
+    // checagem de realidade da mineração: o que o multipool pagou de fato × o aluguel na NiceHash (com a taxa)
+    const sc = (algoMap || []).find((m) => m.algo === 'SCRYPT');
+    const sane = (x) => (isFinite(x) && Math.abs(x) <= 300 ? x : null); // acima de 300%: unidade ou dado errado
+    fronts.zEdge = { sha256: sane(fronts.zpool && fronts.zpool.sha256PerH && mkt.ok ? (fronts.zpool.sha256PerH * 1e18 / (mkt.bidEH * (1 + cfg.rentFeePct / 100)) - 1) * 100 : NaN),
+      scrypt: sane(fronts.zpool && fronts.zpool.scryptPerH && sc && sc.rentBtcPerH ? (fronts.zpool.scryptPerH / sc.rentBtcPerH - 1) * 100 : NaN) };
+    // funding com a Lighter: pares, horas seguidas acima do empate e robô simulado
+    if (lt.ok) {
+      const rows = lighterRows(lighterTable(lt.v), now, lo.ok ? lighterOi(lo.v) : null);
+      let pairs = lighterPairs(rows, ltStreak && ltStreak.s);
+      ltStreak = streakStep(ltStreak, pairs, Math.floor(now / 3600e3));
+      pairs = lighterPairs(rows, ltStreak.s);
+      const best = pairs.filter((x) => x.hours >= 24 && x.spread >= x.be);
+      const fl = fundPaperStep(fundPaperLT, { rows, best, now, fees: LT_FEES, label: 'Lighter' });
+      fundPaperLT = fl.pf;
+      for (const e of fl.events) log.push({ t: now, kind: 'simulado', text: e });
+      fronts.lt = { above: pairs.filter((x) => x.spread >= x.be).length, stable: best.length, pairs: pairs.length, top: pairs.slice(0, 8) };
+    } else fronts.lt = old.lt || null;
+    // papel: US$1.000 em cada frente passiva, com o CDI ao lado
+    frontsPaper = frontsPaperStep(frontsPaper, { now, cdi: fronts.cdi, rates: { bfx: fronts.bfx && fronts.bfx.netApr, basis: fronts.basis && fronts.basis.netApr, ethena: fronts.ethena && fronts.ethena.apr30, hlp: fronts.hlp && fronts.hlp.apr } });
+    // histórico diário (último valor do dia) para ver a tendência de cada frente
+    const d = new Date(now).toISOString().slice(0, 10), H = old.hist || {};
+    H[d] = { bfx: fronts.bfx && fronts.bfx.netApr, basis: fronts.basis && fronts.basis.netApr, ethena: fronts.ethena && fronts.ethena.apr30, hlp: fronts.hlp && fronts.hlp.apr,
+      zSha: fronts.zEdge.sha256, zScrypt: fronts.zEdge.scrypt, usdt: fronts.brl && fronts.brl.usdtPremPct, cdi: fronts.cdi, ltAbove: fronts.lt && fronts.lt.above, ltStable: fronts.lt && fronts.lt.stable };
+    for (const k of Object.keys(H).sort().slice(0, -60)) delete H[k];
+    fronts.hist = H;
   }
 
   // Placar: cada alerta de entrada de funding vira uma posição hipotética acompanhada pelo prazo projetado.
@@ -354,7 +406,7 @@ export async function tick(env, opts = {}) {
   const mempool = mpR.ok ? Object.assign({ at: now }, mpR.v) : state.mempool || null;
 
   const next = Object.assign({}, dec.state, alertState, {
-    lastTick: now, verified: Object.fromEntries(Object.entries(verified).filter(([, x]) => now - x.at <= 6 * 3600e3)), ai: br.ai, aiAnalysis, plan, acct, algoMap, mempool, stable24, pairStats, msig, darr, recentBlocks, nhWeek, paper, paperBurst, paperPlan, paperAlways, hashMkts, blockBuf, blockFlush, lastBlockT, real, fundPaper, alertScore, algoPaper, algoTs, aiScores, fundPaperAI, fhistHour, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig,
+    lastTick: now, verified: Object.fromEntries(Object.entries(verified).filter(([, x]) => now - x.at <= 6 * 3600e3)), ai: br.ai, aiAnalysis, plan, acct, algoMap, mempool, stable24, pairStats, msig, darr, recentBlocks, nhWeek, paper, paperBurst, paperPlan, paperAlways, hashMkts, fronts, frontsPaper, ltStreak, fundPaperLT, blockBuf, blockFlush, lastBlockT, real, fundPaper, alertScore, algoPaper, algoTs, aiScores, fundPaperAI, fhistHour, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig,
     market: mkt.ok ? { breakEvenEH: mkt.breakEvenEH, capEH: mkt.capEH, fillEH: mkt.fillEH, medianEH: mkt.medianEH, bidEH: mkt.bidEH,
       edgeAtBidPct: mkt.edgeAtBidPct, green: mkt.green, D: mkt.D, bookTotalPH: book ? book.totalPH : 0, bchUsd: mkt.bchUsd, btcUsd: mkt.btcUsd, costPerBlockUsd: mkt.costPerBlockUsd,
       hashpriceNet: mkt.hashpriceNet, blockNetUsd: mkt.blockNetUsd, phDaysPerBlock: mkt.phDaysPerBlock, market: mkt.market } : { ok: false, reason: mkt.reason },
@@ -464,7 +516,8 @@ async function api(req, env, url, fetchFn) {
       telegram: !!(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID), creds: credStatus(env), limits, config: cfg,
       state: { lastTick: state.lastTick, lastHeight: state.lastHeight, market: state.market, myBlocks: state.myBlocks || [], dailyUsd: state.dailyUsd || 0,
         errors: state.errors || [], edgeHist: state.edgeHist || [], alerts: (state.alerts || []).slice(-30).reverse(),
-        paper: state.paper || null, paperBurst: state.paperBurst || null, paperPlan: state.paperPlan || null, paperAlways: state.paperAlways || null, hashMkts: state.hashMkts || null, opLog: (state.opLog || []).slice(-20).reverse(), real: state.real ? Object.assign({}, state.real, { paid: undefined }) : null,
+        paper: state.paper || null, paperBurst: state.paperBurst || null, paperPlan: state.paperPlan || null, paperAlways: state.paperAlways || null, hashMkts: state.hashMkts || null, fronts: state.fronts || null, frontsPaper: state.frontsPaper || null,
+        fundPaperLT: state.fundPaperLT ? { summary: fundPaperSummary(state.fundPaperLT, LT_FEES), open: state.fundPaperLT.open, closed: state.fundPaperLT.closed.slice(-50).reverse() } : null, opLog: (state.opLog || []).slice(-20).reverse(), real: state.real ? Object.assign({}, state.real, { paid: undefined }) : null,
         fundPaper: state.fundPaper ? { summary: fundPaperSummary(state.fundPaper, FD.DEFAULT_FEES), open: state.fundPaper.open, closed: state.fundPaper.closed.slice(-100).reverse() } : null,
         algoPaper: state.algoPaper || null,
         fundPaperAI: state.fundPaperAI ? { summary: fundPaperSummary(state.fundPaperAI, FD.DEFAULT_FEES), open: state.fundPaperAI.open, closed: state.fundPaperAI.closed.slice(-100).reverse() } : null,

@@ -110,6 +110,12 @@ sempre identificado; nada de prometer previsão de sorte (Poisson é sem memóri
   outras moedas, funding) com "sem sorte" (média esperada); Real soma o robô na NiceHash (`real`), as sessões e posições
   do Diário e os aportes/retiradas que o usuário registra (`fd_cash`, só no aparelho). Gráfico do resultado acumulado
   por dia (UTC), tabela por dia. Servidor: `algoPaper.days` e totais de funding (`fundingUsd`, `feesUsd`, `capitalUsd`).
+- Frentes em observação (31/10, `docs/pesquisa-frentes.md`, `worker/src/fronts.js`): a cada 15 min, fora do ciclo do
+  mapa de mineração, lê Lighter (funding de Binance/Bybit/HL/Lighter normalizado por 8 h e contratos em aberto),
+  Bitfinex (empréstimo de USDT), Deribit (base de futuros), Ethena, HLP, zpool (pago de fato), Mercado Bitcoin + PTAX
+  (ágio) e CDI. `frontsPaper`: US$1.000 por frente passiva com o CDI ao lado; `fronts.hist` 60 dias. `fundPaperLT`:
+  robô simulado de funding com uma perna na Lighter (taxa zero), regra de 24 h acima do empate (`ltStreak`), só
+  cripto e OI ≥ US$300 mil. Tela: Radar → "Frentes em observação"; Início → Simulado inclui o robô da Lighter.
 - Ciclo do servidor: 3 min. Mínimo do Cloudflare é 1 min, mas o KV grátis aceita 1.000 gravações/dia e propaga em até
   60 s; abaixo de 3 min exige plano pago + Durable Objects. Atraso de 3 min custa < US$1 com 10 PH/s.
 

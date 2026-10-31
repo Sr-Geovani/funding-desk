@@ -143,7 +143,7 @@ async function setup() {
   await new Promise((r) => server.listen(0, r));
   const base = 'http://127.0.0.1:' + server.address().port;
   const env = { FD_KV: memoryKV(), PANEL_TOKEN: 'token-de-teste-com-mais-de-24-chars', ALLOWED_ORIGIN: 'https://sr-geovani.github.io',
-    NH_BASE: base + '/nh', BCH_REST: base + '/bch', PRICE_URL: base + '/cg/x', HL_URL: base + '/hl/info', WTM_URL: base + '/wtm/asic.json', HP_URL: base + '/hp', MRR_URL: base + '/mrr', MEMPOOL_URL: base + '/mempool', KRAKEN_URL: base + '/kraken', NH_API_KEY: MOCK_KEYS.key, NH_API_SECRET: MOCK_KEYS.secret, NH_ORG_ID: MOCK_KEYS.org,
+    NH_BASE: base + '/nh', BCH_REST: base + '/bch', PRICE_URL: base + '/cg/x', HL_URL: base + '/hl/info', WTM_URL: base + '/wtm/asic.json', HP_URL: base + '/hp', MRR_URL: base + '/mrr', LIGHTER_URL: base + '/x', BFX_URL: base + '/x', DERIBIT_URL: base + '/x', ETHENA_URL: base + '/x', HL_INFO_URL: base + '/x', ZPOOL_URL: base + '/x', MB_URL: base + '/x', BCB_PTAX_URL: base + '/x', BCB_SGS_URL: base + '/x', MEMPOOL_URL: base + '/mempool', KRAKEN_URL: base + '/kraken', NH_API_KEY: MOCK_KEYS.key, NH_API_SECRET: MOCK_KEYS.secret, NH_ORG_ID: MOCK_KEYS.org,
     MAX_ORDER_BTC: '0.01', MAX_LIMIT_PH: '100', MAX_DAILY_USD: '1000' };
   const call = async (method, path, body, token = env.PANEL_TOKEN) => {
     const r = await worker.fetch(new Request('https://api.example' + path, { method, headers: { Authorization: 'Bearer ' + token, Origin: 'https://sr-geovani.github.io', 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined }), env, {});
@@ -930,6 +930,34 @@ test('outros fornecedores: Braiins (preço para receber hash) e MiningRigRentals
     assert.deepEqual([r.body.host, r.body.extranonce2Size, r.body.braiins], ['solo.blocksniper.ai', 4, false]);
     assert.equal((await t.call('POST', '/api/pool/check', { host: 'x', port: 3333 })).status, 400);
   } finally { t.server.close(); }
+});
+
+test('frentes: leitura das fontes reais e robô de funding com a Lighter (taxa zero)', async () => {
+  const F = await import('../worker/src/fronts.js');
+  const rd = (f) => JSON.parse(readFileSync(new URL('./fixtures/' + f, import.meta.url)));
+  const NOWF = Date.UTC(2026, 9, 31, 13);
+  const b = F.bitfinexOf(rd('bitfinex-funding-tickers.real.json')); close(b.netApr, b.lastApr * 0.85, 1e-9); assert.ok(b.frrApr > 10 && b.frrApr < 15);
+  const d = F.deribitBasisOf(rd('deribit-btc-futures.real.json').result, NOWF);
+  assert.equal(d.contract, 'BTC-29JAN27'); assert.ok(d.basisApr > 5 && d.basisApr < 6.5 && d.netApr < d.basisApr);
+  assert.ok(Math.abs(F.ethenaOf(rd('ethena-yield.real.json')).apr30 - 4.77) < 0.01);
+  const z = F.zpoolOf(rd('zpool-status.real.json')); close(z.sha256PerH * 1e18, 0.343, 1e-9, 'BTC por EH/s por dia');
+  const r = F.brlOf(rd('mercadobitcoin-tickers.real.json'), rd('bcb-ptax.real.json')); assert.equal(r.ptax, 5.4212); assert.ok(r.usdtPremPct > 2 && r.usdcPremPct > 0.5 && r.usdcPremPct < 1);
+  assert.equal(F.cdiOf([{ data: '29/10/2026', valor: '13.65' }]), 13.65);
+  // Lighter: linhas no formato do funding simulado; empate menor com a perna de taxa zero
+  const by = F.lighterTable(rd('lighter-funding.real.json')); assert.deepEqual(Object.keys(by.BTC).sort(), ['binance', 'bybit', 'hyperliquid', 'lighter']);
+  close(F.ltBe('lighter', 'hyperliquid'), 0.06 / 3 * 365, 1e-9); assert.ok(F.ltBe('lighter', 'hyperliquid') < F.ltBe('binance', 'hyperliquid'));
+  assert.equal(F.lighterRows({ NVDA: { lighter: 0.001, bybit: 0 } }, NOWF).NVDA, undefined, 'ações ficam fora');
+  assert.equal(F.lighterRows({ X: { lighter: 0.001, bybit: 0 } }, NOWF, { X: 1000 }).X, undefined, 'mercado raso fica fora');
+  let rows = F.lighterRows(by, NOWF), pairs = F.lighterPairs(rows, {});
+  assert.ok(pairs.every((p) => p.s === 'lighter' || p.l === 'lighter')); assert.equal(pairs[0].coin, 'PONS');
+  // 24 leituras horárias seguidas acima do empate → par estável; uma abaixo zera
+  let st = null; for (let h = 0; h < 24; h++) st = F.streakStep(st, pairs, 1000 + h);
+  assert.equal(st.s[pairs[0].key], 24);
+  st = F.streakStep(st, pairs.map((p) => Object.assign({}, p, { spread: p.key === pairs[0].key ? 0 : p.spread })), 1024); assert.equal(st.s[pairs[0].key], undefined);
+  // papel das frentes passivas: US$1.000 a 10% a.a. por 1 h; CDI ao lado
+  let pp = F.frontsPaperStep(null, { rates: { bfx: 10 }, cdi: 13.65, now: NOWF });
+  pp = F.frontsPaperStep(pp, { rates: { bfx: 10 }, cdi: 13.65, now: NOWF + 3600e3 });
+  close(pp.f.bfx.usd, 1000 * 0.10 / 8760, 1e-9); close(pp.f.bfx.cdiPct, (Math.pow(1.1365, 1 / 8760) - 1) * 100, 1e-9);
 });
 
 test('auditoria IA: mesma régua do robô, reajuste real, funding acompanhado e grupo de controle', () => {

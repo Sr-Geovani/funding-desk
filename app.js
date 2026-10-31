@@ -690,7 +690,7 @@ function loadOps(){
     if(r[2].ok)ops.bal=r[2].v;else ops.err.bal=r[2].e.message;
     if(r[3].ok)ops.pools=r[3].v.list||[];else ops.err.pools=r[3].e.message;
     if(r[4].ok)ops.log=r[4].v.log||[];
-    renderOps();renderHome();renderMine();renderAcct();renderRadar();renderRobo();renderWindow();renderHeat();renderAI();renderNext();renderAct();renderHashMkts();
+    renderOps();renderHome();renderMine();renderAcct();renderRadar();renderRobo();renderWindow();renderHeat();renderAI();renderNext();renderAct();renderHashMkts();renderFronts();
   });
 }
 // Dados do servidor em qualquer aba: 30 s em Operar, 60 s nas outras. Ao voltar do segundo plano (iPhone deixa o app
@@ -1424,6 +1424,9 @@ function finData(mode){
     if(fs&&isFinite(fs.fundingUsd)){var fres=fs.fundingUsd-fs.feesUsd;
       fr.push({name:'Funding (robô)',cost:fs.feesUsd,rev:fs.fundingUsd,exp:fres,note:fs.closed+' fechadas, '+fs.open+' abertas'+(fs.capitalUsd?' (US$'+nf(fs.capitalUsd,0)+' de capital em uso)':'')});
       (fp.closed||[]).forEach(function(c){add(dayOf(c.closedAt),c.netUsd)});add(today,fs.openNetUsd||0)}
+    var lp=st.fundPaperLT,ls=lp&&lp.summary;
+    if(ls&&isFinite(ls.fundingUsd)){fr.push({name:'Funding com Lighter (robô)',cost:ls.feesUsd,rev:ls.fundingUsd,exp:ls.fundingUsd-ls.feesUsd,note:ls.closed+' fechadas, '+ls.open+' abertas · perna de taxa zero'});
+      (lp.closed||[]).forEach(function(c){add(dayOf(c.closedAt),c.netUsd)});add(today,ls.openNetUsd||0)}
   }else{
     var r=st.real;
     if(r&&(r.spendUsd||r.revenueUsd)){fr.push({name:'Mineração BCH (robô)',cost:r.spendUsd||0,rev:r.revenueUsd||0,note:(r.blocks||0)+' bloco(s) pagos no seu endereço'});
@@ -1707,6 +1710,52 @@ function alertHTML(a,opts){opts=opts||{};var k=KIND[a.kind]||['Info','',''];
   return '<div class="alert '+a.kind+'"'+(resolved?' style="opacity:.65"':'')+'><div class="row between"><span class="chip '+k[1]+'">'+k[2]+' '+k[0]+'</span>'+when+'</div>'+body+life+acts+'</div>'}
 function dayLabel(t){var d=new Date(t),n=new Date(),y=new Date(n.getTime()-864e5);
   return d.toDateString()===n.toDateString()?'Hoje':d.toDateString()===y.toDateString()?'Ontem':d.toLocaleDateString('pt-BR',{weekday:'long',day:'2-digit',month:'2-digit'})}
+// Frentes em observação (docs/pesquisa-frentes.md): cada uma com o número de agora, a régua para valer a pena e o
+// resultado simulado desde o início do acompanhamento, sempre ao lado do CDI.
+function renderFronts(){
+  var el=$('r_fronts');if(!el)return;
+  var st=(ops.status&&ops.status.state)||{},F=st.fronts,P=st.frontsPaper,LT=st.fundPaperLT;
+  var head='<div class="eyebrow">Frentes em observação</div><div class="lead">Onde mais pode haver retorno (monitorando antes de operar)</div>';
+  if(!settings.apiUrl){el.innerHTML=head+'<p class="note">Precisa do backend conectado: ele lê as fontes a cada 15 min.</p>';return}
+  if(!F){el.innerHTML=head+'<p class="note">Começa no próximo ciclo do servidor (até 15 min).</p>';return}
+  var cdi=F.cdi,chipF=function(ok,mid){return ok?'<span class="chip ok">vale observar</span>':mid?'<span class="chip warn">no limite</span>':'<span class="chip">abaixo da régua</span>'};
+  var pctA=function(x){return isFinite(x)&&x!==null?pctp(x,1)+' a.a.':'—'};
+  var pap=function(k){var f=P&&P.f&&P.f[k];if(!f||!(f.usd>0))return '';var d=(Date.now()-f.since)/864e5;
+    return '<div class="note">US$1.000 aqui desde '+new Date(f.since).toLocaleDateString('pt-BR')+': <b>'+signUsd(f.usd)+'</b> ('+pctp(f.usd/10,2)+') · CDI no mesmo período: '+pctp(f.cdiPct||0,2)+(d<7?' · poucos dias ainda':'')+'</div>'};
+  var h=head+'<p class="note" style="margin:0 0 8px">Régua: CDI hoje '+(cdi?pctp(cdi,2)+' a.a.':'—')+' (em reais). Frente em dólar só ganha do CDI se render mais que ele menos a alta esperada do dólar. Pesquisa completa: docs/pesquisa-frentes.md.</p>';
+  // 1) funding com perna de taxa zero
+  var L=F.lt;
+  if(L){var seenC={},top=(L.top||[]).filter(function(p){if(seenC[p.coin])return false;seenC[p.coin]=1;return true}).slice(0,3),ls=LT&&LT.summary;
+    h+='<div class="trow"><div class="row between"><b>Funding com perna na Lighter (taxa zero)</b>'+chipF(L.stable>0,L.above>0)+'</div>'+
+      '<div class="note">A Lighter não cobra taxa (nem a mercado): o empate cai de ~12% para ~7% a.a. e a perna a mercado deixa de custar ~US$0,60 por operação. Agora: '+L.above+' pares acima do empate, <b>'+L.stable+' estáveis 24 h</b> (regra validada).</div>'+
+      (top.length?'<div class="note">Maiores agora: '+top.map(function(p){return esc(p.coin)+' (short '+esc(p.s)+', long '+esc(p.l)+') '+pctp(p.spread,0)+' a.a., empate '+pctp(p.be,1)+', '+p.hours+' h acima'}).join(' · ')+'</div>':'')+
+      (ls?'<div class="note">Robô simulado (US$1.000 por operação, 2x): '+ls.closed+' fechadas, '+ls.open+' abertas · resultado <b class="'+((ls.netUsd+ls.openNetUsd)>=0?'good':'bad')+'">'+signUsd(ls.netUsd+ls.openNetUsd)+'</b> desde '+new Date(ls.since).toLocaleDateString('pt-BR')+'.</div>':'')+
+      '<div class="note">Só cripto (ações, câmbio e índices da Lighter ficam fora) e mercados com US$300 mil+ em aberto. Riscos: liquidez menor que Binance/Bybit, contrato inteligente (DEX), depósito em USDC pela rede. Sem KYC.</div></div>';}
+  // 2) dólar parado rendendo
+  var B=F.bfx,D=F.basis,E=F.ethena,HL=F.hlp,gap=function(x){return cdi&&isFinite(x)&&x!==null?x>=cdi-2:false};
+  h+='<div class="eyebrow" style="margin:12px 0 4px">Dólar parado rendendo (capital entre operações)</div>';
+  h+='<div class="trow"><div class="row between"><b>Emprestar USDT na Bitfinex</b>'+chipF(B&&gap(B.netApr),B&&B.netApr>=8)+'</div><div class="note">Último empréstimo: '+pctA(B&&B.lastApr)+' · líquido da taxa de 15%: <b>'+pctA(B&&B.netApr)+'</b> · taxa média (FRR) '+pctA(B&&B.frrApr)+'. Em dias de volatilidade passa de 15–50% a.a. Risco: a própria Bitfinex.</div>'+pap('bfx')+'</div>';
+  h+='<div class="trow"><div class="row between"><b>Cash-and-carry BTC (Deribit)</b>'+chipF(D&&gap(D.netApr),D&&D.netApr>=8)+'</div><div class="note">Compra BTC e vende o futuro '+(D?esc(D.contract)+' ('+nf(D.days,0)+' dias)':'')+': base '+pctA(D&&D.basisApr)+', líquido <b>'+pctA(D&&D.netApr)+'</b>, travado até o vencimento. Vale quando passa de ~12–15% (mercado comprado).</div>'+pap('basis')+'</div>';
+  h+='<div class="trow"><div class="row between"><b>Ethena sUSDe · cofre HLP (Hyperliquid)</b>'+chipF(false,(E&&E.apr30>=8)||(HL&&HL.apr>=8))+'</div><div class="note">sUSDe (média 30 dias): <b>'+pctA(E&&E.apr30)+'</b> · HLP: <b>'+pctA(HL&&HL.apr)+'</b>. Referência de rendimento neutro em dólar; risco de protocolo.</div>'+pap('ethena')+pap('hlp')+'</div>';
+  // 3) mineração: checagem de realidade
+  var Z=F.zEdge||{},HM=st.hashMkts||{},M=HM.mrr,mk=st.market||{},nh=mk.bidEH?mk.bidEH*1.03:null;
+  h+='<div class="eyebrow" style="margin:12px 0 4px">Mineração: o que pagou de fato</div>'+
+    '<div class="trow"><div class="row between"><b>Alugar e mandar para multipool (zpool)</b>'+chipF(Z.sha256>0||Z.scrypt>0,Z.sha256>-5||Z.scrypt>-5)+'</div><div class="note">Pago nas últimas 24 h × aluguel na NiceHash com taxa: SHA-256 <b>'+(isFinite(Z.sha256)&&Z.sha256!==null?pct(Z.sha256,1):'—')+'</b> · Scrypt <b>'+(isFinite(Z.scrypt)&&Z.scrypt!==null?pct(Z.scrypt,1):'—')+'</b>. Número real (não estimativa): é a checagem das "outras moedas".</div></div>'+
+    '<div class="trow"><div class="row between"><b>Revender hash na MiningRigRentals</b>'+chipF(false,M&&nh&&M.suggestedEH/nh>1.2&&M.rentedPH>100)+'</div><div class="note">Preço pedido '+(M&&nh?pct((M.suggestedEH/nh-1)*100,0)+' acima da NiceHash':'—')+', mas só '+(M?nf(M.rentedPH||0,0)+' PH/s alugados de '+nf((M.availPH||0)/1000,1)+' EH/s anunciados':'—')+': sobra oferta, quase ninguém aluga.</div></div>';
+  // 4) câmbio
+  var R=F.brl;
+  if(R)h+='<div class="eyebrow" style="margin:12px 0 4px">Câmbio para os aportes</div><div class="trow"><div class="row between"><b>Real → dólar cripto</b>'+chipF(R.usdcPremPct!==null&&R.usdcPremPct<0.3,R.usdcPremPct!==null&&R.usdcPremPct<0.8)+'</div><div class="note">Comprar no Mercado Bitcoin custa, sobre o dólar oficial (PTAX '+(R.ptax?nf(R.ptax,4):'—')+'): USDC <b>'+(R.usdcPremPct!==null?pct(R.usdcPremPct,2):'—')+'</b> · USDT <b>'+(R.usdtPremPct!==null?pct(R.usdtPremPct,2):'—')+'</b>. Não é lucro: é economia em cada aporte (escolher a moeda e a hora com menor ágio).</div></div>';
+  h+='<details style="margin-top:8px"><summary>Descartadas na pesquisa (e por quê)</summary><ul class="rules note" style="margin-top:6px">'+
+    '<li><b>Polymarket/Kalshi</b>: proibidas no Brasil (CMN 5.298/2026, bloqueio da Anatel).</li>'+
+    '<li><b>Surebet em casas de aposta</b>: legal, mas as casas limitam a conta e os termos proíbem; fora de cripto.</li>'+
+    '<li><b>Arbitragem à vista entre corretoras / triangular</b>: tomada por robôs rápidos.</li>'+
+    '<li><b>Moedas extras do merged mining (PEP, DINGO, LKY)</b>: somam ~0,3% no Scrypt; não mudam a conta.</li>'+
+    '<li><b>Revenda de hash na MRR</b>: oferta sobrando (as 100 máquinas mais baratas sem aluguel).</li>'+
+    '<li><b>Comerciante P2P de USDT</b>: margem de 0,3–1% com risco de golpe e bloqueio no Pix.</li></ul></details>'+
+    (F.err&&F.err.length?'<p class="note warn" style="margin:6px 0 0">Sem leitura agora: '+esc(F.err.join(' · '))+'</p>':'')+
+    '<p class="note" style="margin:6px 0 0">Atualizado '+ago(F.at)+' atrás. Valores em dólar; o "papel" de US$1.000 mostra o que cada frente teria rendido desde o início do acompanhamento.</p>';
+  el.innerHTML=h;
+}
 function renderRadar(){
   if(!$('r_alerts'))return;
   var now=Date.now();
