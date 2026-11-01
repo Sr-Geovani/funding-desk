@@ -16,7 +16,7 @@ function hourOfWeek(nhWeek, now) {
 }
 const DAYS = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
 
-export function entryChecklist({ mkt, darr, mom, ret, win, nhWeek, hashMkts, power, cfg, now }) {
+export function entryChecklist({ mkt, darr, mom, ret, win, nhWeek, hashMkts, power, cfg, now, mm }) {
   const steps = [], add = (id, title, status, value, why) => steps.push({ n: steps.length + 1, id, title, status, value, why });
   const minEdge = cfg.minEdgePct || 3, fee = cfg.rentFeePct || 3;
   // 1) margem no preço que de fato recebe hash (NiceHash, com a taxa de 3%). O menor preço recebendo pode ter hash para
@@ -84,5 +84,8 @@ export function entryChecklist({ mkt, darr, mom, ret, win, nhWeek, hashMkts, pow
   const lottery = !ok(nh) ? '' : nh < 0
     ? 'Loteria consciente (aceitando perder o orçamento): hoje cada tentativa custa, em média, ' + n(-nh, 1) + '% do que se gasta; os melhores momentos para isso são os de margem menos negativa.'
     : 'Margem positiva: repetindo tentativas, o resultado tende à margem (' + pctTxt(nh) + ' do gasto); a sorte muda o caminho, não a média.';
-  return { at: now, verdict, title, text, lottery, steps, okCount: steps.filter((s) => s.status === 'ok').length, scored: steps.filter((s) => s.status !== 'na' && s.status !== 'info').length };
+  // o mercado no período (margem média), para comparar o momento com o normal e não só com o mínimo
+  const W = mm && (mm.d7 || mm.h24), market = W ? { label: W.label || (mm.d7 ? '7 dias' : '24 h'), avg: W.avg, median: W.median, pctPos: W.pctPos, pctMin: W.pctMin, hoursMin: W.hoursMin, rankNow: ok(nh) && W.rankNow !== null ? W.rankNow : null,
+    h24: mm.h24 && mm.d7 && mm.d7.n > mm.h24.n ? mm.h24.avg : null } : null;
+  return { market, at: now, verdict, title, text, lottery, steps, okCount: steps.filter((s) => s.status === 'ok').length, scored: steps.filter((s) => s.status !== 'na' && s.status !== 'info').length };
 }

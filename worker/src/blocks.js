@@ -37,13 +37,17 @@ export function blockRecord(b, { prevT, mkt, book, sim, mineBch, realPH }) {
   if (mkt && mkt.ok) Object.assign(r, { usd: +(reward * mkt.bchUsd).toFixed(2), bchUsd: mkt.bchUsd, nhBid: mkt.bidEH, nhMedian: mkt.medianEH, be: +mkt.breakEvenEH.toFixed(4), edge: +mkt.edgeAtBidPct.toFixed(2) });
   if (book) r.nhPH = +book.totalPH.toFixed(1);
   if (sim) Object.assign(r, { simPH: sim.ph || 0, simProb: sim.prob ? +sim.prob.toFixed(5) : 0, simWon: !!sim.won });
+  // preço e margem em que a simulação estava comprando (decididos no ciclo anterior; a margem acima é a do registro)
+  if (sim && sim.priceEH > 0 && mkt && mkt.ok) Object.assign(r, { simBid: sim.priceEH, simEdge: +((mkt.breakEvenEH / sim.priceEH - 1) * 100).toFixed(2) });
   if (mineBch > 0) r.mine = mineBch;
   if (realPH > 0 && b.difficulty) { r.realPH = +realPH.toFixed(2); r.realProb = +(realPH * 1e15 / (b.difficulty * TWO32 / 600 + realPH * 1e15)).toFixed(5); } // suas ordens reais (modo Ativo)
   return r;
 }
 
 // Resumo para padrões: por pool, solo × não solo, intervalos, taxas, tamanho, horário (UTC) e margem do aluguel.
-export function blockSummary(list) {
+export function blockSummary(list, { fixAt } = {}) {
+  // margem gravada antes da correção do preço (31/10) era otimista: corrige o lance em +5,8%
+  if (fixAt) list = list.map((b) => (b.t < fixAt && isFinite(b.edge) && b.edge !== null ? Object.assign({}, b, { edge: ((1 + b.edge / 100) / 1.058 - 1) * 100 }) : b));
   const n = list.length, avg = (f, a = list) => { const v = a.map(f).filter((x) => x !== null && x !== undefined && isFinite(x)); return v.length ? v.reduce((s, x) => s + x, 0) / v.length : null; };
   const byPool = {};
   for (const b of list) { const e = byPool[b.pool] || (byPool[b.pool] = { n: 0, solo: b.solo }); e.n++; }

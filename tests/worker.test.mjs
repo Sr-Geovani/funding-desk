@@ -66,12 +66,15 @@ test('mercado: preço de empate igual ao do painel (mining.js)', () => {
     { price: '0.45', acceptedSpeed: '0.001', alive: true }, { price: '0.40', acceptedSpeed: '0', alive: true }, { price: '0.47', acceptedSpeed: '0.002', alive: true }] } } });
   close(book.fillEH, 0.45); close(book.medianEH, 0.47); close(book.totalPH, 3);
   const cfg = Object.assign({}, DEFAULT_CONFIG, { poolFeePct: 2, rentFeePct: 3, minEdgePct: 3, bidPremiumPct: 0.5 });
-  const m = computeMarket({ D: 527.94e9, bchUsd: 283.49, btcUsd: 77366, book, cfg });
+  const m = computeMarket({ D: 527.94e9, bchUsd: 283.49, btcUsd: 77366, book, cfg: Object.assign({}, cfg, { targetPh: 1 }) });
   const p = FDM.plan({ ph: 1, hours: 24, D: 527.94e9, rewardCoin: 3.125, coinUsd: 283.49, priceBtcPerEhDay: 0.45, btcUsd: 77366, rentFeePct: 3, poolFeePct: 2 });
   close(m.breakEvenEH, p.breakEvenPrice, 1e-9, 'empate');
   close(m.capEH, m.breakEvenEH * 0.97);
   close(m.bidEH, 0.4523);
   assert.equal(m.green, m.bidEH <= m.capEH);
+  // preço pelo tamanho: 1 PH/s cabe no nível de 0,45; 10 PH/s passam do livro inteiro (3 PH/s) e pagam o último nível
+  const m10 = computeMarket({ D: 527.94e9, bchUsd: 283.49, btcUsd: 77366, book, cfg: Object.assign({}, cfg, { targetPh: 10 }) });
+  close(m10.fillTopEH, 0.45); close(m10.bidEH, 0.4724); assert.ok(m10.edgeAtBidPct < m.edgeAtBidPct);
 });
 
 const units = { minLimitPH: 0.1, priceDownStepEH: 0.01, minOrderBtc: 0.001 };
@@ -1195,4 +1198,20 @@ test('replay: mesmas regras refeitas com os blocos registrados (mesmo sorteio, s
   const old = list.map((r) => Object.assign({}, r, { nhBid: 0.402 }));
   const B2 = bestScenarios(old, { now, since: null, fixAt: now, cfg, btcUsd: 110000, blockUsd: 900 }), x = B2.top[0];
   assert.ok(Math.abs(x.spendUsd / (x.ph * x.hours) / (0.402 * 1.058 * 110000 * 1.03 / 24000) - 1) < 0.01);
+});
+
+test('margem do mercado: média, tempo acima do mínimo e posição de agora; IA compara com o mercado', async () => {
+  const { marginStats } = await import('../worker/src/signals.js');
+  const now = Date.UTC(2026, 10, 1, 16), H = [];
+  for (let i = 0; i < 96; i++) H.push([now - (96 - i) * 15 * 60e3, i < 1 ? 3.5 : -2, 0.42]); // 15 min de 24 h com margem ≥ 3%
+  const M = marginStats(H, { now, fixAt: null, minEdge: 3, edgeNow: -1 });
+  assert.ok(Math.abs(M.h24.pctMin - 1 / 96 * 100) < 1e-9 && Math.abs(M.h24.hoursMin - 0.25) < 1e-9 && M.h24.rankNow > 90 && M.d7 === null || M.d7.n === 96);
+  // antes da correção do preço: lance corrigido em +5,8%
+  const C = marginStats(H.map((x) => [x[0], 3.5]), { now, fixAt: now + 1, minEdge: 3 });
+  assert.ok(C.h24.avg < -2 && C.h24.pctMin === 0);
+  const sn = { now, edge: -1, green: false, minEdge: 3, darr: 1, D: 5e11, mom: null, ret: null, win: null, mm: M, fund: [], rows: {}, stable24: {}, algos: [] };
+  const a = analysis(sn, brainStep(null, sn).ai);
+  assert.ok(a.lines.some((l) => /Mercado \(24 h\): margem média/.test(l) && /melhor que/.test(l)));
+  assert.equal(marginStats(H.map((x) => [x[0], 1]), { now, minEdge: 3, edgeNow: 1 }).h24.rankNow, 50, 'empate fica no meio');
+  assert.ok(a.lines.some((l) => /quase não aconteceu/.test(l)), 'mínimo raro: explica e não sugere baixar o mínimo');
 });

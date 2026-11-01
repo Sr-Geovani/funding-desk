@@ -203,6 +203,14 @@ export function analysis(snap, ai) {
       ? `Mineração BCH: janela aberta. Margem de ${f(e, 1)}% no lance (DARR ${d ? f(d, 3) : '—'}). O robô compraria agora.`
       : `Mineração BCH: o robô está pausado. Margem de ${f(e, 1)}% no lance, abaixo do seu mínimo de ${snap.minEdge}%${d ? ` (DARR ${f(d, 3)})` : ''}.`);
     if (snap.green) recs.push({ area: 'mineracao', text: 'Janela aberta: com o robô em Ativo, ele compraria agora e pararia no bloco.', type: 'mine_buy' });
+    // comparação com o mercado (média de 7 dias), não só com o cenário ideal
+    const W = snap.mm && (snap.mm.d7 || snap.mm.h24);
+    if (W) {
+      const lab = W.label || (snap.mm.d7 ? '7 dias' : '24 h');
+      out.push(`Mercado (${lab}): margem média ${f(W.avg, 1)}% (mediana ${f(W.median, 1)}%, de ${f(W.min, 1)}% a ${f(W.max, 1)}%). Margem ≥ 0 em ${f(W.pctPos, 0)}% do tempo; ≥ seu mínimo de ${snap.minEdge}% em ${f(W.pctMin, 1)}% (~${f(W.hoursMin, 1)} h). ` +
+        (W.rankNow !== null ? `A margem de agora (${f(e, 1)}%) está melhor que ${f(W.rankNow, 0)}% das leituras: ${W.rankNow >= 80 ? 'momento bom para o padrão do mercado' : W.rankNow <= 20 ? 'momento ruim para o padrão do mercado' : 'momento comum'}.` : ''));
+      if (W.pctMin < 2 && W.n >= 48) out.push(`Seu mínimo de ${snap.minEdge}% quase não aconteceu (${f(W.pctMin, 1)}% do tempo): o robô vai comprar pouco. É o mercado, não defeito: abaixo de 0 se perde em média. Para comprar mais vezes sem perder, o caminho é custo menor (Braiins sem taxa: empate ~2 pontos mais baixo), não baixar o mínimo.`);
+    }
   }
   if (snap.mom && snap.mom.vsEmaPct >= 2) out.push(`BCH subiu ${f(snap.mom.vsEmaPct, 1)}% acima da média de 2 dias contra o BTC: a dificuldade ainda não reagiu, o que costuma melhorar a margem nas próximas horas.`);
   if (snap.ret && isFinite(snap.ret.darrAfter)) out.push(`Reajuste do BTC em ${snap.ret.remainingBlocks} blocos (${pctTxt(snap.ret.changePct)}): o DARR deve ir para ~${f(snap.ret.darrAfter, 3)}.`);

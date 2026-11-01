@@ -8,7 +8,7 @@ export const MOCK_KEYS = { key: 'mock-key', secret: 'mock-secret-0123456789', or
 export function createMock() {
   const s = {
     height: 900000, difficulty: 530e9, bchUsd: 285, btcUsd: 77000,
-    book: [{ price: 0.40, speed: 0.0006 }, { price: 0.42, speed: 0.0004 }, { price: 0.50, speed: 0.0002 }],
+    book: [{ price: 0.40, speed: 0.06 }, { price: 0.42, speed: 0.04 }, { price: 0.50, speed: 0.02 }],
     blocks: {}, orders: {}, pools: [{ id: 'pool-1', name: 'BlockSniper solo', stratumHostname: 'solo.blocksniper.ai', stratumPort: 3333, username: 'bitcoincash:qtest', password: 'x' }],
     calls: [], authFails: 0, balance: 0.05, nextId: 1, tgUpdates: [], tgSent: []
   };

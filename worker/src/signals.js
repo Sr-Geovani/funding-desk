@@ -67,3 +67,21 @@ export function weekAdd(week, t, { edge, price, ph, darr }) {
   b[0]++; b[1] += edge; b[2] += price; b[3] += ph || 0; b[4] += isFinite(darr) ? darr : 0;
   return w;
 }
+
+// Margem média do mercado (o "normal" contra o qual comparar o momento): a partir do gravador de 15 em 15 min (edgeHist:
+// [t, margem no lance, ...]). Leituras de antes da correção do preço (31/10) usam o lance corrigido (+5,8%).
+// Devolve, para 24 h e 7 dias: média, mediana, % do tempo com margem ≥ 0 e ≥ o seu mínimo, e onde a margem de agora fica.
+export function marginStats(edgeHist, { now, fixAt, minEdge = 3, edgeNow = null }) {
+  const F = 1.058, pts = (edgeHist || []).filter((x) => x && isFinite(x[1]))
+    .map((x) => [x[0], fixAt && x[0] < fixAt ? ((1 + x[1] / 100) / F - 1) * 100 : x[1]]);
+  const win = (h) => {
+    const v = pts.filter((x) => x[0] >= now - h * 3600e3).map((x) => x[1]);
+    if (v.length < 4) return null;
+    const s = v.slice().sort((a, b) => a - b), n = v.length;
+    return { n, hours: n / 4, avg: v.reduce((a, b) => a + b, 0) / n, median: s[Math.floor(n / 2)], min: s[0], max: s[n - 1],
+      pctPos: v.filter((x) => x >= 0).length / n * 100, pctMin: v.filter((x) => x >= minEdge).length / n * 100,
+      hoursMin: v.filter((x) => x >= minEdge).length / 4, rankNow: isFinite(edgeNow) && edgeNow !== null ? (v.filter((x) => x < edgeNow - 0.05).length + v.filter((x) => Math.abs(x - edgeNow) <= 0.05).length / 2) / n * 100 : null,
+      label: n / 4 >= 144 ? '7 dias' : n / 4 >= 48 ? Math.round(n / 96) + ' dias' : Math.max(1, Math.round(n / 4)) + ' h' };
+  };
+  return { at: now, minEdge, now: isFinite(edgeNow) ? edgeNow : null, h24: win(24), d7: win(24 * 7) };
+}

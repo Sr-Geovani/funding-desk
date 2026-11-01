@@ -1039,6 +1039,12 @@ function renderEntry(){
   var S={ok:['ok','✓'],warn:['warn','!'],bad:['bad','✕'],na:['','—'],info:['','i']};
   el.innerHTML='<div class="row between"><div class="eyebrow">Cartilha de entrada · '+E.okCount+' de '+E.scored+' a favor</div><span class="chip '+V[0]+'">'+V[1]+'</span></div>'+
     '<div class="lead">'+esc(E.title)+'</div><p class="why" style="margin:0 0 8px">'+esc(E.text)+'</p>'+
+    (E.market?(function(M){var mn=+((ops.status||{}).config||{}).minEdgePct;mn=isFinite(mn)?mn:3;
+      return '<div class="box" style="margin:0 0 8px"><b>Margem do mercado ('+M.label+')</b>'+
+        '<div class="kv" style="margin-top:4px"><div><small>Média</small><span class="'+(M.avg>=0?'good':'bad')+'">'+pct(M.avg,1)+'</span></div>'+
+        (M.h24!==null&&M.h24!==undefined?'<div><small>Média 24 h</small><span class="'+(M.h24>=0?'good':'bad')+'">'+pct(M.h24,1)+'</span></div>':'')+
+        '<div><small>Tempo ≥ 0</small><span>'+pctp(M.pctPos,0)+'</span></div><div><small>Tempo ≥ '+nf(mn,0)+'%</small><span>'+pctp(M.pctMin,1)+'</span></div></div>'+
+        (M.rankNow!==null?'<div class="note" style="margin-top:4px">Agora está melhor que <b>'+pctp(M.rankNow,0)+'</b> das leituras do período ('+(M.rankNow>=80?'bom para o padrão do mercado':M.rankNow<=20?'ruim para o padrão do mercado':'momento comum')+').</div>':'')+'</div>'})(E.market):'')+
     '<div class="stack" style="gap:4px">'+E.steps.map(function(s){var c=S[s.status]||S.na;
       return '<details class="trow"><summary><span class="chip '+c[0]+'">'+c[1]+'</span> <b>'+s.n+'. '+esc(s.title)+'</b><div class="note" style="margin:2px 0 0 28px">'+esc(s.value)+'</div></summary><p class="note" style="margin:4px 0 0">'+esc(s.why)+'</p></details>'}).join('')+'</div>'+
     (E.lottery?'<p class="note" style="margin:8px 0 0">'+esc(E.lottery)+'</p>':'')+
@@ -1212,7 +1218,7 @@ function renderBlocksLog(){
       b.netPH?'Potência da rede: '+nf(b.netPH,0)+' PH/s (dificuldade '+nf(b.D/1e9,1)+' G)':'',
       b.nhPH?'NiceHash: '+nf(b.nhPH,0)+' PH/s alugados; lance '+(b.nhBid||0).toFixed(4)+', empate '+(b.be||0).toFixed(4)+' BTC/EH/dia':'',
       b.realPH?'Suas ordens: '+nf(b.realPH,2)+' PH/s (chance de ser seu: '+pctp(b.realProb*100,2)+')':'',
-      b.simPH?'Simulação: '+nf(b.simPH,0)+' PH/s, chance '+pctp(b.simProb*100,2)+', '+(b.simWon?'seria seu':'não saiu'):'',
+      b.simPH?'Simulação (cenário Sua): '+nf(b.simPH,0)+' PH/s'+(b.simBid?' comprando a '+b.simBid.toFixed(4)+(b.simEdge!==undefined?' (margem na compra '+pct(b.simEdge,1)+')':''):'')+', chance '+pctp(b.simProb*100,2)+', '+(b.simWon?'seria seu':'não saiu'):'',
       'Assinatura: '+esc(b.tag||'—'),(ops.status&&ops.status.state&&ops.status.state.lastHeight?'Confirmações: '+Math.max(1,ops.status.state.lastHeight-b.h+1):''),b.backfill?'Buscado depois: sem dados de mercado do momento.':''].filter(Boolean);
     return '<details class="trow"><summary style="list-style:none;cursor:pointer"><div>'+head+'</div><div class="note">'+line+'</div></summary><div class="note" style="margin-top:4px">'+det.join('<br>')+'</div></details>'}).join('')+'</div>'+
     (L.length>40?'<p class="note">Mostrando 40 de '+L.length+'. O CSV tem todos.</p>':'');

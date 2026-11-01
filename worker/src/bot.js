@@ -109,10 +109,23 @@ export function computeMarket({ D, bchUsd, btcUsd, feesBch = 0, book, cfg }) {
   const m = { ok: true, D, bchUsd, btcUsd, phDaysPerBlock, blockNetUsd, hashpriceNet, breakEvenEH, capEH,
     fillEH: book && book.fillEH, medianEH: book && book.medianEH, market: book && book.market, depth: (book && book.depth) || null };
   if (!m.fillEH) return Object.assign(m, { ok: false, reason: 'livro de ordens vazio' });
+  // Preço pelo tamanho (01/11): a ordem mais barata recebendo hash às vezes tem só 1–2 máquinas (fração de PH/s). Um lance
+  // logo acima dela só toma esse pouco; para receber a potência alvo é preciso passar do nível do livro em que o hash
+  // acumulado chega nela. Sem isso o sinal ficava verde por alguns minutos por causa de uma ordem minúscula (ex.: 0,404)
+  // e no ciclo seguinte voltava a 0,426 (−2,3%).
+  m.fillTopEH = m.fillEH;
+  return sizeMarket(m, cfg.targetPh, cfg);
+}
+// Mesmo mercado com o lance para receber `ph` PH/s (profundidade do livro). Usado também pelos cenários de outra potência.
+export function sizeMarket(mkt, ph, cfg) {
+  if (!mkt || !mkt.ok || !(mkt.fillTopEH || mkt.fillEH)) return mkt;
+  const m = Object.assign({}, mkt), size = Math.max(1, ph || 0), top = m.fillTopEH || m.fillEH;
+  const lv = Array.isArray(m.depth) && m.depth.length ? (m.depth.find((d) => d[1] >= size) || m.depth[m.depth.length - 1]) : null;
+  m.fillTopEH = top; m.fillEH = lv ? Math.max(top, lv[0]) : top; m.sizePh = size;
   m.bidEH = ceil4(m.fillEH * (1 + cfg.bidPremiumPct / 100));
-  m.edgeAtBidPct = (breakEvenEH / m.bidEH - 1) * 100;
-  m.green = m.bidEH <= capEH;
-  m.costPerBlockUsd = phDaysPerBlock * m.bidEH / 1000 * btcUsd * (1 + cfg.rentFeePct / 100);
+  m.edgeAtBidPct = (m.breakEvenEH / m.bidEH - 1) * 100;
+  m.green = m.bidEH <= m.capEH;
+  m.costPerBlockUsd = m.phDaysPerBlock * m.bidEH / 1000 * m.btcUsd * (1 + cfg.rentFeePct / 100);
   return m;
 }
 

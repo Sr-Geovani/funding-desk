@@ -47,6 +47,10 @@ ligado direto): −74% em um dia, +15% na semana.
 negativa.
 
 ## 4. Na prática
+No topo da cartilha fica a **margem do mercado** (24 h e 7 dias): média, quanto do tempo ficou ≥ 0 e ≥ o seu mínimo, e
+se o momento está melhor ou pior que o normal. O preço usado é o que compra a sua potência inteira (profundidade do
+livro), não o da ordem mais barata.
+
 1. Olhar o veredito. Se não for "Entrar", o robô já fica pausado.
 2. Se for "Entrar": usar a potência do passo 8 (até o teto), stop-loss por tentativa (passo 9) e parar no bloco.
 3. Para jogar na **loteria de propósito** (aceitando perder o orçamento), escolher os momentos de margem menos negativa
