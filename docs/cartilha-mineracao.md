@@ -51,8 +51,9 @@ negativa.
 2. Se for "Entrar": usar a potência do passo 8 (até o teto), stop-loss por tentativa (passo 9) e parar no bloco.
 3. Para jogar na **loteria de propósito** (aceitando perder o orçamento), escolher os momentos de margem menos negativa
    e um orçamento que não faça falta.
-4. Conferir depois: placar da sorte (Rede), cenários (Diário → Robô) e "A IA bate o acaso?" (se os sinais 4–6 de fato
-   antecipam janelas).
+4. Conferir depois: placar da sorte (Rede), cenários e replay (Diário → Robô) e "A IA bate o acaso?" (se os sinais 4–6
+   de fato antecipam janelas). No replay, a regra que vale é a que fica no topo **pela média** por muitos dias no livro
+   diário; a melhor "pela sorte" é retrovisor.
 
 ## 5. Leitura de 31/10 (exemplo)
 DARR ~1,05 (topo histórico), margem real na NiceHash ≈ −0,4% (preço real 0,4254 × empate 0,4244), Braiins ≈ +0,5%,

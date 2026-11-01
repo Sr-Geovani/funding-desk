@@ -753,8 +753,50 @@ function burstHTML(p,b,c,a){
   var cols=[[p,'Sua<div class="note">'+nf(p.ph||+((ops.status||{}).config||{}).targetPh||0,0)+' PH/s</div>'],[c,'Copiloto<div class="note">'+(c&&c.ph?nf(c.ph,0)+' PH/s':'—')+'</div>'],[b,'Rajada<div class="note">50 PH/s</div>'],[a,'Sempre ligado<div class="note">'+(a&&a.ph?nf(a.ph,0)+' PH/s':'—')+'</div>']];
   var rows=SCEN_ROWS.concat([['Pausas',function(x){return String((x.runs||[]).length)}],['Chance de ≥1 bloco',function(x){return pctp((1-Math.exp(-(x.lambda||0)))*100,1)}]]);
   return '<div class="eyebrow" style="margin:14px 0 6px">Cenários lado a lado (mesmos blocos, mesmo sorteio) · deslize →</div>'+scenTable(cols,rows)+
-    archiveHTML()+'<p class="note" style="margin:6px 0 0">Lucro = receita dos blocos − custo do aluguel; o % embaixo é sobre o custo (quanto cada dólar gasto voltou). "Com a sorte" é o que teria acontecido de fato; "sem sorte" é a média que se repetiria em muitas vezes. "Sua", "Copiloto" e "Rajada" compram abaixo do teto e pausam acima; "Sempre ligado" usa a sua potência sem pausar e sem stop-loss. Os cenários podem ter começado em horas diferentes (linha "Desde").</p>';
+    '<div id="o_replay" style="margin-top:14px"></div>'+archiveHTML()+'<p class="note" style="margin:6px 0 0">Lucro = receita dos blocos − custo do aluguel; o % embaixo é sobre o custo (quanto cada dólar gasto voltou). "Com a sorte" é o que teria acontecido de fato; "sem sorte" é a média que se repetiria em muitas vezes. "Sua", "Copiloto" e "Rajada" compram abaixo do teto e pausam acima; "Sempre ligado" usa a sua potência sem pausar e sem stop-loss. Os cenários podem ter começado em horas diferentes (linha "Desde").</p>';
 }
+// Replay: as mesmas regras refeitas com os blocos já registrados (mesmos blocos, mesmo sorteio, preço de cada momento).
+// Não apaga nada. "Com a sorte" = o que teria acontecido; "sem sorte" = a média, que é o que tende a se repetir.
+var rpWin='atual';
+function rpName(x){
+  if(x.label)return x.label;
+  var k=x.key||'',p=k.split('|');if(p.length<3)return k==='rules'?'Todas as regras':k;
+  var f=p[1]==='n'?'sempre ligado':p[1]==='min'?'margem ≥ mínimo':'margem ≥ '+nf(+p[1],0)+'%';
+  return p[0]+' PH/s · '+f+' · '+(+p[2]>0?'stop US$'+nf(+p[2],0):'sem stop');
+}
+function renderReplay(){
+  var el=$('o_replay');if(!el)return;var R=blk.replay;
+  var head='<div class="eyebrow" style="margin:0 0 6px">Replay com os blocos registrados (mesmos blocos, mesmo sorteio) · deslize →</div>';
+  if(!R||!R.windows||!R.windows.length){el.innerHTML=head+'<p class="note">'+(blk.err?'Falhou: '+esc(blk.err):'Carregando o registro de blocos…')+'</p>';return}
+  var W=R.windows.filter(function(w){return w.id===rpWin})[0]||R.windows[0];
+  var cols=W.rows.map(function(x){var sub=x.id==='always'?'sem stop':(x.id==='rules'?'só verde (≥ '+nf(R.cfg.minEdgePct,0)+'%) · ':x.id==='edge0'?'só margem ≥ 0 · ':'')+(x.stopUsd?'stop US$'+nf(x.stopUsd,0)+' + '+nf(x.coolH,0)+' h':'');
+    return [x,x.label+'<div class="note">'+nf(x.ph,0)+' PH/s'+(sub?' · '+sub:'')+'</div>']});
+  var rows=[['Horas comprando',function(x){return nf(x.hours,1)+' h'}],['Custo',function(x){return usd(x.costUsd)}],
+    ['Receita (blocos)',function(x){return usd(x.wonUsd)+'<div class="note">'+x.blocks+' de '+x.draws+'</div>'}],
+    ['<b>Lucro (com sorte)</b>',function(x){return '<b>'+money(x.profitUsd,x.costUsd)+'</b>'}],
+    ['Média (sem sorte)',function(x){return money(x.evProfitUsd,x.costUsd)}],
+    ['Stop-loss acionado',function(x){return String(x.stops)}],
+    ['Chance de ≥1 bloco',function(x){return pctp(x.chance*100,1)}],
+    ['Blocos achados',function(x){return x.wins&&x.wins.length?x.wins.map(function(w){return w.h+' ('+hhmm(new Date(w.t))+')'}).join('<br>'):'—'}]];
+  var line=function(r){return '<div class="trow"><div><b>'+esc(rpName(r))+'</b></div><div class="note">'+nf(r.hours,1)+' h · custo '+usd(r.costUsd,0)+' · '+r.blocks+' bloco(s) → com sorte <b class="'+(r.profitUsd>=0?'good':'bad')+'">'+signUsd(r.profitUsd)+'</b> ('+pct(r.pct,0)+') · média '+'<span class="'+(r.evProfitUsd>=0?'good':'bad')+'">'+signUsd(r.evProfitUsd)+'</span> ('+pct(r.evPct,1)+')</div></div>'};
+  var h=head+'<div class="seg" style="margin-bottom:6px">'+R.windows.map(function(w){return '<button class="sm" data-rpw="'+w.id+'" aria-pressed="'+(w===W)+'">'+esc(w.label)+'</button>'}).join('')+'</div>'+
+    '<p class="note" style="margin:0 0 6px">Desde '+dt2(W.from)+': '+W.blocks+' blocos da rede. Cada trecho entre dois blocos decide pela margem e pelo preço gravados no início dele (sem olhar o futuro).'+(R.estimated?' '+R.estimated+' blocos de antes da correção do preço (31/10) usam o preço corrigido (+5,8%).':'')+'</p>'+
+    scenTable(cols,rows)+
+    '<details style="margin-top:8px" open><summary>O que teria sido melhor ('+W.gridN+' combinações: potência × regra de entrada × stop-loss)</summary>'+
+    '<div class="eyebrow" style="margin:8px 0 4px">Pela sorte que saiu (retrovisor)</div><div class="stack" style="gap:6px">'+W.bestLuck.map(line).join('')+'</div>'+
+    '<div class="eyebrow" style="margin:10px 0 4px">Pela média (sem sorte: o que tende a se repetir)</div>'+(W.anyAvgUp?'':'<p class="note" style="margin:0 0 4px"><b>Nenhuma combinação teve média positiva neste período: pela média, o melhor teria sido não comprar.</b> Abaixo, as que perderam menos por dólar gasto.</p>')+'<div class="stack" style="gap:6px">'+W.bestAvg.map(line).join('')+'</div>'+
+    '<p class="note" style="margin:6px 0 0">A melhor "pela sorte" é escolhida depois de ver quais blocos saíram: não se repete de propósito. A melhor "pela média" depende só do preço e da margem de cada momento: é a que vale como regra. Com pouca amostra, as duas mudam muito de um dia para o outro.</p></details>';
+  var Lg=blk.ledger;
+  if(Lg&&Lg.rows&&Lg.rows.length){
+    var mine=Lg.rows.filter(function(r){return r.key==='rules'})[0],top=Lg.rows.filter(function(r){return r.key!=='rules'}).slice(0,5);
+    var lrow=function(r){return '<div class="trow"><div><b>'+esc(r.key==='rules'?'Todas as regras (sua config)':rpName(r))+'</b></div><div class="note">'+r.days+' dia(s) · '+nf(r.hours,0)+' h · custo '+usd(r.costUsd,0)+' · '+r.blocks+' bloco(s) · com sorte <b class="'+(r.profitUsd>=0?'good':'bad')+'">'+signUsd(r.profitUsd)+'</b> ('+pct(r.pct,0)+') · média <span class="'+(r.evPct>=0?'good':'bad')+'">'+pct(r.evPct,1)+'</span> · dias no lucro '+r.upDays+'/'+r.days+'</div></div>'};
+    h+='<details style="margin-top:8px"><summary>Livro diário: estatística acumulada ('+Lg.days+' dia(s), '+Lg.from.slice(8,10)+'/'+Lg.from.slice(5,7)+' a '+Lg.to.slice(8,10)+'/'+Lg.to.slice(5,7)+')</summary>'+
+      '<p class="note" style="margin:6px 0">Todo dia o servidor grava o resultado de cada combinação naquele dia (o registro de blocos só guarda ~4 dias; o livro guarda 120). Ordenado pela média: a regra que se sustenta é a que fica no topo por muitos dias, não a que acertou um bloco.</p>'+
+      '<div class="stack" style="gap:6px">'+top.map(lrow).join('')+(mine?lrow(mine):'')+'</div></details>';
+  }
+  el.innerHTML=h;
+}
+document.addEventListener('click',function(e){var b=e.target.closest('#o_replay [data-rpw]');if(!b)return;rpWin=b.dataset.rpw;renderReplay()});
 // Simulações arquivadas na correção do preço (31/10): compravam a ~0,402, preço que não recebe hash. O custo no preço
 // real soma ~5,8% (0,4254 ÷ 0,402); os blocos sorteados continuam valendo (o sorteio não depende do preço).
 function archiveHTML(){
@@ -852,6 +894,7 @@ function renderRobo(){
   }
   mh+='<div class="row" style="margin-top:8px"><button class="sm" data-roboreset="funding">Reiniciar funding</button><button class="sm" data-roboreset="mining">Reiniciar mineração</button></div>';
   $('rb_mine').innerHTML=mh;
+  if($('o_replay')){if(blk.replay&&Date.now()-blk.at<600000)renderReplay();else loadBlocksLog(true)}
   renderAlgoPaper(s.algoPaper);
 }
 var algoOpen={};
@@ -1151,7 +1194,7 @@ var blk={list:[],sum:null,at:0,err:null};
 function loadBlocksLog(force){
   if(!settings.apiUrl){renderBlocksLog();return}
   if(!force&&Date.now()-blk.at<120000){renderBlocksLog();return}
-  apiCall('GET','/blocks').then(function(r){blk.list=r.blocks||[];blk.sum=r.summary;blk.luck=r.luck||null;renderLuck();blk.at=Date.now();blk.err=null;renderBlocksLog()},function(e){blk.err=e.message;renderBlocksLog()});
+  apiCall('GET','/blocks').then(function(r){blk.list=r.blocks||[];blk.sum=r.summary;blk.luck=r.luck||null;blk.replay=r.replay||null;blk.ledger=r.ledger||null;renderLuck();renderReplay();blk.at=Date.now();blk.err=null;renderBlocksLog()},function(e){blk.err=e.message;renderBlocksLog()});
 }
 function hhU(t){return hhmm(t)+' ('+utcHM(t)+' UTC)'}
 // Placar da sorte: quem estivesse ligado o tempo todo com X PH/s, quantos blocos teria achado e com qual resultado;
