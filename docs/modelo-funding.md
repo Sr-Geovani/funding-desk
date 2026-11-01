@@ -52,3 +52,23 @@ a diferença fica ≤ 0 em 2 leituras (média de 18 h). Taker = ordem a mercado 
 Leitura: com taxa cheia, quase nenhuma diferença dura o bastante para pagar as 4 execuções. O que chega perto do
 lucro é ordem limite + diferença estável há 24 h + sair quando virar. Ressalva: o histórico usa a última taxa já
 paga (as exchanges de 8 h atualizam devagar) e não inclui Binance e Bybit; o robô ao vivo usa a taxa prevista.
+
+## Reteste das janelas (01/11/2026, 90 dias: 03/08 a 01/11)
+Pergunta: 24 h seguidas acima do empate é tempo demais? Mesmas fontes (Hyperliquid, OKX, Bitget, taxa já paga),
+ordem limite nas 4 execuções, US$1.000 por perna, uma posição por par de cada vez
+(`scripts/backtest-janelas-funding.mjs`).
+
+| Janela antes de entrar | Saída do robô: entradas · acerto · média/op | Fica 3 dias: entradas · acerto · média/op |
+|---|---|---|
+| 2 leituras (sem janela) | 6.387 · 5% · −US$0,80 | 3.281 · 14% · −US$0,62 |
+| 6 h | 2.924 · 7% · −US$0,73 | 2.099 · 18% · −US$0,48 |
+| 12 h | 971 · 11% · −US$0,62 | 851 · 25% · −US$0,33 |
+| 18 h | 334 · 17% · −US$0,53 | 318 · 32% · −US$0,20 |
+| 24 h | 214 · 16% · −US$0,63 | 205 · 27% · −US$0,34 |
+| 36 h | 38 · 18% · −US$0,61 | 37 · 43% · −US$0,07 |
+| 48 h | 17 · 0% · −US$1,16 | 17 · 29% · −US$0,36 |
+
+Leitura: janelas curtas perdem mais (o pico volta antes de pagar as 4 execuções); de 18 h para cima o resultado por
+operação melhora, mas nesses 90 dias (regime frio de alavancagem) **nenhuma janela fechou positiva** nessas três
+corretoras. 18 h e 24 h ficam empatadas dentro do ruído (poucas centenas de entradas). O +US$0,11 do teste anterior
+foi num período diferente. Fora da conta: Binance, Bybit e Lighter (taxa zero), onde estão os maiores spreads de agora.
