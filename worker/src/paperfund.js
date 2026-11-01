@@ -59,7 +59,7 @@ export function fundPaperStep(pf, { rows, best, now, fees, rules = FUND_RULES, l
     c.netUsd = c.fundingUsd - c.feesUsd; c.retPct = c.netUsd / rules.capital * 100;
     delete c.legs; delete c.neg; delete c.missing; delete c.negSince; delete c.missSince;
     p.closed.push(c);
-    events.push(`${L}: saiu de ${o.coin} (short ${o.s}, long ${o.l}) após ${o.payments} pagamentos: ${c.netUsd >= 0 ? '+' : '−'}US$${Math.abs(c.netUsd).toFixed(2)} (${why})`);
+    events.push(`${L}: saiu de ${o.coin} (short ${o.s}, long ${o.l}) após ${o.payments} pagamentos: ${c.netUsd >= 0 ? '+' : '−'}US$${Math.abs(c.netUsd).toFixed(2).replace('.', ',')} (${why})`);
   }
   p.open = still;
 
@@ -76,7 +76,7 @@ export function fundPaperStep(pf, { rows, best, now, fees, rules = FUND_RULES, l
     p.open.push({ id: p.nextId++, key: b.key, coin: b.coin, s: b.s, l: b.l, openedAt: now, notional, entrySpread: rs.apr - rl.apr, spreadNow: rs.apr - rl.apr,
       feesUsd: entryFee, fundingUsd: 0, payments: 0, neg: 0, missing: 0,
       legs: newLegs(rs, rl, b.s, b.l) });
-    events.push(`${L}: entrou em ${b.coin} (short ${b.s}, long ${b.l}) com diferença de ${(rs.apr - rl.apr).toFixed(1)}% a.a.`);
+    events.push(`${L}: entrou em ${b.coin} (short ${b.s}, long ${b.l}) com diferença de ${(rs.apr - rl.apr).toFixed(1).replace('.', ',')}% a.a.`);
   }
   p.closed = p.closed.slice(-rules.keepClosed);
   return { pf: p, events };

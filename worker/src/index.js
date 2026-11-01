@@ -90,7 +90,7 @@ async function getConfig(env) { return Object.assign({}, DEFAULT_CONFIG, await k
 async function appendLog(env, entries) {
   if (!entries.length) return;
   const log = await kvGet(env, 'log', []);
-  const next = log.concat(entries).slice(-LOG_MAX);
+  const next = log.concat(entries.map((x) => (x && typeof x.text === 'string' ? Object.assign({}, x, { text: plain(x.text) }) : x))).slice(-LOG_MAX); // texto claro, sem símbolos
   await kvPut(env, 'log', next);
 }
 
@@ -153,8 +153,8 @@ export async function tick(env, opts = {}) {
       if (mine > 0) {
         blockEvent = { height: h, bch: mine, time: cb.v.time, txid: cb.v.txid };
         state.myBlocks = (state.myBlocks || []).concat(blockEvent).slice(-50);
-        log.push({ t: now, kind: 'bloco', text: `Bloco ${h} pago no seu endereço: ${mine.toFixed(8)} BCH` });
-        await notify(env, `bloco ${h} encontrado! ${mine.toFixed(4)} BCH no seu endereço`, fetchFn);
+        log.push({ t: now, kind: 'bloco', text: `Bloco ${h} pago no seu endereço: ${mine.toFixed(8).replace('.', ',')} BCH` });
+        await notify(env, `bloco ${h} encontrado! ${mine.toFixed(4).replace('.', ',')} BCH no seu endereço`, fetchFn);
       }
       state.lastHeight = h;
     }
@@ -174,7 +174,7 @@ export async function tick(env, opts = {}) {
   const weekLossUsd = (() => { const d = (state.real && state.real.days) || {}, from = new Date(now - 6 * 864e5).toISOString().slice(0, 10);
     return Object.entries(d).filter(([k]) => k >= from).reduce((a, [, x]) => a + (x.spendUsd || 0) - (x.revenueUsd || 0), 0); })();
   const dec = decide({ cfg, mkt, orders, state, now, units, limits, blockEvent, weekLossUsd });
-  if (dec.state.weekStop && !state.weekStop) await notify(env, `Funding Desk: limite de perda semanal atingido (perda real de US$${weekLossUsd.toFixed(2)} em 7 dias; limite US$${cfg.weeklyLossUsd}). Robô encerrou as ordens e não cria novas até a perda da semana baixar.`, fetchFn);
+  if (dec.state.weekStop && !state.weekStop) await notify(env, `Funding Desk: limite de perda semanal atingido (perda real de US$${weekLossUsd.toFixed(2).replace('.', ',')} em 7 dias; limite US$${cfg.weeklyLossUsd}). Robô encerrou as ordens e não cria novas até a perda da semana baixar.`, fetchFn);
 
   // Simulação (só no modo Observar) e resultado real (ordens gerenciadas + blocos).
   // Preço v2 (31/10): o lance simulado passou a sair do preço que de fato recebe hash (ordens com máquinas). Até aqui as

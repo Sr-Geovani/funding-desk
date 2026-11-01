@@ -59,7 +59,7 @@ export function paperStep(paper, { cfg, mkt, now, units, limits, blocks }) {
     for (const t of [p, d]) { t.blocks = (t.blocks || 0) + 1; t.wonUsd = (t.wonUsd || 0) + usd; }
     if (p.run) { p.run.blocks = (p.run.blocks || 0) + 1; p.run.wonUsd = (p.run.wonUsd || 0) + usd; }
     p.wins = (p.wins || []).concat({ height: b.height, t: b.time || now, usd, prob }).slice(-50);
-    events.push(`Simulação: o bloco ${b.height} seria seu (sorteio pelo hash do bloco; chance era ${(prob * 100).toFixed(2)}%): +US$${usd.toFixed(0)}`);
+    events.push(`Simulação: o bloco ${b.height} seria seu (sorteio pelo hash do bloco; chance era ${(prob * 100).toFixed(2).replace('.', ',')}%): +US$${usd.toFixed(0).replace('.', ',')}`);
     if (p.sess) p.sess = { start: now, spendUsd: 0, lambda: 0 }; // bloco zera a sessão do stop-loss
     if (cfg.onBlock === 'cancel' || cfg.onBlock === 'min') {
       closeRun(cfg.onBlock === 'cancel' ? 'bloco achado: encerraria a ordem' : 'bloco achado: reduziria à potência de pausa');
@@ -73,7 +73,7 @@ export function paperStep(paper, { cfg, mkt, now, units, limits, blocks }) {
   if (p.sess && cfg.sessionBudgetUsd > 0 && p.sess.spendUsd >= cfg.sessionBudgetUsd) {
     p.stops++;
     p.stopUntil = now + (cfg.stopCooldownH === undefined ? 6 : cfg.stopCooldownH) * 3600e3;
-    events.push(`Simulação: stop-loss da tentativa (US$${p.sess.spendUsd.toFixed(2)} gastos sem bloco; chance de ter achado bloco nela: ${((1 - Math.exp(-p.sess.lambda)) * 100).toFixed(0)}%); sem compra até ${new Date(p.stopUntil).toISOString().slice(11, 16)} UTC`);
+    events.push(`Simulação: stop-loss da tentativa (US$${p.sess.spendUsd.toFixed(2).replace('.', ',')} gastos sem bloco; chance de ter achado bloco nela: ${((1 - Math.exp(-p.sess.lambda)) * 100).toFixed(0).replace('.', ',')}%); sem compra até ${new Date(p.stopUntil).toISOString().slice(11, 16)} UTC`);
     p.sess = null;
     closeRun('stop-loss da tentativa'); p.on = false; // como o robô: cancela e espera stopCooldownH antes de comprar de novo
   }
@@ -85,7 +85,7 @@ export function paperStep(paper, { cfg, mkt, now, units, limits, blocks }) {
   const want = !!(mkt && mkt.ok && mkt.green && !dailyHit && !cooling && !weekHit);
   if (want) {
     if (!p.sess) { p.sess = { start: now, spendUsd: 0, lambda: 0 }; p.sessions++; }
-    if (!p.on) events.push(`Simulação: compraria ${target} PH/s a ${mkt.bidEH.toFixed(4)} BTC/EH/dia (margem ${mkt.edgeAtBidPct.toFixed(1)}%). Por quê: lance ≤ teto ${mkt.capEH.toFixed(4)} (empate ${mkt.breakEvenEH ? mkt.breakEvenEH.toFixed(4) : '—'} − margem mínima ${cfg.minEdgePct}%); potência = sua potência alvo`);
+    if (!p.on) events.push(`Simulação: compraria ${target} PH/s a ${mkt.bidEH.toFixed(4).replace('.', ',')} BTC/EH/dia (margem ${mkt.edgeAtBidPct.toFixed(1).replace('.', ',')}%). Por quê: lance ≤ teto ${mkt.capEH.toFixed(4).replace('.', ',')} (empate ${mkt.breakEvenEH ? mkt.breakEvenEH.toFixed(4) : '—'} − margem mínima ${cfg.minEdgePct}%); potência = sua potência alvo`);
     // !p.run com p.on: simulação criada antes do diário de operações; a operação passa a contar daqui
     if (!p.on || !p.run) p.run = { start: now, ph: target, priceEH: mkt.bidEH, edgePct: mkt.edgeAtBidPct, spendUsd: 0, evUsd: 0, lambda: 0, hours: 0 };
     // Preço como a NiceHash deixa (igual ao robô real): sobe na hora; desce só um degrau a cada 10 min. Quando o mercado
@@ -99,7 +99,7 @@ export function paperStep(paper, { cfg, mkt, now, units, limits, blocks }) {
   } else {
     if (p.on) {
       const why = weekHit ? `limite de perda semanal de US$${cfg.weeklyLossUsd} atingido` : dailyHit ? `limite diário de US$${cfg.dailyBudgetUsd} atingido` : cooling ? 'espera depois do stop-loss'
-        : mkt && mkt.ok ? `aluguel ${mkt.bidEH.toFixed(4)} acima do teto ${mkt.capEH.toFixed(4)}` : 'sem dados de mercado';
+        : mkt && mkt.ok ? `aluguel ${mkt.bidEH.toFixed(4).replace('.', ',')} acima do teto ${mkt.capEH.toFixed(4).replace('.', ',')}` : 'sem dados de mercado';
       events.push(`Simulação: pausaria (${why}). Por quê: ${dailyHit ? 'o gasto do dia chegou ao seu limite' : cooling ? 'o stop-loss limita a perda por tentativa' : mkt && mkt.ok ? 'cada hash comprado acima do teto custa mais do que rende em média' : 'sem preço não dá para saber se compensa'}`);
       closeRun(why);
     }

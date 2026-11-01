@@ -20,7 +20,7 @@ export function darrBand(d) {
   if (!isFinite(d)) return '';
   let pct = 100;
   for (const [lvl, p] of DARR_REF.above) if (d >= lvl) pct = p;
-  if (d >= 1.0) return `acima de ${DARR_REF.above.filter(([l]) => d >= l).pop()[0].toFixed(2)}: só ${pct.toString().replace('.', ',')}% das horas nos últimos 6 meses`;
+  if (d >= 1.0) return `acima de ${DARR_REF.above.filter(([l]) => d >= l).pop()[0].toFixed(2).replace('.', ',')}: só ${pct.toString().replace('.', ',')}% das horas nos últimos 6 meses`;
   if (d >= DARR_REF.mean) return 'acima da média dos últimos 6 meses (0,94), mas abaixo de 1';
   return 'abaixo da média dos últimos 6 meses (0,94)';
 }

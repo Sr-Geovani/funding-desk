@@ -72,7 +72,7 @@ export function entryChecklist({ mkt, darr, mom, ret, win, nhWeek, hashMkts, pow
   const budget = cfg.sessionBudgetUsd > 0 ? cfg.sessionBudgetUsd : 300, cpb = mkt && mkt.ok ? mkt.costPerBlockUsd * (buy && mkt.bidEH > 0 ? buy.bidEH / mkt.bidEH : 1) : null, V = mkt && mkt.ok ? mkt.blockNetUsd : null;
   const ch = ok(cpb) && cpb > 0 ? 1 - Math.exp(-budget / cpb) : null;
   add('tentativa', 'A tentativa: orçamento, chance e desfecho', !ok(ch) ? 'na' : 'info',
-    ok(ch) ? 'US$' + n(budget, 0) + ' → ' + n(ch * 100, 0) + '% de chance de ≥1 bloco · achou: ~' + pctTxt((V / budget - 1) * 100, 0) + ' · não achou: −100%' : 'sem dados',
+    ok(ch) ? 'US$' + n(budget, 0) + ' → ' + n(ch * 100, 0) + '% de chance de achar 1 bloco ou mais · achou: ~' + pctTxt((V / budget - 1) * 100, 0) + ' · não achou: −100%' : 'sem dados',
     'Cada tentativa é tudo ou nada; a média de muitas tentativas é a margem do passo 1. Stop-loss por tentativa e espera depois dele limitam o pior caso.');
   // veredito
   const bad = (id) => (steps.find((s) => s.id === id) || {}).status === 'bad';

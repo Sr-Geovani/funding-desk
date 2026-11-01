@@ -154,16 +154,16 @@ export function decide({ cfg, mkt, orders, state = {}, now, units, limits = limi
   const dailyUsd = mkt.btcUsd ? dailyBtc * mkt.btcUsd : 0;
   st.dailyUsd = dailyUsd;
   const dailyHit = cfg.dailyBudgetUsd > 0 && dailyUsd >= cfg.dailyBudgetUsd;
-  if (dailyHit) notes.push(`limite diário atingido (US$${dailyUsd.toFixed(2)})`);
+  if (dailyHit) notes.push(`limite diário atingido (US$${dailyUsd.toFixed(2).replace('.', ',')})`);
 
   if (cfg.mode === 'off') return { actions, notes: notes.concat('robô desligado'), state: st };
 
   // Limite de perda da carteira (7 dias, resultado real): acima dele encerra todas as ordens e não cria novas até a perda
   // da semana voltar para baixo do limite (os dias mais antigos saem da conta).
   if (cfg.weeklyLossUsd > 0 && weekLossUsd >= cfg.weeklyLossUsd) {
-    for (const o of managed) actions.push({ type: 'cancel', id: o.id, reason: `limite de perda semanal: perda real de US$${weekLossUsd.toFixed(2)} em 7 dias (limite US$${cfg.weeklyLossUsd}); encerrando` });
+    for (const o of managed) actions.push({ type: 'cancel', id: o.id, reason: `limite de perda semanal: perda real de US$${weekLossUsd.toFixed(2).replace('.', ',')} em 7 dias (limite US$${cfg.weeklyLossUsd}); encerrando` });
     st.weekStop = true;
-    return { actions, notes: notes.concat(`limite de perda semanal atingido (US$${weekLossUsd.toFixed(2)} de US$${cfg.weeklyLossUsd})`), state: st };
+    return { actions, notes: notes.concat(`limite de perda semanal atingido (US$${weekLossUsd.toFixed(2).replace('.', ',')} de US$${cfg.weeklyLossUsd})`), state: st };
   }
   st.weekStop = false;
 
@@ -187,7 +187,7 @@ export function decide({ cfg, mkt, orders, state = {}, now, units, limits = limi
   if (cfg.sessionBudgetUsd > 0 && sessionUsd >= cfg.sessionBudgetUsd && !cooling) {
     st.stopUntil = now + (cfg.stopCooldownH === undefined ? 6 : cfg.stopCooldownH) * 3600e3;
     st.sess = null;
-    for (const o of managed) actions.push({ type: 'cancel', id: o.id, reason: `stop-loss: a tentativa gastou US$${sessionUsd.toFixed(2)} sem bloco (limite US$${cfg.sessionBudgetUsd}); sem ordem nova até ${new Date(st.stopUntil).toISOString().slice(11, 16)} UTC` });
+    for (const o of managed) actions.push({ type: 'cancel', id: o.id, reason: `stop-loss: a tentativa gastou US$${sessionUsd.toFixed(2).replace('.', ',')} sem bloco (limite US$${cfg.sessionBudgetUsd}); sem ordem nova até ${new Date(st.stopUntil).toISOString().slice(11, 16)} UTC` });
     return { actions, notes: notes.concat('stop-loss da tentativa'), state: st };
   }
   if (cooling) {
@@ -210,8 +210,8 @@ export function decide({ cfg, mkt, orders, state = {}, now, units, limits = limi
     let limit = mkt.green && !dailyHit ? target : minPh;
     const want = mkt.green ? mkt.bidEH : Math.min(o.priceEH, r4(mkt.capEH));
     const rule = `empate ${isFinite(mkt.breakEvenEH) ? mkt.breakEvenEH.toFixed(4) : '—'} − sua margem ${cfg.minEdgePct}% = teto ${isFinite(mkt.capEH) ? mkt.capEH.toFixed(4) : '—'}`;
-    let price = want, reason = mkt.green ? `sinal verde: margem ${mkt.edgeAtBidPct.toFixed(1)}% no lance. Por quê: lance ${mkt.bidEH.toFixed(4)} ≤ teto (${rule})`
-      : `acima do teto (${mkt.capEH.toFixed(4)}): pausa. Por quê: lance ${mkt.bidEH.toFixed(4)} > teto (${rule}); comprar acima disso dá prejuízo médio`;
+    let price = want, reason = mkt.green ? `sinal verde: margem ${mkt.edgeAtBidPct.toFixed(1).replace('.', ',')}% no lance. Por quê: lance ${mkt.bidEH.toFixed(4).replace('.', ',')} ≤ teto (${rule})`
+      : `acima do teto (${mkt.capEH.toFixed(4).replace('.', ',')}): pausa. Por quê: lance ${mkt.bidEH.toFixed(4).replace('.', ',')} > teto (${rule}); comprar acima disso dá prejuízo médio`;
     if (dailyHit && mkt.green) reason = 'limite diário: pausa';
     if (want < o.priceEH - 1e-9) {
       const last = st.lastDecrease[o.id] || 0;
@@ -227,7 +227,7 @@ export function decide({ cfg, mkt, orders, state = {}, now, units, limits = limi
   if (cfg.autoCreate && !managed.length && mkt.ok && mkt.green && !dailyHit && cfg.poolId && !blockEvent) {
     const amount = Math.max(units.minOrderBtc, Math.min(cfg.orderAmountBtc, limits.maxOrderBtc));
     actions.push({ type: 'create', priceEH: mkt.bidEH, limitPH: target, amountBtc: amount, poolId: cfg.poolId,
-      market: mkt.market, reason: `sinal verde sem ordem ativa: criando (margem ${mkt.edgeAtBidPct.toFixed(1)}%)` });
+      market: mkt.market, reason: `sinal verde sem ordem ativa: criando (margem ${mkt.edgeAtBidPct.toFixed(1).replace('.', ',')}%)` });
   }
   return { actions, notes, state: st };
 }

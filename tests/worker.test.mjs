@@ -485,14 +485,14 @@ const pm = (o) => Object.assign({ ok: true, green: true, bidEH: 0.40, capEH: 0.4
 test('simulação: acumula gasto, receita média e blocos esperados só enquanto "compraria"', () => {
   const T0 = Date.UTC(2026, 9, 31, 12);
   let r = paperStep(null, { cfg: PCFG, mkt: pm(), now: T0, units: PU, limits: PL });
-  assert.match(r.events[0], /compraria 10 PH\/s a 0\.4000/);
+  assert.match(r.events[0], /compraria 10 PH\/s a 0,4000/);
   assert.equal(r.paper.spendUsd, 0);
   r = paperStep(r.paper, { cfg: PCFG, mkt: pm(), now: T0 + 180e3, units: PU, limits: PL });
   const cost = 10 * 0.40 / 1000 * 77000 * 1.03 * 180 / 86400, lam = 10 * 1e15 * 180 / (500e9 * 4294967296);
   close(r.paper.spendUsd, cost, 1e-9); close(r.paper.lambda, lam, 1e-15); close(r.paper.evUsd, lam * 900, 1e-9);
   assert.deepEqual(r.events, [], 'sem log repetido');
   r = paperStep(r.paper, { cfg: PCFG, mkt: pm({ green: false, bidEH: 0.45 }), now: T0 + 360e3, units: PU, limits: PL });
-  assert.match(r.events[0], /pausaria \(aluguel 0\.4500 acima do teto 0\.4200\)/);
+  assert.match(r.events[0], /pausaria \(aluguel 0,4500 acima do teto 0,4200\)/);
   const spent = r.paper.spendUsd;
   r = paperStep(r.paper, { cfg: PCFG, mkt: pm({ green: false }), now: T0 + 540e3, units: PU, limits: PL });
   close(r.paper.spendUsd, spent, 1e-12, 'pausado não gasta');
@@ -563,7 +563,7 @@ test('funding simulado: entra após 2 leituras, recebe nos horários de cada exc
   r = fundPaperStep(r.pf, { rows: rows(-0.01, T0 + 540 * M, 0.00125, T0 + 130 * M), best: [], now: T0 + 125 * M, fees, rules: TAKER }); // a virada precisa durar 1 h
   assert.equal(r.pf.open.length, 0); assert.equal(r.pf.closed.length, 1);
   const c = r.pf.closed[0];
-  close(c.netUsd, 1 - 0.0125 - 2 * 1.15, 1e-9); assert.match(c.reason, /virou contra/); assert.match(r.events[0], /saiu de ENA .* −US\$1\.31/);
+  close(c.netUsd, 1 - 0.0125 - 2 * 1.15, 1e-9); assert.match(c.reason, /virou contra/); assert.match(r.events[0], /saiu de ENA .* −US\$1,31/);
   const sum = fundPaperSummary(r.pf);
   assert.deepEqual([sum.closed, sum.wins, sum.open], [1, 0, 0]);
   close(sum.fundingUsd - sum.feesUsd, sum.netUsd, 1e-9, 'quadro financeiro: recebido − taxas = resultado');
@@ -648,7 +648,7 @@ test('mineração simulada: sorteio honesto pelos blocos reais da rede (hash do 
   assert.equal(r.paper.draws, 1); assert.equal(r.paper.blocks || 0, 0, 'número sorteado alto: não é seu');
   r = paperStep(r.paper, { cfg: PCFG, mkt: pm({ D }), now: T0 + 360e3, units: PU, limits: PL, blocks: [{ height: 3, hash: '0000000000', difficulty: D, time: T0 + 300e3 }] });
   assert.equal(r.paper.blocks, 1); close(r.paper.wonUsd, 900);
-  assert.match(r.events[0], new RegExp('bloco 3 seria seu .*chance era ' + (prob * 100).toFixed(2).replace('.', '\\.') + '%'));
+  assert.match(r.events[0], new RegExp('bloco 3 seria seu .*chance era ' + (prob * 100).toFixed(2).replace('.', ',') + '%'));
   assert.equal(r.paper.runs.length, 1); assert.match(r.paper.runs[0].reason, /bloco achado: encerraria a ordem/);
   assert.equal(r.paper.runs[0].blocks, 1); close(r.paper.runs[0].wonUsd, 900);
   assert.ok(r.paper.on && r.paper.run && r.paper.run.start === T0 + 360e3, 'mercado favorável: abre outra operação');
@@ -678,7 +678,7 @@ test('outras moedas (PPS): orçamento fixo enquanto compensa; pausa com o motivo
   const T0 = Date.UTC(2026, 9, 31, 12), M = 60e3;
   const mk = (level, edge, thin) => [{ algo: 'SCRYPT', label: 'Scrypt', coins: ['LTC', 'DOGE'], level, edgePct: edge, thin: !!thin }];
   let r = algoPaperStep(null, { map: mk('go', 10), now: T0 });
-  assert.match(r.events[0], /compraria Scrypt \(LTC\+DOGE\) com margem de 10\.0%/);
+  assert.match(r.events[0], /compraria Scrypt \(LTC\+DOGE\) com margem de 10,0%/);
   r = algoPaperStep(r.pa, { map: mk('go', 10), now: T0 + 15 * M });
   const a = r.pa.algos.SCRYPT, sp = 100 * 15 / 1440;
   close(a.spendUsd, sp, 1e-9); close(a.revUsd, sp * 1.10, 1e-9); close(a.hoursOn, 0.25, 1e-9);

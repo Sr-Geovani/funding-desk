@@ -32,7 +32,7 @@ export function algoPaperStep(pa, { map, now, rules = ALGO_RULES }) {
     const sus = isFinite(m.edgePct) && m.edgePct > rules.maxEdgePct;
     const want = m.level === 'go' && isFinite(m.edgePct) && !sus;
     if (want) {
-      if (!a.on) { a.run = { start: now, edgePct: m.edgePct, coins: m.coins, spendUsd: 0, revUsd: 0 }; events.push(`Outras moedas: compraria ${m.label} (${m.coins.join('+')}) com margem de ${m.edgePct.toFixed(1)}%`); }
+      if (!a.on) { a.run = { start: now, edgePct: m.edgePct, coins: m.coins, spendUsd: 0, revUsd: 0 }; events.push(`Outras moedas: compraria ${m.label} (${m.coins.join('+')}) com margem de ${m.edgePct.toFixed(1).replace('.', ',')}%`); }
       a.on = true; a.edgePct = m.edgePct;
     } else if (a.on) {
       const why = sus ? 'margem acima de 100% (dado suspeito)' : m.level === 'maybe' ? (m.thin ? 'livro raso (poucas ordens recebendo hash)' : 'margem abaixo do mínimo') : m.level === 'no' ? 'aluguel acima da receita' : 'sem preço de aluguel';

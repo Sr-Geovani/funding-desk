@@ -280,7 +280,7 @@ function drawHist(key){
   html+='<div class="chart">'+chartSVG(pts,be,function(v){return pct(v,1)})+'<div class="tip" hidden></div></div>'+
     '<div class="kv"><div><small>Média</small><span class="'+cls(st.mean,be,0)+'">'+pct(st.mean,1)+'</span></div>'+
     '<div><small>Mín / máx</small><span>'+st.min.toFixed(0)+' / '+st.max.toFixed(0)+'</span></div>'+
-    '<div><small>Horas ≥ b.e.</small><span>'+(st.pctAboveBe===null?'—':st.pctAboveBe.toFixed(0)+'%')+'</span></div></div>'+
+    '<div><small>Horas acima do empate</small><span>'+(st.pctAboveBe===null?'—':st.pctAboveBe.toFixed(0)+'%')+'</span></div></div>'+
     '<div class="legs">Último pago: <b>'+o.s+'</b> '+pct(lastA.rate,4)+' ('+pct(lastA.apr,1)+' a.a.) às '+hhmm(lastA.t)+
     (lastB?' · <b>'+o.l+'</b> '+pct(lastB.rate,4)+' ('+pct(lastB.apr,1)+' a.a.) às '+hhmm(lastB.t):'')+'</div>'+
     '<div class="note">Linha tracejada: spread de break-even do ciclo ('+pct(be,1)+'). Spread alto só nas últimas horas e média baixa indica pico, não tendência.</div>'+
@@ -562,7 +562,7 @@ function renderMine(){
   var kv=[
     ['Receita BCH /PH·dia',hp?usd(hp):'—'],
     ['Aluguel /PH·dia',R.p?usd(R.p.rentPerPhDay):'—'],
-    ['Preço de empate',R.p?R.p.breakEvenPrice.toFixed(4)+' BTC/EH':'—'],
+    ['Preço de empate',R.p?R.p.breakEvenPrice.toFixed(4).replace('.',',')+' BTC/EH':'—'],
     ['Receita BTC /PH·dia',hpBtc?usd(hpBtc):'—'],
     ['Dificuldade BCH',L.D?nf(L.D/1e9,1)+' G':'—'],
     ['vs média '+(L.st?L.st.n:25)+' blocos',L.st?pct(L.st.diffVsAvgPct,1):'—'],
@@ -576,9 +576,9 @@ function renderMine(){
     '<div class="kv"><div><small>Ordens pagando</small><span>'+b.activeOrders+' de '+b.orders+'</span></div>'+
     '<div><small>Velocidade total</small><span>'+nf(b.totalSpeed*1000,2)+' PH/s</span></div>'+
     '<div><small>Máquinas</small><span>'+nf(b.rigs)+'</span></div>'+
-    '<div><small>Menor preço ativo</small><span>'+(b.minActive?b.minActive.toFixed(4):'—')+'</span></div>'+
-    '<div><small>Mediana (por velocidade)</small><span>'+(b.medianWeighted?b.medianWeighted.toFixed(4):'—')+'</span></div>'+
-    '<div><small>Maior preço ativo</small><span>'+(b.maxActive?b.maxActive.toFixed(4):'—')+'</span></div></div>'+
+    '<div><small>Menor preço ativo</small><span>'+(b.minActive?b.minActive.toFixed(4).replace('.',','):'—')+'</span></div>'+
+    '<div><small>Mediana (por velocidade)</small><span>'+(b.medianWeighted?b.medianWeighted.toFixed(4).replace('.',','):'—')+'</span></div>'+
+    '<div><small>Maior preço ativo</small><span>'+(b.maxActive?b.maxActive.toFixed(4).replace('.',','):'—')+'</span></div></div>'+
     '<p class="note" style="margin:8px 0 0">Preços em BTC por EH/s por dia. Fonte: '+mine.bookSrc+(mine.bookAt?', '+ago(mine.bookAt)+' atrás':'')+'. A NiceHash não deixa o navegador ler o livro direto; sem proxy, a foto do GitHub atrasa ~10-30 min.</p>'
     :'<p class="note">Livro indisponível ('+(mine.err.book||'carregando')+'). Digite o preço em Planejar.</p>';
   renderNet(L);renderPlan();
@@ -629,7 +629,7 @@ function renderPlan(){
     ['Tempo médio por bloco nesse ritmo',hpb<48?nf(hpb,1)+' h':nf(hpb/24,1)+' dias',''],
     ['Orçamento p/ 50% de chance',cpd>0?usd(FDM.budgetForProb(0.5,q.D,cpd)):'—',''],
     ['Orçamento p/ 90% de chance',cpd>0?usd(FDM.budgetForProb(0.9,q.D,cpd)):'—',''],
-    ['Preço de empate',p.breakEvenPrice.toFixed(4)+' BTC/EH/dia','']
+    ['Preço de empate',p.breakEvenPrice.toFixed(4).replace('.',',')+' BTC/EH/dia','']
   ]);
   renderInvest();
 }
@@ -690,7 +690,7 @@ function loadOps(){
     if(r[2].ok)ops.bal=r[2].v;else ops.err.bal=r[2].e.message;
     if(r[3].ok)ops.pools=r[3].v.list||[];else ops.err.pools=r[3].e.message;
     if(r[4].ok)ops.log=r[4].v.log||[];
-    renderOps();renderHome();renderMine();renderAcct();renderRadar();renderRobo();renderWindow();renderHeat();renderAI();renderNext();renderAct();renderHashMkts();renderFronts();renderEntry();renderExec();
+    renderOps();renderHome();renderMine();renderAcct();renderRadar();renderRobo();renderWindow();renderHeat();renderAI();renderNext();renderAct();renderHashMkts();renderFronts();renderEntry();renderExec();renderReady();
   });
 }
 // Dados do servidor em qualquer aba: 30 s em Operar, 60 s nas outras. Ao voltar do segundo plano (iPhone deixa o app
@@ -753,7 +753,7 @@ var SCEN_ROWS=[
 function burstHTML(p,b,c,a){
   if(!b&&!c&&!a)return '';
   var B=(ops.status&&ops.status.state&&ops.status.state.bestScen)||null;
-  var ent=function(f){return f===null||f===undefined?'sempre ligado':'margem ≥ '+nf(f,0)+'%'};
+  var ent=function(f){return f===null||f===undefined?'sempre ligado':'margem a partir de '+nf(f,0)+'%'};
   var stp=function(x){return x.stopUsd?'stop US$'+nf(x.stopUsd,0)+' + '+nf(x.coolH,0)+' h':'sem stop'};
   var mine=[[p,'Sua','só verde · '+stp({stopUsd:+((ops.status||{}).config||{}).sessionBudgetUsd||0,coolH:+((ops.status||{}).config||{}).stopCooldownH||6})],[c,'Copiloto','plano da IA'],[b,'Rajada','só verde · para no bloco'],[a,'Sempre ligado','sem pausa · sem stop']]
     .filter(function(r){return r[0]}).map(function(r){return {x:r[0],name:r[1],sub:r[2],ph:r[0].ph}});
@@ -790,7 +790,7 @@ function archiveHTML(){
 function outcomesHTML(spend,ev,lam,blk){
   if(!(spend>0))return '<p class="note">Sem compras simuladas ainda.</p>';
   var ch=1-Math.exp(-lam),V=blk>0?blk:(lam>0?ev/lam:0),avg=ev-spend;
-  return '<div class="kv"><div><small>Gasto (aluguel)</small><span>'+usd(spend)+'</span></div><div><small>Chance de ≥1 bloco</small><span>'+pctp(ch*100,ch<0.1?1:0)+'</span></div><div><small>Média de longo prazo</small><span class="'+(avg>=0?'good':'bad')+'">'+signUsd(avg)+'</span></div></div>'+
+  return '<div class="kv"><div><small>Gasto (aluguel)</small><span>'+usd(spend)+'</span></div><div><small>Chance de 1 bloco ou mais</small><span>'+pctp(ch*100,ch<0.1?1:0)+'</span></div><div><small>Média de longo prazo</small><span class="'+(avg>=0?'good':'bad')+'">'+signUsd(avg)+'</span></div></div>'+
     '<div class="box" style="margin-top:8px"><b>Se fosse dinheiro de verdade</b>'+
     '<span class="bad">Sem bloco ('+pctp((1-ch)*100,0)+' de chance, o mais provável): −'+usd(spend)+'</span>, perde todo o aluguel.<br>'+
     '<span class="good">Com 1 bloco ('+pctp(ch*100,ch<0.1?1:0)+'): ~'+signUsd(V-spend)+'</span> (bloco de ~'+usd(V)+' menos o aluguel).<br>'+
@@ -807,7 +807,7 @@ function renderPaper(st){
   if(!p){el.innerHTML=head+'<p class="note">'+(cfg.mode==='observe'?'Começa no próximo ciclo do robô (até 3 min).':'Só roda com o robô em Observar.')+'</p>';return}
   el.innerHTML=head+
     '<p class="note" style="margin:6px 0">Desde '+new Date(p.since).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})+'. '+
-    (cfg.mode!=='observe'?'<b>Parada</b>: o robô não está em Observar.':(p.on?'Agora: <b class="good">compraria</b> '+nf(p.ph,0)+' PH/s a '+(+p.priceEH).toFixed(4)+'.':'Agora: <b>pausado</b> (aluguel acima do teto ou limite do dia).'))+'</p>'+
+    (cfg.mode!=='observe'?'<b>Parada</b>: o robô não está em Observar.':(p.on?'Agora: <b class="good">compraria</b> '+nf(p.ph,0)+' PH/s a '+(+p.priceEH).toFixed(4).replace('.',',')+'.':'Agora: <b>pausado</b> (aluguel acima do teto ou limite do dia).'))+'</p>'+
     simResultHTML(p)+
     '<div class="kv" style="margin-top:8px"><div><small>Tempo comprando</small><span>'+nf(p.hoursOn,1)+' h</span></div><div><small>Sessões</small><span>'+p.sessions+'</span></div><div><small>Stop-loss</small><span>'+p.stops+'</span></div></div>'+
     dayRows(p.days,[['Dia (UTC)'],['Horas',function(d){return nf(d.hoursOn,1)}],['Gasto',function(d){return usd(d.spendUsd)}],['Blocos',function(d){return (d.blocks||0)+' de '+(d.draws||0)}],['Resultado',function(d){return signUsd((d.wonUsd||0)-d.spendUsd)}]])+
@@ -860,11 +860,11 @@ function renderRobo(){
   var mh='<div class="row between"><h2 style="margin:0">Mineração (BCH solo)</h2>'+(mp?'<span class="note">desde '+dt2(mp.since)+'</span>':'')+'</div>';
   if(!mp)mh+='<p class="note">'+(st.config.mode==='observe'?'Começa no próximo ciclo (até 3 min).':'Só roda com o robô em Observar (Mineração → Operar).')+'</p>';
   else{
-    mh+=cur?'<div class="box" style="margin:10px 0 0"><b>Comprando agora (simulado)</b>Desde '+dt2(cur.start)+' ('+ago(cur.start)+'): '+nf(cur.ph,0)+' PH/s a '+cur.priceEH.toFixed(4)+' (margem '+pct(cur.edgePct,1)+'). Gasto até agora '+usd(cur.spendUsd)+'. Blocos da rede nesse tempo: '+(cur.draws||0)+'; seus: '+(cur.blocks||0)+'.</div>'
+    mh+=cur?'<div class="box" style="margin:10px 0 0"><b>Comprando agora (simulado)</b>Desde '+dt2(cur.start)+' ('+ago(cur.start)+'): '+nf(cur.ph,0)+' PH/s a '+cur.priceEH.toFixed(4).replace('.',',')+' (margem '+pct(cur.edgePct,1)+'). Gasto até agora '+usd(cur.spendUsd)+'. Blocos da rede nesse tempo: '+(cur.draws||0)+'; seus: '+(cur.blocks||0)+'.</div>'
       :'<p class="note" style="margin:10px 0 0">Agora: pausado (aluguel acima do teto, limite do dia ou sem dados).</p>';
     var rs=runs.slice().reverse(),showm=roboAll.m?rs:rs.slice(0,15);
     mh+='<div class="eyebrow" style="margin:12px 0 6px">Operações encerradas ('+rs.length+')</div>'+(rs.length?'<div class="stack" style="gap:6px">'+showm.map(function(r){
-      return '<div class="trow"><div><b>'+nf(r.ph,0)+' PH/s</b> <span class="note">a '+r.priceEH.toFixed(4)+' (margem '+pct(r.edgePct,1)+')</span></div><div class="note">'+dt2(r.start)+' → '+dt2(r.end)+' · '+FDI.dur(r.end-r.start)+' · gasto '+usd(r.spendUsd)+' · blocos da rede '+(r.draws||0)+', seus '+(r.blocks||0)+' → <strong class="'+(((r.wonUsd||0)-r.spendUsd)>=0?'good':'bad')+'">'+signUsd((r.wonUsd||0)-r.spendUsd)+'</strong></div><div class="note">Saída: '+esc(r.reason)+'</div></div>'}).join('')+'</div>'+
+      return '<div class="trow"><div><b>'+nf(r.ph,0)+' PH/s</b> <span class="note">a '+r.priceEH.toFixed(4).replace('.',',')+' (margem '+pct(r.edgePct,1)+')</span></div><div class="note">'+dt2(r.start)+' → '+dt2(r.end)+' · '+FDI.dur(r.end-r.start)+' · gasto '+usd(r.spendUsd)+' · blocos da rede '+(r.draws||0)+', seus '+(r.blocks||0)+' → <strong class="'+(((r.wonUsd||0)-r.spendUsd)>=0?'good':'bad')+'">'+signUsd((r.wonUsd||0)-r.spendUsd)+'</strong></div><div class="note">Saída: '+esc(r.reason)+'</div></div>'}).join('')+'</div>'+
       (rs.length>15?'<div style="margin-top:6px"><button class="sm" data-roboall="m">'+(roboAll.m?'Mostrar menos':'Ver todas ('+rs.length+')')+'</button></div>':'')
       :'<p class="note" style="margin:0">Nenhuma encerrada ainda.</p>');
     mh+=simResultHTML(mp)+burstHTML(mp,s.paperBurst,s.paperPlan,s.paperAlways);
@@ -891,7 +891,7 @@ function renderAlgoPaper(ap){
   $('rb_algo').innerHTML=h;
 }
 // Placar dos alertas de funding: projetado no alerta × o que de fato pagou no prazo, já com as taxas.
-// IA em modo sombra: o mesmo robô de funding, mas só entra quando a IA dá p ≥ limiar. Lado a lado com as regras.
+// IA em modo sombra: o mesmo robô de funding, mas só entra quando a IA dá p maior ou igual ao limiar. Lado a lado com as regras.
 var GH_DOC='https://github.com/Sr-Geovani/funding-desk/blob/main/docs/modelo-funding.md';
 function aiCompareHTML(s){
   var M=s.model,fa=s.fundPaperAI,fr=s.fundPaper;
@@ -903,7 +903,7 @@ function aiCompareHTML(s){
     lab.map(function(l,i){return '<tr><td>'+l+'</td><td>'+B[i]+'</td><td>'+A[i]+'</td></tr>'}).join('')+'</table></div>';
   if(fa&&fa.open&&fa.open.length)h+='<p class="note" style="margin:6px 0 0">Abertas pela IA: '+fa.open.map(function(o){var ai=(s.aiScores||{})[o.key];return esc(o.coin)+' (short '+esc(o.s)+', long '+esc(o.l)+(ai?', IA '+pctp(ai.p*100,0):'')+')'}).join(' · ')+'</p>';
   h+='<p class="note" style="margin:6px 0 0"><b>Realismo:</b> o resultado supõe as 2 pernas em ordem limite (maker), que pode não executar. Se uma perna precisar ir a mercado (taker) na entrada e na saída, cada operação custa ~US$0,60 a mais: a linha "Se 1 perna fosse a mercado" mostra isso. Com dinheiro real, só vale se as duas ordens limite executarem.</p>';
-  h+='<div class="box" style="margin-top:8px"><b>Como a IA decide</b>Entra só quando a regra diz "Compensa" <strong>e</strong> a IA dá chance ≥ '+pctp(M.threshold*100,0)+' de a entrada pagar as taxas em 3 dias. '+
+  h+='<div class="box" style="margin-top:8px"><b>Como a IA decide</b>Entra só quando a regra diz "Compensa" <strong>e</strong> a IA dá chance a partir de '+pctp(M.threshold*100,0)+' de a entrada pagar as taxas em 3 dias. '+
     'Ela olha o histórico do próprio spread (média de 8, 24 e 72 h, oscilação, horas acima do empate, tamanho do pico). Treino: '+(R.days||'—')+' dias, '+(R.coins||'—')+' moedas (Hyperliquid, OKX, Bitget). '+
     'No teste com dados que ela não viu: regras acertaram '+pc(R.test&&R.test.hit)+'; só as aprovadas pela IA, '+pc(R.testKept&&R.testKept.hit)+'; as vetadas, '+pc(R.testDropped&&R.testDropped.hit)+'. '+
     'Precisa de 6 h de histórico do par para dar nota. <a href="'+GH_DOC+'" target="_blank" rel="noopener">Relatório do modelo</a>.</div>';
@@ -935,20 +935,21 @@ document.addEventListener('click',function(e){
 });
 /* ---------- copiloto: o que fazer agora (plano de ação com números e travas) ---------- */
 function renderAct(){
-  ['h_act','m_act'].forEach(function(id){var el=$(id);if(!el)return;
+  if($('h_act'))$('h_act').hidden=true; // Início mostra o relatório completo do copiloto; o plano detalhado fica em Mineração
+  ['m_act'].forEach(function(id){var el=$(id);if(!el)return;
     var P=ops.status&&ops.status.state&&ops.status.state.plan;
     if(!P){el.hidden=true;return}
     el.hidden=false;var M=P.mining,cfg=(ops.status||{}).config||{};
     el.className='card sig '+(M&&M.action==='alugar'?'favoravel':'neutro');
-    var h='<div class="row between"><div class="eyebrow">O que fazer agora</div><span class="chip">copiloto</span></div>';
+    var h='<div class="row between"><div class="eyebrow">Plano de mineração · o que fazer agora</div><span class="chip">copiloto</span></div>';
     if(M){
       h+='<div class="lead">'+esc(M.title)+'</div><p class="note" style="margin:4px 0 8px">'+esc(M.text)+'</p>'+
         '<div class="kv judged">'+
         kvJ('Potência',M.ph+' PH/s','',null,'~'+usd(M.costPerHourUsd,0)+' por hora')+
-        kvJ('Preço',M.price.toFixed(4),M.price<=M.maxPrice?'good':'bad',M.price<=M.maxPrice?'↓ abaixo do máximo':'↑ acima do máximo','máximo que compensa: '+M.maxPrice.toFixed(4))+
+        kvJ('Preço',M.price.toFixed(4).replace('.',','),M.price<=M.maxPrice?'good':'bad',M.price<=M.maxPrice?'↓ abaixo do máximo':'↑ acima do máximo','máximo que compensa: '+M.maxPrice.toFixed(4).replace('.',','))+
         kvJ('Orçamento por tentativa',usd(M.budgetUsd,0),'',null,'= '+M.amountBtc.toString().replace('.',',')+' BTC na ordem; stop-loss: ao gastar isso sem bloco, para e espera '+(((ops.status||{}).config||{}).stopCooldownH===undefined?6:(ops.status.config.stopCooldownH))+' h')+
-        kvJ('Duração',nf(M.durationH,1)+' h','',null,'janelas costumam durar ~2 h')+
-        kvJ('Chance de bloco',pctp(M.chance*100,0),M.chance>=0.25?'good':'neutral',M.chance>=0.25?'↑ boa por sessão':'→ baixa por sessão','sem bloco: perde o orçamento')+
+        kvJ('Duração',nf(M.durationH,1)+' h','',null,'tempo para gastar o orçamento nesta potência; janelas reais vão de minutos a poucas horas')+
+        kvJ('Chance de bloco',pctp(M.chance*100,0),'neutral','→ por tentativa',(M.action==='alugar'?'com margem positiva, repetir tende a lucrar':'com margem negativa, repetir tende a perder')+'; sem bloco, perde o orçamento')+
         kvJ('Bloco vale',usd(M.blockUsd||0,0),'',null,'recompensa já sem a taxa do pool')+'</div>'+
         (M.why?'<details style="margin-top:8px"><summary>Por que '+M.ph+' PH/s?</summary><ol class="note" style="margin:6px 0 0;padding-left:18px">'+M.why.map(function(w){return '<li>'+esc(w)+'</li>'}).join('')+'</ol>'+
           (M.alt?'<div class="scroll"><table style="margin-top:6px"><tr><th>Potência</th><th>Gasto em 2 h</th><th>Chance de bloco</th></tr>'+M.alt.map(function(a){return '<tr><td>'+a.ph+' PH/s</td><td>'+usd(a.costUsd,0)+'</td><td>'+pctp(a.chance*100,0)+'</td></tr>'}).join('')+'</table></div><p class="note" style="margin:4px 0 0">Chance e gasto crescem juntos: a média por dólar é igual. Se quiser arriscar menos por sessão, baixe o orçamento (Operar → Stop-loss por sessão) que a potência sugerida cai junto.</p>':'')+'</details>':'')+
@@ -1026,8 +1027,8 @@ function powerHTML(P){
   return '<div class="box" style="margin-top:10px"><b>'+head+'</b>'+
     '<div class="scroll"><table style="margin-top:6px"><tr><th>PH/s</th><th>Lance</th><th>Margem</th><th>Lucro esperado/dia</th><th>Blocos/dia</th><th>Sorte (±1 dia)</th></tr>'+
     P.curve.filter(function(r){return [5,10,30,50,100,200,500].indexOf(r.ph)>=0||r.ph===P.idealPh}).map(function(r){
-      return '<tr'+(r.ph===P.idealPh?' style="font-weight:700"':'')+'><td>'+r.ph+(r.overCap?'*':'')+'</td><td>'+r.bidEH.toFixed(4)+'</td><td class="'+(r.edgePct>=0?'good':'bad')+'">'+pct(r.edgePct,1)+'</td><td class="'+(r.profitDay>=0?'good':'bad')+'">'+signUsd(r.profitDay)+'</td><td>'+nf(r.blocksDay,2)+'</td><td>±'+usd(r.luckDay,0)+'</td></tr>'}).join('')+'</table></div>'+
-    '<p class="note" style="margin:6px 0 0">O lucro esperado cresce junto com a potência enquanto o livro aguenta sem subir o lance: a potência não muda a margem, muda o tamanho do ganho <b>e</b> da sorte. '+
+      return '<tr'+(r.ph===P.idealPh?' style="font-weight:700"':'')+'><td>'+r.ph+(r.overCap?'*':'')+'</td><td>'+r.bidEH.toFixed(4).replace('.',',')+'</td><td class="'+(r.edgePct>=0?'good':'bad')+'">'+pct(r.edgePct,1)+'</td><td class="'+(r.profitDay>=0?'good':'bad')+'">'+signUsd(r.profitDay)+'</td><td>'+nf(r.blocksDay,2)+'</td><td>±'+usd(r.luckDay,0)+'</td></tr>'}).join('')+'</table></div>'+
+    '<p class="note" style="margin:6px 0 0">'+(P.edgePct>=0?'O lucro esperado cresce junto com a potência enquanto o livro aguenta sem subir o lance: a potência não muda a margem, muda o tamanho do ganho <b>e</b> da sorte. ':'Com margem negativa, a perda esperada por dia cresce junto com a potência: a potência não muda a margem, muda o tamanho do ganho <b>e</b> da perda. ')+'Potências com * passam do teto de segurança do servidor. '+
     (P.bankrollMinUsd?'Para a sorte não quebrar o caixa antes de a média aparecer, o capital deveria ser de pelo menos ~'+usd(P.bankrollMinUsd,0)+' (critério de Kelly: bloco ÷ 2 × margem).':'Com margem negativa, mais potência só aumenta a perda esperada.')+
     (P.curve.some(function(r){return r.overCap})?' * acima do teto de segurança do servidor ('+P.capPh+' PH/s).':'')+'</p></div>';
 }
@@ -1101,7 +1102,7 @@ function renderAI(){
   var ks=Object.keys(T);
   h+='<details style="margin-top:10px"><summary>O que ela aprendeu por tipo de previsão</summary><div class="scroll"><table><tr><th>Previsão</th><th>Tipo</th><th>Conferidas</th><th>Acerto</th><th>XP</th></tr>'+ks.map(function(k){var s=(A.stats||{})[k]||{n:0,hits:0};return '<tr><td>'+esc(T[k].label)+'</td><td>'+(T[k].hard?'difícil':'fácil')+'</td><td>'+s.n+'</td><td>'+(s.n?pctp(s.hits/s.n*100,0):'—')+'</td><td>'+(s.xp||0)+'</td></tr>'}).join('')+'</table></div><p class="note" style="margin:6px 0 0">Fácil = aposta que o que está aí continua (ex.: margem boa segue boa por 1 h): acerta quase sempre e por isso vale pouco. Difícil = aposta numa mudança (janela abre, dificuldade sobe, DARR depois do reajuste, funding paga as taxas): é aqui que se vê se a IA sabe algo.</p></details>'+
     skillHTML(A,T)+
-    '<details style="margin-top:6px"><summary>Como a IA aprende e ganha XP</summary><p class="note" style="margin:6px 0 0">A cada 3 min o servidor junta todos os sinais (DARR, margem, reajuste do BTC, BCH contra o BTC, blocos chegando, funding com 24 h estável e meia-vida, outras moedas) e transforma cada sinal numa previsão com prazo. Quando o prazo vence, ele confere com os dados reais. Acerto difícil vale 10 XP (15 se o tipo já é confiável); acerto fácil vale 2; erro vale 0. Não precisa que você execute: conta se a dica era boa. A confiança de cada tipo vem do histórico de acertos dele; tipos com 20+ conferidas e 60%+ de acerto viram "confiáveis". Níveis: Aprendiz → Analista (30 conferidas, 5 difíceis) → Estrategista (100, 20 difíceis com acerto ≥ 50% e acima do acaso) → Mestre (300, 60 difíceis com acerto ≥ 55% e acima do acaso). Tempo sozinho não sobe de nível: precisa acertar as difíceis e bater o grupo de controle.'+(nx?' Próximo nível: '+esc(nx.name)+' ('+A.resolved+' de '+nx.min+' conferidas; difíceis '+HD.n+' de '+nx.hard+(nx.hit?', acerto nelas '+pctp(HD.rate*100,0)+' de ≥ '+pctp(nx.hit*100,0):'')+').':'')+'</p></details>';
+    '<details style="margin-top:6px"><summary>Como a IA aprende e ganha XP</summary><p class="note" style="margin:6px 0 0">A cada 3 min o servidor junta todos os sinais (DARR, margem, reajuste do BTC, BCH contra o BTC, blocos chegando, funding com 24 h estável e meia-vida, outras moedas) e transforma cada sinal numa previsão com prazo. Quando o prazo vence, ele confere com os dados reais. Acerto difícil vale 10 XP (15 se o tipo já é confiável); acerto fácil vale 2; erro vale 0. Não precisa que você execute: conta se a dica era boa. A confiança de cada tipo vem do histórico de acertos dele; tipos com 20+ conferidas e 60%+ de acerto viram "confiáveis". Níveis: Aprendiz → Analista (30 conferidas, 5 difíceis) → Estrategista (100, 20 difíceis com acerto a partir de 50% e acima do acaso) → Mestre (300, 60 difíceis com acerto a partir de 55% e acima do acaso). Tempo sozinho não sobe de nível: precisa acertar as difíceis e bater o grupo de controle.'+(nx?' Próximo nível: '+esc(nx.name)+' ('+A.resolved+' de '+nx.min+' conferidas; difíceis '+HD.n+' de '+nx.hard+(nx.hit?', acerto nelas '+pctp(HD.rate*100,0)+' de pelo menos '+pctp(nx.hit*100,0):'')+').':'')+'</p></details>';
   card.innerHTML=h;
 }
 // Cartão único da rede: usa o bloco mais recente entre a Blockchair (painel) e o servidor, e julga cada número.
@@ -1147,9 +1148,9 @@ function renderWindow(){
   rows.push('<div class="kv judged" style="margin-top:8px">'+
     kvJ('DARR',nf(d,3),dT[0],dT[1],'bom acima de 1,05 (paga as taxas)')+
     kvJ('Margem no lance',isFinite(m.edgeAtBidPct)?pct(m.edgeAtBidPct,1):'—',eT&&eT[0],eT&&eT[1],'o robô compra acima de '+nf(cfg.minEdgePct||3,1)+'%')+
-    kvJ('NiceHash cobra',m.bidEH?m.bidEH.toFixed(4):'—',m.bidEH?(m.bidEH<=maxNH?'good':'bad'):'',m.bidEH?(m.bidEH<=maxNH?'↓ abaixo do máximo (bom)':'↑ acima do máximo (ruim)'):null,'máximo que compensa: '+maxNH.toFixed(4))+
-    kvJ('BCH paga',D.hpBch.toFixed(4),'',null,'BTC por EH/s por dia')+
-    kvJ('BTC paga',D.hpBtc.toFixed(4),'',null,'a NiceHash cobra perto disto')+
+    kvJ('NiceHash cobra',m.bidEH?m.bidEH.toFixed(4).replace('.',','):'—',m.bidEH?(m.bidEH<=maxNH?'good':'bad'):'',m.bidEH?(m.bidEH<=maxNH?'↓ abaixo do máximo (bom)':'↑ acima do máximo (ruim)'):null,'máximo que compensa: '+maxNH.toFixed(4).replace('.',','))+
+    kvJ('BCH paga',D.hpBch.toFixed(4).replace('.',','),'',null,'BTC por EH/s por dia')+
+    kvJ('BTC paga',D.hpBtc.toFixed(4).replace('.',','),'',null,'a NiceHash cobra perto disto')+
     kvJ('Aluguel ÷ BTC',D.nhRatio?nf(D.nhRatio,3)+'×':'—','',null,'perto de 1: aluguel segue o BTC')+'</div>');
   if(R)rows.push('<div class="box" style="margin-top:8px"><b>Próximo reajuste do BTC</b>'+(R.at?'Por volta de '+new Date(R.at).toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'})+' ('+(R.remainingBlocks||0)+' blocos). ':'')+'Estimativa '+pct(R.changePct,1)+' na dificuldade do BTC → o DARR vai para ~<strong>'+nf(R.darrAfter,3)+'</strong>'+(R.changePct>0?' (o BCH fica relativamente mais vantajoso).':' (o BCH fica relativamente menos vantajoso).')+'</div>');
   if(M)rows.push('<div class="box" style="margin-top:8px"><b>BCH contra o BTC</b>Preço '+pct(M.vsEmaPct,1)+' em relação à média de 2 dias'+(M.ret24Pct!==null?'; '+pct(M.ret24Pct,1)+' em 24 h':'')+'. '+(M.vsEmaPct>2?'O preço subiu antes da dificuldade reagir: costuma abrir janela nas próximas horas.':(M.vsEmaPct<-2?'O preço caiu antes da dificuldade: a janela tende a piorar.':'Sem sinal forte.'))+'</div>');
@@ -1209,7 +1210,7 @@ function renderLuck(){
     '<li>Hora do dia (UTC): '+T.hours.map(function(x){return x.from+'–'+(x.from+6)+'h '+(x.z===null?'—':(Math.abs(x.z)<2?'normal':'desvio '+nf(x.z,1)+'σ'))}).join(' · ')+'.</li>'+
     '<li>Distribuição dos sorteios: qui² '+nf(T.chi2,1)+' (acaso: até 16,9 em 95% das vezes) em '+T.n+' blocos.</li></ul>'+
     '<p class="note" style="margin:4px 0 0">Conclusão: o que aconteceu nas últimas horas não muda a chance do próximo bloco. O que decide o resultado de longo prazo é a margem (preço do aluguel × quanto o bloco paga); a potência só muda o tamanho do ganho e da sorte.</p></div>';
-  if(L.recent&&L.recent.length)h+='<details style="margin-top:8px"><summary>Últimos blocos: potência mínima para ser seu</summary><div class="stack" style="gap:2px;margin-top:6px">'+L.recent.map(function(b){return '<div class="note">'+b.h+' · '+hhmm(new Date(b.t))+' · '+esc(b.pool||'')+' · seria seu com ≥ <b>'+nf(b.needPH,0)+' PH/s</b></div>'}).join('')+'</div></details>';
+  if(L.recent&&L.recent.length)h+='<details style="margin-top:8px"><summary>Últimos blocos: potência mínima para ser seu</summary><div class="stack" style="gap:2px;margin-top:6px">'+L.recent.map(function(b){return '<div class="note">'+b.h+' · '+hhmm(new Date(b.t))+' · '+esc(b.pool||'')+' · seria seu com <b>'+nf(b.needPH,0)+' PH/s ou mais</b></div>'}).join('')+'</div></details>';
   el.innerHTML=h;
 }
 document.addEventListener('click',function(e){var b=e.target.closest('#bl_luck [data-luckw]');if(!b)return;luckWin=+b.dataset.luckw;renderLuck()});
@@ -1224,12 +1225,12 @@ function renderBlocksLog(){
     var gap=b.dt===null||b.dt===undefined?'':(b.dt<60?'<1 min':FDI.dur(b.dt*1000));
     var head='<b class="mono">'+b.h+'</b> <span class="note">'+hhmm(b.t)+'</span> · <b>'+esc(b.pool)+'</b>'+(b.solo?' <span class="chip ok">solo</span>':'')+(b.mine?' <span class="chip ok">seu</span>':'')+(b.simWon?' <span class="chip ok">seria seu</span>':'')+
       (gap?' <span class="note">· '+gap+(b.dt>1800?' <span class="warn">(lento)</span>':'')+'</span>':'');
-    var line=(b.txs?b.txs+' tx · ':'')+(b.size?nf(b.size/1000,1)+' KB · ':'')+(isFinite(b.reward)?b.reward.toFixed(4)+' BCH':'—')+(b.usd?' ('+usd(b.usd,0)+')':'')+(b.edge!==undefined&&b.edge!==null?' · margem '+pct(b.edge,1):'');
-    var det=['Hora: '+dt2(b.t),'Taxas das transações: '+(+b.fees||0).toFixed(5)+' BCH'+(b.poolFeePct!==null&&b.poolFeePct!==undefined?' · fatia do pool: '+nf(b.poolFeePct,1)+'%':''),
+    var line=(b.txs?b.txs+' tx · ':'')+(b.size?nf(b.size/1000,1)+' KB · ':'')+(isFinite(b.reward)?b.reward.toFixed(4).replace('.',',')+' BCH':'—')+(b.usd?' ('+usd(b.usd,0)+')':'')+(b.edge!==undefined&&b.edge!==null?' · margem '+pct(b.edge,1):'');
+    var det=['Hora: '+dt2(b.t),'Taxas das transações: '+(+b.fees||0).toFixed(5).replace('.',',')+' BCH'+(b.poolFeePct!==null&&b.poolFeePct!==undefined?' · fatia do pool: '+nf(b.poolFeePct,1)+'%':''),
       b.netPH?'Potência da rede: '+nf(b.netPH,0)+' PH/s (dificuldade '+nf(b.D/1e9,1)+' G)':'',
-      b.nhPH?'NiceHash: '+nf(b.nhPH,0)+' PH/s alugados; lance '+(b.nhBid||0).toFixed(4)+', empate '+(b.be||0).toFixed(4)+' BTC/EH/dia':'',
+      b.nhPH?'NiceHash: '+nf(b.nhPH,0)+' PH/s alugados; lance '+(b.nhBid||0).toFixed(4).replace('.',',')+', empate '+(b.be||0).toFixed(4).replace('.',',')+' BTC/EH/dia':'',
       b.realPH?'Suas ordens: '+nf(b.realPH,2)+' PH/s (chance de ser seu: '+pctp(b.realProb*100,2)+')':'',
-      b.simPH?'Simulação (cenário Sua): '+nf(b.simPH,0)+' PH/s'+(b.simBid?' comprando a '+b.simBid.toFixed(4)+(b.simEdge!==undefined?' (margem na compra '+pct(b.simEdge,1)+')':''):'')+', chance '+pctp(b.simProb*100,2)+', '+(b.simWon?'seria seu':'não saiu'):'',
+      b.simPH?'Simulação (cenário Sua): '+nf(b.simPH,0)+' PH/s'+(b.simBid?' comprando a '+b.simBid.toFixed(4).replace('.',',')+(b.simEdge!==undefined?' (margem na compra '+pct(b.simEdge,1)+')':''):'')+', chance '+pctp(b.simProb*100,2)+', '+(b.simWon?'seria seu':'não saiu'):'',
       'Assinatura: '+esc(b.tag||'—'),(ops.status&&ops.status.state&&ops.status.state.lastHeight?'Confirmações: '+Math.max(1,ops.status.state.lastHeight-b.h+1):''),b.backfill?'Buscado depois: sem dados de mercado do momento.':''].filter(Boolean);
     return '<details class="trow"><summary style="list-style:none;cursor:pointer"><div>'+head+'</div><div class="note">'+line+'</div></summary><div class="note" style="margin-top:4px">'+det.join('<br>')+'</div></details>'}).join('')+'</div>'+
     (L.length>40?'<p class="note">Mostrando 40 de '+L.length+'. O CSV tem todos.</p>':'');
@@ -1239,7 +1240,7 @@ function renderBlocksLog(){
   var top=lh.map(function(n,h){return [h,n]}).filter(function(x){return x[1]>0}).sort(function(a,b){return b[1]-a[1]}).slice(0,4);
   $('bl_sum').innerHTML='<p class="note" style="margin:0 0 8px">'+S.n+' blocos, de '+dt2(S.from)+' a '+dt2(S.to)+'.</p>'+
     '<div class="kv"><div><small>Intervalo médio</small><span>'+(S.dt?FDI.dur(S.dt*1000):'—')+'</span></div><div><small>Lentos (&gt;30 min)</small><span>'+S.slow+'</span></div><div><small>Rápidos (&lt;2 min)</small><span>'+S.fast+'</span></div>'+
-    '<div><small>Transações</small><span>'+(S.txs?nf(S.txs,0):'—')+'</span></div><div><small>Tamanho</small><span>'+(S.size?nf(S.size/1000,1)+' KB':'—')+'</span></div><div><small>Taxas</small><span>'+(S.fees!==null?S.fees.toFixed(4):'—')+'</span></div></div>'+
+    '<div><small>Transações</small><span>'+(S.txs?nf(S.txs,0):'—')+'</span></div><div><small>Tamanho</small><span>'+(S.size?nf(S.size/1000,1)+' KB':'—')+'</span></div><div><small>Taxas</small><span>'+(S.fees!==null?S.fees.toFixed(4).replace('.',','):'—')+'</span></div></div>'+
     '<div class="eyebrow" style="margin:10px 0 4px">Quem achou</div><div class="row" style="gap:6px">'+S.byPool.slice(0,12).map(function(p){return '<span class="chip'+(p.solo?' ok':'')+'">'+esc(p.pool)+' '+p.n+'</span>'}).join('')+(S.byPool.length>12?'<span class="note">+'+(S.byPool.length-12)+'</span>':'')+'</div>'+
     '<div class="box" style="margin-top:8px"><b>Blocos solo (onde vai o hash alugado)</b>'+S.solo.n+' de '+S.n+' ('+pctp(S.n?S.solo.n/S.n*100:0,0)+'). '+
     (S.solo.edge!==null?'Margem média do aluguel quando saíram: '+pct(S.solo.edge,1)+' (outros blocos: '+(S.other.edge!==null?pct(S.other.edge,1):'—')+'). ':'')+
@@ -1275,14 +1276,34 @@ function renderHashMkts(){
   var fee=+cfg.rentFeePct||3,be=mk.breakEvenEH?mk.breakEvenEH*(1+fee/100):null; // empate sem a taxa do fornecedor
   var row=function(name,price,feePct,note){if(!isFinite(price)||price===null)return '<tr><td>'+name+'</td><td colspan="3">sem dado agora</td></tr>';
     var tot=price*(1+feePct/100),e=be?(be/tot-1)*100:null;
-    return '<tr><td>'+name+'</td><td>'+price.toFixed(4)+'</td><td>'+nf(feePct,0)+'%</td><td>'+tot.toFixed(4)+'</td><td>'+(e===null?'—':'<b class="'+(e>=0?'good':'bad')+'">'+pct(e,1)+'</b>')+'</td></tr>'+(note?'<tr><td></td><td colspan="4" class="note">'+note+'</td></tr>':'')};
+    return '<tr><td>'+name+'</td><td>'+price.toFixed(4).replace('.',',')+'</td><td>'+nf(feePct,0)+'%</td><td>'+tot.toFixed(4).replace('.',',')+'</td><td>'+(e===null?'—':'<b class="'+(e>=0?'good':'bad')+'">'+pct(e,1)+'</b>')+'</td></tr>'+(note?'<tr><td></td><td colspan="4" class="note">'+note+'</td></tr>':'')};
   var B=H.braiins||{},M=H.mrr||{};
   el.innerHTML=head+'<p class="note" style="margin:0 0 6px">Preço para receber hash agora, em BTC por EH/s por dia. Margem = quanto o hash rende no BCH (pool solo) ÷ preço total − 1. Atualizado '+ago(H.at)+' atrás.</p>'+
     '<div class="scroll"><table><tr><th>Fornecedor</th><th>Preço</th><th>Taxa</th><th>Total</th><th>Margem BCH</th></tr>'+
     row('NiceHash',mk.bidEH,fee,'Hoje usada pelo robô. Exige KYC; depósitos de exchange podem ficar retidos pela Travel Rule (VASP).')+
-    row('Braiins Hashpower',B.matchEH,B.feePct||0,'Taxa 0% no beta (pode mudar). Disponível ~'+nf((B.availPH||0)/1000,1)+' EH/s. <b>Exige pool com extranonce2 ≥ 7: a maioria dos pools de BCH usa 4.</b> Use "Conferir com a Braiins" no cadastro de pool.')+
-    row('MiningRigRentals',M.suggestedEH,0,'Preço sugerido do SHA-256 (o menor anúncio: '+(isFinite(M.lowestEH)?M.lowestEH.toFixed(4):'—')+'). Aluga máquinas por horas fixas; caro para o BCH solo.')+'</table></div>'+
+    row('Braiins Hashpower',B.matchEH,B.feePct||0,'Taxa 0% no beta (pode mudar). Disponível ~'+nf((B.availPH||0)/1000,1)+' EH/s. <b>Exige pool com extranonce2 de 7 ou mais: a maioria dos pools de BCH usa 4.</b> Use "Conferir com a Braiins" no cadastro de pool.')+
+    row('MiningRigRentals',M.suggestedEH,0,'Preço sugerido do SHA-256 (o menor anúncio: '+(isFinite(M.lowestEH)?M.lowestEH.toFixed(4).replace('.',','):'—')+'). Aluga máquinas por horas fixas; caro para o BCH solo.')+'</table></div>'+
     ((H.err||[]).length?'<p class="note warn" style="margin:6px 0 0">'+esc(H.err.join(' · '))+'</p>':'');
+}
+// Prontidão para o dinheiro real: os critérios objetivos da fase de observação, cada um com o estado de agora.
+// Só recomenda ligar quando todos estiverem cumpridos (a decisão final é sua).
+function renderReady(){
+  var el=$('h_ready');if(!el)return;var st=ops.status,S=st&&st.state,cfg=st&&st.config;if(!S||!cfg){el.hidden=true;return}
+  el.hidden=false;
+  var A=S.ai||{},M=(S.entryCheck&&S.entryCheck.market)||{},B=M.band,P=S.paper||{},F=(S.fundPaper&&S.fundPaper.summary)||{},X=S.exec,lift=A.lift||{};
+  var ev=P.spendUsd>0?((P.evUsd||0)-P.spendUsd)/P.spendUsd*100:null;
+  var items=[
+    [!!B,'Faixa de entrada comprovada','A IA precisa achar uma faixa de margem com lucro esperado positivo nas 2 horas seguintes, mesmo no pior caso do intervalo.',B?'Achada: a partir de '+nf(B.from,0)+'% ('+pctp(B.hit*100,0)+' de acerto, '+nf(B.n,0)+' leituras).':'Ainda não: nos dados até agora, as margens altas não se sustentaram.'],
+    [(A.hard&&A.hard.n>=20)&&lift.pts>0,'IA melhor que o acaso','Pelo menos 20 previsões difíceis conferidas e acerto acima do grupo de controle.',(A.hard?A.hard.hits+' de '+A.hard.n+' difíceis':'0 difíceis')+(lift.pts!==null&&lift.pts!==undefined?'; contra o acaso: '+(lift.pts>0?'+':'')+nf(lift.pts,0)+' pontos':'; sem comparação ainda')+'.'],
+    [ev!==null&&ev>0&&P.spendUsd>=1000,'Simulação da sua regra com média positiva','O cenário "Sua" com pelo menos US$1.000 de compras simuladas e média (sem sorte) positiva.',P.spendUsd>0?usd(P.spendUsd,0)+' simulados; média '+pct(ev,1)+'.':'Sem compras simuladas: a sua regra ainda não ficou verde.'],
+    [F.closed>=10&&F.netUsd>0,'Funding simulado positivo','Pelo menos 10 operações fechadas com resultado positivo depois das taxas.',(F.closed||0)+' fechadas; resultado '+signUsd(F.netUsd||0)+'.'],
+    [!!(X&&X.orders&&X.orders.length),'Teste de calibração feito','10 PH/s por 1 a 2 horas em Ativo, comparando entrega e preço com a simulação.',X&&X.orders&&X.orders.length?'Feito: entrega média '+(X.avgDelivered!==null?pctp(X.avgDelivered*100,0):'—')+'.':'Ainda não (é o último passo, com sua aprovação).'],
+    [cfg.sessionBudgetUsd>0&&cfg.dailyBudgetUsd>0&&cfg.weeklyLossUsd>0,'Limites de perda configurados','Stop-loss por tentativa, limite diário e perda máxima em 7 dias.','Stop-loss US$'+nf(cfg.sessionBudgetUsd||0,0)+', diário US$'+nf(cfg.dailyBudgetUsd||0,0)+', semanal US$'+nf(cfg.weeklyLossUsd||0,0)+'.']
+  ];
+  var done=items.filter(function(i){return i[0]}).length;
+  el.innerHTML='<div class="row between"><div class="eyebrow">Fase de observação</div><span class="chip '+(done===items.length?'ok':'')+'">'+done+' de '+items.length+'</span></div>'+
+    '<div class="lead">Prontidão para o dinheiro real</div><p class="note" style="margin:4px 0 8px">'+(done===items.length?'Todos os critérios cumpridos: dá para ligar com o capital mínimo e escalar aos poucos. A decisão é sua.':'Ligar o dinheiro real só quando todos estiverem cumpridos. Até lá, o painel observa, simula e aprende sozinho.')+'</p>'+
+    '<div class="stack" style="gap:4px">'+items.map(function(i){return '<details class="trow"><summary><span class="chip '+(i[0]?'ok':'')+'">'+(i[0]?'✓':'…')+'</span> <b>'+esc(i[1])+'</b><div class="note" style="margin:2px 0 0 28px">'+esc(i[3])+'</div></summary><p class="note" style="margin:4px 0 0">'+esc(i[2])+'</p></details>'}).join('')+'</div>';
 }
 // Execução real × simulação (calibração): o que de fato aconteceu com as ordens do robô no modo Ativo.
 function renderExec(){
@@ -1291,7 +1312,7 @@ function renderExec(){
   if(!X){el.innerHTML=h+'<p class="note" style="margin:0">Aparece quando o robô operar em Ativo. Mostra, ordem por ordem, quanto tempo o hash demorou a chegar, quanto da potência pedida foi entregue e o preço efetivo pago. É a régua do teste de calibração (10 PH/s por 1 a 2 horas): se esses números baterem com a simulação, dá para escalar.</p>';return}
   h+='<div class="kv"><div><small>Tempo até o hash</small><span>'+(X.avgToHashMin!==null?nf(X.avgToHashMin,0)+' min':'—')+'</span></div><div><small>Entrega média</small><span class="'+(X.avgDelivered!==null&&X.avgDelivered<0.9?'warn':'')+'">'+(X.avgDelivered!==null?pctp(X.avgDelivered*100,0):'—')+'</span></div><div><small>Preço efetivo × lance</small><span>'+(X.avgEffVsBid!==null?pct((X.avgEffVsBid-1)*100,1):'—')+'</span></div></div>'+
     '<p class="note" style="margin:6px 0">A simulação supõe hash chegando na hora, 100% entregue e preço igual ao lance. Diferenças aqui entram como custo extra na conta: entrega de 90% significa pagar ~10% a mais por hash recebido.</p>'+
-    '<div class="stack" style="gap:4px">'+X.orders.map(function(o){return '<div class="note">'+dt2(o.created)+' · '+nf(o.limitPH,1)+' PH/s a '+o.priceEH.toFixed(4)+(o.alive?' · ativa':'')+' · hash em '+(o.toHashMin!==null?nf(o.toHashMin,0)+' min':'—')+' · entrega '+(o.delivered!==null?pctp(o.delivered*100,0):'—')+(o.effEH?' · efetivo '+o.effEH.toFixed(4):'')+'</div>'}).join('')+'</div>';
+    '<div class="stack" style="gap:4px">'+X.orders.map(function(o){return '<div class="note">'+dt2(o.created)+' · '+nf(o.limitPH,1)+' PH/s a '+o.priceEH.toFixed(4).replace('.',',')+(o.alive?' · ativa':'')+' · hash em '+(o.toHashMin!==null?nf(o.toHashMin,0)+' min':'—')+' · entrega '+(o.delivered!==null?pctp(o.delivered*100,0):'—')+(o.effEH?' · efetivo '+o.effEH.toFixed(4).replace('.',','):'')+'</div>'}).join('')+'</div>';
   el.innerHTML=h;
 }
 function renderOps(){
@@ -1311,9 +1332,9 @@ function renderOps(){
   $('o_status').innerHTML='<div class="row" style="justify-content:space-between"><h2 style="margin:0">Robô</h2><span class="chip '+MODE_CHIP[cfg.mode]+'">'+MODE_TXT[cfg.mode]+'</span></div>'+
     (m.bidEH?'<div class="row" style="margin-top:10px;align-items:baseline"><span class="huge '+(m.green?'good':m.edgeAtBidPct>=0?'warn':'bad')+'">'+pct(m.edgeAtBidPct,1)+'</span><span class="note">margem no lance (servidor)</span></div>'+
     '<div class="kv judged" style="margin-top:8px">'+
-      kvJ('Lance',m.bidEH.toFixed(4),m.bidEH<=m.capEH?'good':'bad',m.bidEH<=m.capEH?'↓ abaixo do teto: compra':'↑ acima do teto: pausa','preço que o robô pagaria agora')+
-      kvJ('Teto',m.capEH.toFixed(4),'',null,'máximo aceito (empate − sua margem)')+
-      kvJ('Empate',m.breakEvenEH.toFixed(4),'',null,'acima disto, prejuízo médio')+
+      kvJ('Lance',m.bidEH.toFixed(4).replace('.',','),m.bidEH<=m.capEH?'good':'bad',m.bidEH<=m.capEH?'↓ abaixo do teto: compra':'↑ acima do teto: pausa','preço que o robô pagaria agora')+
+      kvJ('Teto',m.capEH.toFixed(4).replace('.',','),'',null,'máximo aceito (empate − sua margem)')+
+      kvJ('Empate',m.breakEvenEH.toFixed(4).replace('.',','),'',null,'acima disto, prejuízo médio')+
       kvJ('Custo por bloco',usd(m.costPerBlockUsd),m.blockNetUsd&&m.costPerBlockUsd<m.blockNetUsd?'good':'bad',m.blockNetUsd?(m.costPerBlockUsd<m.blockNetUsd?'↓ abaixo do valor do bloco':'↑ acima do valor do bloco'):null,m.blockNetUsd?'bloco vale ~'+usd(m.blockNetUsd,0):'')+
       kvJ('Gasto hoje',usd(s.dailyUsd||0),(s.dailyUsd||0)>=(cfg.dailyBudgetUsd||1e9)?'bad':(s.dailyUsd||0)>=0.8*(cfg.dailyBudgetUsd||1e9)?'warn':'neutral',(s.dailyUsd||0)>=(cfg.dailyBudgetUsd||1e9)?'limite do dia atingido':'→ dentro do limite','limite diário: '+usd(cfg.dailyBudgetUsd||0,0))+
       kvJ('Blocos achados',(s.myBlocks||[]).length,'',null,'pagos no seu endereço')+'</div>'+
@@ -1321,13 +1342,13 @@ function renderOps(){
     :'<p class="note">'+esc(m.reason||'Sem ciclo ainda. Toque em Rodar ciclo agora.')+'</p>')+
     '<div class="legs" style="margin-top:6px">Último ciclo: '+(s.lastTick?'<b data-ago="'+s.lastTick+'">'+ago(s.lastTick)+'</b> atrás':'nunca')+(s.lastHeight?' · bloco BCH '+s.lastHeight:'')+'</div>'+
     ((s.errors||[]).length?'<div class="note bad">'+esc(s.errors.join('; '))+'</div>':'')+
-    ((s.myBlocks||[]).length?'<div class="legs">Seus blocos: '+s.myBlocks.slice(-5).reverse().map(function(b){return '<b>'+b.height+'</b> ('+(+b.bch).toFixed(4)+' BCH)'}).join(' · ')+'</div>':'');
+    ((s.myBlocks||[]).length?'<div class="legs">Seus blocos: '+s.myBlocks.slice(-5).reverse().map(function(b){return '<b>'+b.height+'</b> ('+(+b.bch).toFixed(4).replace('.',',')+' BCH)'}).join(' · ')+'</div>':'');
   renderPaper(st);
   var btcUsd=m.btcUsd||live().btcUsd;
   $('o_bal').innerHTML=ops.bal?'Saldo disponível: <b>'+(+ops.bal.available).toFixed(8)+' BTC</b>'+(btcUsd?' ('+usd(+ops.bal.available*btcUsd)+')':''):esc(ops.err.bal||'');
   $('o_orders').innerHTML=ops.orders.length?ops.orders.map(function(o){
     return '<div class="card opp '+(o.managed?'g':'')+'" style="background:var(--panel2)"><div class="h"><span><b class="mono">'+esc(String(o.id).slice(0,8))+'</b>'+(o.managed?'<span class="chip ok">robô gerencia</span>':'<span class="chip">manual</span>')+'</span><span class="mono">'+esc(o.status)+'</span></div>'+
-      '<div class="kv"><div><small>Preço</small><span>'+o.priceEH.toFixed(4)+'</span></div><div><small>Limite</small><span>'+nf(o.limitPH,2)+' PH</span></div><div><small>Entregando</small><span>'+nf(o.speedPH,2)+' PH</span></div>'+
+      '<div class="kv"><div><small>Preço</small><span>'+o.priceEH.toFixed(4).replace('.',',')+'</span></div><div><small>Limite</small><span>'+nf(o.limitPH,2)+' PH</span></div><div><small>Entregando</small><span>'+nf(o.speedPH,2)+' PH</span></div>'+
       '<div><small>Gasto</small><span>'+o.paidBtc.toFixed(6)+'</span></div><div><small>Disponível</small><span>'+o.availableBtc.toFixed(6)+'</span></div><div><small>Pool</small><span style="font-size:12px">'+esc(o.poolName||'—')+'</span></div></div>'+
       '<div class="grid2"><label>Novo preço<input data-op="'+esc(o.id)+'" type="number" inputmode="decimal" step="0.0001" value="'+o.priceEH.toFixed(4)+'"></label><label>Nova potência (PH/s)<input data-ol="'+esc(o.id)+'" type="number" inputmode="decimal" value="'+o.limitPH.toFixed(2)+'"></label></div>'+
       '<div class="row"><button class="sm pri" data-oupd="'+esc(o.id)+'">Aplicar</button><button class="sm" data-orefill="'+esc(o.id)+'">Reabastecer</button><button class="sm" data-oman="'+esc(o.id)+'" data-v="'+(o.managed?0:1)+'">'+(o.managed?'Tirar do robô':'Robô gerencia')+'</button><button class="sm" data-ocancel="'+esc(o.id)+'">Cancelar</button></div></div>';
@@ -2232,7 +2253,7 @@ $('n_create').addEventListener('click',function(){
   var b={poolId:$('n_pool').value,priceEH:num('n_price'),limitPH:num('n_limit'),amountBtc:num('n_amount'),managed:$('n_managed').checked};
   if(!b.poolId){alert('Escolha um pool (cadastre abaixo se ainda não tiver).');return}
   var m=ops.status&&ops.status.state.market;
-  var warn=m&&m.capEH&&b.priceEH>m.capEH?'\n\nATENÇÃO: preço acima do teto ('+m.capEH.toFixed(4)+'): valor esperado negativo.':'';
+  var warn=m&&m.capEH&&b.priceEH>m.capEH?'\n\nATENÇÃO: preço acima do teto ('+m.capEH.toFixed(4).replace('.',',')+'): valor esperado negativo.':'';
   if(!confirm('Criar ordem na NiceHash ('+(ops.status?ops.status.nhEnv:'')+')?\n'+b.priceEH+' BTC/EH/dia · '+b.limitPH+' PH/s · '+b.amountBtc+' BTC'+warn))return;
   apiCall('POST','/orders',b).then(function(){loadOps()},function(e){alert('Erro: '+e.message)});
 });
@@ -2243,8 +2264,8 @@ $('pl_check').addEventListener('click',function(){
   m.textContent='Conferindo '+host+':'+port+'…';
   apiCall('POST','/pool/check',{host:host,port:port}).then(function(r){
     if(!r.ok){m.innerHTML='<span class="bad">Não deu para conferir: '+esc(r.error||'erro')+'</span>';return}
-    m.innerHTML=r.braiins?'<span class="good">Compatível com a Braiins</span>: extranonce2 = '+r.extranonce2Size+' (precisa ≥ 7). Dá para usar este pool com hash da Braiins Hashpower.'
-      :'<span class="bad">Não compatível com a Braiins</span>: extranonce2 = '+r.extranonce2Size+' (precisa ≥ 7). Com a Braiins seria preciso outro pool de BCH; na NiceHash este pool funciona.';
+    m.innerHTML=r.braiins?'<span class="good">Compatível com a Braiins</span>: extranonce2 = '+r.extranonce2Size+' (precisa de 7 ou mais). Dá para usar este pool com hash da Braiins Hashpower.'
+      :'<span class="bad">Não compatível com a Braiins</span>: extranonce2 = '+r.extranonce2Size+' (precisa de 7 ou mais). Com a Braiins seria preciso outro pool de BCH; na NiceHash este pool funciona.';
   },function(e){m.innerHTML='<span class="bad">'+esc(e.message)+'</span>'});
 });
 $('pl_add').addEventListener('click',function(){
