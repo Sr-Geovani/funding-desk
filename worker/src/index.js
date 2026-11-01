@@ -265,6 +265,8 @@ export async function tick(env, opts = {}) {
   const execLog = orders.length ? execStep(state.execLog, { orders, managedIds: (cfg.managed || []).concat(calib ? [calib.id] : []), now }) : (state.execLog || null);
   if (calibId && hasKeys(env)) {
     const o = orders.find((x) => x.id === calibId), over = now >= calib.until;
+    // quanto do tempo o mercado esteve acima do preço da ordem (sem hash por causa do mercado, não por falha)
+    if (book && book.fillEH && now < calib.until) calib = Object.assign({}, calib, { ticks: (calib.ticks || 0) + 1, outbid: (calib.outbid || 0) + (book.fillEH > calib.priceEH ? 1 : 0) });
     if (over && o && o.alive) { const r = await settle(nh.cancelOrder(calibId)); if (!r.ok) errors.push('calibração: ' + r.e); }
     if (over || (o && !o.alive) || (!o && now - calib.start > 15 * 60e3)) {
       // valor final pago (a NiceHash lança o pagamento com atraso; depois de encerrar, a ordem some da lista)
@@ -274,8 +276,9 @@ export async function tick(env, opts = {}) {
       const hours = Math.max(0, ((e && e.lastTs) || now) - calib.start) / 3600e3;
       const paidUsd = e ? e.paidBtc * btc : 0, simUsd = calib.ph / 1000 * calib.priceEH * btc * hours / 24; // sem a taxa de 3%: compara com o pago na ordem
       const delivered = e && e.n ? e.ratioSum / e.n : null, toHashMin = e && e.firstHash ? Math.round((e.firstHash - calib.start) / 60e3) : null;
+      const effEH = e && e.ehDays > 0 ? e.paidBtc / e.ehDays : null;
       calib = Object.assign({}, calib, { done: now, result: { hours, paidUsd, simUsd, diffPct: simUsd > 0 ? (paidUsd / simUsd - 1) * 100 : null, delivered, toHashMin,
-        effEH: e && e.ehDays > 0 ? e.paidBtc / e.ehDays : null } });
+        effEH, effVsPricePct: effEH ? (effEH / calib.priceEH - 1) * 100 : null, outbidPct: calib.ticks ? calib.outbid / calib.ticks * 100 : null } });
       const R = calib.result;
       log.push({ t: now, kind: 'acao', text: `Teste de calibração encerrado: ${R.hours.toFixed(1)} h, pago US$${R.paidUsd.toFixed(2)} contra US$${R.simUsd.toFixed(2)} da simulação; entrega média ${delivered !== null ? (delivered * 100).toFixed(0) + '%' : 'sem dado'}; hash chegou em ${toHashMin !== null ? toHashMin + ' min' : 'sem dado'}` });
       await notify(env, `Funding Desk: teste de calibração encerrado. ${R.hours.toFixed(1)} h; pago US$${R.paidUsd.toFixed(2)} (simulação: US$${R.simUsd.toFixed(2)}); entrega média ${delivered !== null ? (delivered * 100).toFixed(0) + '%' : 'sem dado'}; hash chegou em ${toHashMin !== null ? toHashMin + ' min' : 'sem dado'}. Detalhes em Mineração → Operar.`, fetchFn);
