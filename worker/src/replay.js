@@ -58,16 +58,22 @@ export function bestScenarios(list, { now, since, fixAt, cfg, btcUsd, blockUsd }
   const L = prep(list, fixAt);
   if (L.length < 3 || !(btcUsd > 0)) return null;
   const from = since && since > L[0].t ? since : L[0].t, cool = cfg.stopCooldownH === undefined ? 6 : cfg.stopCooldownH;
-  const stops = [0, cfg.sessionBudgetUsd > 0 ? cfg.sessionBudgetUsd : 300, 600].filter((x, i, a) => a.indexOf(x) === i);
+  const stops = [0, 150, cfg.sessionBudgetUsd > 0 ? cfg.sessionBudgetUsd : 300, 600].filter((x, i, a) => a.indexOf(x) === i);
   const o = { from, to: now, btcUsd, blockUsd, rentFeePct: cfg.rentFeePct || 3, poolFeePct: cfg.poolFeePct || 2, minEdgePct: cfg.minEdgePct || 3 };
   const all = [];
   for (const ph of BEST_PH) for (const filter of RP_FILTERS) for (const stopUsd of stops) {
     const r = runStrategy(L, { ph, filter, stopUsd, coolH: stopUsd ? cool : 0 }, o);
     if (r.costUsd > 0) all.push(r);
   }
-  const top = all.sort((a, b) => b.profitUsd - a.profitUsd || a.costUsd - b.costUsd)
-    .filter((r, i, a) => a.findIndex((z) => z.ph === r.ph && z.blocks === r.blocks && Math.abs(z.costUsd - r.costUsd) < 0.5) === i).slice(0, 5)
-    .map((r) => ({ ph: r.ph, filter: r.filter === 'min' ? o.minEdgePct : r.filter, stopUsd: r.stopUsd, coolH: r.coolH, hours: +r.hours.toFixed(2), spendUsd: +r.costUsd.toFixed(2),
-      wonUsd: +r.wonUsd.toFixed(2), evUsd: +r.evUsd.toFixed(2), blocks: r.blocks, draws: r.draws }));
-  return { at: now, from, blocks: L.filter((r) => r.t > from).length, tested: all.length, top };
+  const same = (z, r) => z.ph === r.ph && z.blocks === r.blocks && Math.abs(z.costUsd - r.costUsd) < 0.5;
+  const out = (r) => ({ ph: r.ph, filter: r.filter === 'min' ? o.minEdgePct : r.filter, stopUsd: r.stopUsd, coolH: r.coolH, hours: +r.hours.toFixed(2), spendUsd: +r.costUsd.toFixed(2),
+    wonUsd: +r.wonUsd.toFixed(2), evUsd: +r.evUsd.toFixed(2), blocks: r.blocks, draws: r.draws });
+  const uniq = (a) => a.filter((r, i) => a.findIndex((z) => same(z, r)) === i);
+  // 1) maior lucro em dólar
+  const best = uniq(all.slice().sort((a, b) => b.profitUsd - a.profitUsd || a.costUsd - b.costUsd)).slice(0, 5);
+  // 2) maior lucro por dólar gasto (menor custo com maior lucro), sem repetir os de cima
+  const eff = uniq(all.slice().sort((a, b) => b.profitUsd / b.costUsd - a.profitUsd / a.costUsd || a.costUsd - b.costUsd))
+    .filter((r) => !best.some((z) => same(z, r))).slice(0, 5);
+  const top = best.map(out), effTop = eff.map(out);
+  return { at: now, from, blocks: L.filter((r) => r.t > from).length, tested: all.length, top, eff: effTop };
 }

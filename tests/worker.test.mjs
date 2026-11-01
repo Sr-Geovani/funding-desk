@@ -1187,6 +1187,9 @@ test('replay: mesmas regras refeitas com os blocos registrados (mesmo sorteio, s
   const B = bestScenarios(list, { now, since: list[100].t, fixAt: null, cfg, btcUsd: 110000, blockUsd: 900 });
   assert.ok(B.top.length >= 1 && B.top.length <= 5 && B.tested > 20 && B.from === list[100].t);
   for (let i = 1; i < B.top.length; i++) assert.ok(B.top[i - 1].wonUsd - B.top[i - 1].spendUsd >= B.top[i].wonUsd - B.top[i].spendUsd);
+  const roi = (x) => (x.wonUsd - x.spendUsd) / x.spendUsd;
+  for (let i = 1; i < B.eff.length; i++) assert.ok(roi(B.eff[i - 1]) >= roi(B.eff[i]));
+  assert.ok(B.eff.every((e) => !B.top.some((t) => t.ph === e.ph && t.blocks === e.blocks && Math.abs(t.spendUsd - e.spendUsd) < 0.5)));
   // antes da correção do preço (31/10) o registro gravou lance barato demais: o custo é corrigido em +5,8%
   const old = list.map((r) => Object.assign({}, r, { nhBid: 0.402 }));
   const B2 = bestScenarios(old, { now, since: null, fixAt: now, cfg, btcUsd: 110000, blockUsd: 900 }), x = B2.top[0];
