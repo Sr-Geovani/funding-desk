@@ -267,6 +267,9 @@ export async function tick(env, opts = {}) {
     const o = orders.find((x) => x.id === calibId), over = now >= calib.until;
     if (over && o && o.alive) { const r = await settle(nh.cancelOrder(calibId)); if (!r.ok) errors.push('calibração: ' + r.e); }
     if (over || (o && !o.alive) || (!o && now - calib.start > 15 * 60e3)) {
+      // valor final pago (a NiceHash lança o pagamento com atraso; depois de encerrar, a ordem some da lista)
+      const fin = await settle(nh.getOrder(calibId));
+      if (fin.ok && execLog && execLog.orders && execLog.orders[calibId]) { const x = execLog.orders[calibId]; x.paidBtc = Math.max(x.paidBtc, (fin.v.paidBtc || 0) - (x.paid0 || 0)); }
       const e = execLog && execLog.orders && execLog.orders[calibId], btc = mkt.ok ? mkt.btcUsd : (state.market && state.market.btcUsd) || 0;
       const hours = Math.max(0, ((e && e.lastTs) || now) - calib.start) / 3600e3;
       const paidUsd = e ? e.paidBtc * btc : 0, simUsd = calib.ph / 1000 * calib.priceEH * btc * hours / 24; // sem a taxa de 3%: compara com o pago na ordem

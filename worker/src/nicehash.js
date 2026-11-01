@@ -122,6 +122,7 @@ export function createClient({ base, key, secret, org, algorithm = DEFAULT_ALGO,
       return call('POST', '/main/api/v2/hashpower/order/' + encodeURIComponent(id) + '/updatePriceAndLimit', '', body);
     },
     cancelOrder: (id) => call('DELETE', '/main/api/v2/hashpower/order/' + encodeURIComponent(id)),
+    getOrder: async (id) => { const u = await units(); return normOrder(await call('GET', '/main/api/v2/hashpower/order/' + encodeURIComponent(id)), u); },
     refillOrder: (id, amountBtc) => call('POST', '/main/api/v2/hashpower/order/' + encodeURIComponent(id) + '/refill', '', { amount: fmt8(amountBtc) })
   };
 }

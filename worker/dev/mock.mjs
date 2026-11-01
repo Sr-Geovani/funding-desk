@@ -99,6 +99,7 @@ export function createMock() {
           o.updates.push(b); return send(200, ord(o));
         }
         if (m[2] === '/refill') { o.amount = String(+o.amount + +JSON.parse(body).amount); return send(200, ord(o)); }
+        if (req.method === 'GET' && !m[2]) return send(200, ord(o));
         if (req.method === 'DELETE') { o.alive = false; s.balance += Math.max(0, +o.amount - o.paid); return send(200, ord(o)); }
       }
       return send(404, { error: 'mock: rota ' + req.method + ' ' + path });

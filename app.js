@@ -1321,6 +1321,7 @@ function renderExec(){
   }else if(!C.done){
     var left=Math.max(0,C.until-Date.now());
     h+='<div class="box" style="margin:0 0 8px"><b>Em andamento</b>'+nf(C.ph,0)+' PH/s a '+C.priceEH.toFixed(4).replace('.',',')+' · começou '+dt2(C.start)+' · encerra em '+FDI.dur(left)+'.</div>'+
+      (function(){var o=X&&X.orders&&X.orders.filter(function(r){return r.id===C.id})[0];return o?'<div class="kv" style="margin:0 0 8px"><div><small>Hash chegou em</small><span>'+(o.toHashMin!==null?nf(o.toHashMin,0)+' min':'aguardando')+'</span></div><div><small>Entrega até agora</small><span>'+(o.delivered!==null?pctp(o.delivered*100,0):'—')+'</span></div></div><p class="note" style="margin:0 0 8px">O valor pago é lançado pela NiceHash com alguns minutos de atraso: o custo real só é comparado com a simulação no fim, com o valor final da ordem.</p>':''})()+
       '<button id="cal_stop">Encerrar agora</button><p class="note" id="cal_msg" style="margin:6px 0 0">O resultado aparece aqui e no Telegram quando encerrar.</p>';
   }else{
     var R=C.result||{},ok1=R.delivered!==null&&R.delivered>=0.9,ok2=R.diffPct!==null&&Math.abs(R.diffPct)<=10,ok3=R.toHashMin!==null&&R.toHashMin<=10;
