@@ -549,7 +549,7 @@ test('funding simulado: entra após 2 leituras, recebe nos horários de cada exc
   // diferença vira negativa duas vezes: sai
   r = fundPaperStep(r.pf, { rows: rows(-0.01, T0 + 540 * M, 0.00125, T0 + 130 * M), best: [], now: T0 + 64 * M, fees, rules: TAKER });
   assert.equal(r.pf.open.length, 1, 'uma leitura negativa ainda não sai');
-  r = fundPaperStep(r.pf, { rows: rows(-0.01, T0 + 540 * M, 0.00125, T0 + 130 * M), best: [], now: T0 + 67 * M, fees, rules: TAKER });
+  r = fundPaperStep(r.pf, { rows: rows(-0.01, T0 + 540 * M, 0.00125, T0 + 130 * M), best: [], now: T0 + 125 * M, fees, rules: TAKER }); // a virada precisa durar 1 h
   assert.equal(r.pf.open.length, 0); assert.equal(r.pf.closed.length, 1);
   const c = r.pf.closed[0];
   close(c.netUsd, 1 - 0.0125 - 2 * 1.15, 1e-9); assert.match(c.reason, /virou contra/); assert.match(r.events[0], /saiu de ENA .* −US\$1\.31/);
@@ -568,7 +568,7 @@ test('funding simulado: no máximo 3 abertas, uma por moeda; moeda que some fech
   assert.deepEqual(r.pf.open.map((o) => o.coin), ['A', 'B', 'C']);
   const rows2 = Object.assign({}, rows); delete rows2.B;
   r = fundPaperStep(r.pf, { rows: rows2, best: [], now: T0 + 36e4, fees });
-  r = fundPaperStep(r.pf, { rows: rows2, best: [], now: T0 + 54e4, fees });
+  r = fundPaperStep(r.pf, { rows: rows2, best: [], now: T0 + 36e4 + 36e5, fees }); // some por 1 h
   assert.equal(r.pf.closed[0].coin, 'B'); assert.match(r.pf.closed[0].reason, /saiu dos dados/);
 });
 
@@ -916,7 +916,7 @@ test('IA: cria previsões dos sinais, confere no prazo e ganha XP', () => {
   assert.ok(r.ai.done.some((d) => d.type === 'mine_buy' && d.hit));
   const L = levelOf(r.ai); assert.equal(L.level.name, 'Aprendiz'); assert.ok(L.progress > 0 && L.progress < 1);
   const a = analysis(Object.assign({}, base, { green: true, edge: 4 }), r.ai);
-  assert.match(a.lines[0], /janela aberta/); assert.ok(a.recs.some((x) => x.area === 'outras'));
+  assert.match(a.lines[0], /Mineração BCH: comprando/); assert.ok(a.recs.some((x) => x.area === 'outras'));
   // confiança aprende com o histórico do tipo
   const ai = { stats: { mine_avoid: { n: 30, hits: 27 } } };
   assert.ok(reliability(ai, 'mine_avoid').trusted && reliability(ai, 'mine_avoid').conf > 0.75);
@@ -1220,8 +1220,26 @@ test('margem do mercado: média, tempo acima do mínimo e posição de agora; IA
   assert.ok(C.h24.avg < -2 && C.h24.pctMin === 0);
   const sn = { now, edge: -1, green: false, minEdge: 3, darr: 1, D: 5e11, mom: null, ret: null, win: null, mm: M, fund: [], rows: {}, stable24: {}, algos: [] };
   const a = analysis(sn, brainStep(null, sn).ai);
-  assert.ok(a.lines.some((l) => /Mercado \(24 h\): margem média/.test(l) && /melhor que/.test(l)));
+  assert.ok(a.lines.some((l) => /Mercado \(24 h\): a margem média foi negativa/.test(l) && /melhor que/.test(l)));
+  assert.ok(a.lines.every((l) => !/[≥≤<>]/.test(l)), 'texto sem símbolos');
+  assert.match(a.lines[0], /pausado\. Motivo: a margem agora é negativa/);
   assert.equal(marginStats(H.map((x) => [x[0], 1]), { now, minEdge: 3, edgeNow: 1 }).h24.rankNow, 50, 'empate fica no meio');
-  assert.ok(a.lines.some((l) => /Onde a chance é maior: a média do mercado é negativa/.test(l) && /10% melhores momentos tiveram margem ≥/.test(l)));
   assert.ok(M.h24.top10 >= M.h24.median && M.bestHours.length >= 1);
+});
+
+test('IA aprende a faixa de margem com mais chance (2 h seguintes) e ajusta com acertos e erros', async () => {
+  const { bandThreshold } = await import('../worker/src/brain.js');
+  const now = Date.UTC(2026, 10, 1, 18), hist = [];
+  // blocos de 3 h: margem +3% e depois −3%, por 2 dias
+  for (let i = 0; i < 192; i++) hist.push([now - (192 - i) * 15 * 60e3, Math.floor(i / 12) % 2 ? -3 : 3, 0.42]);
+  const sn = { now, edge: -3, green: false, minEdge: 1, darr: 1, D: 5e11, mom: null, ret: null, win: null, hist, fixAt: null, fund: [], rows: {}, stable24: {}, algos: [],
+    limits: { stopUsd: 300, coolH: 6, dailyUsd: 500 } };
+  const ai = brainStep(null, sn).ai, T = bandThreshold(ai.band);
+  assert.equal(T.from, 3); assert.ok(T.hit >= 0.6 && T.n >= 8);
+  const a = analysis(sn, ai);
+  assert.ok(a.lines.some((l) => /O que a IA aprendeu/.test(l) && /Aumente a margem mínima para 3%/.test(l) && /Agora está fora: faltam 6,0 pontos/.test(l)), a.lines.join('\n'));
+  assert.ok(a.lines.some((l) => /stop-loss de US\$300 por tentativa/.test(l)));
+  assert.ok(ai.band.calls.n > 0, 'placar próprio da faixa');
+  // incremental: rodar de novo no mesmo instante não conta duas vezes
+  const again = brainStep(ai, sn).ai; assert.equal(again.band.calls.n, ai.band.calls.n);
 });

@@ -103,10 +103,53 @@ function track(o, snap, now) {
 }
 
 // snap: { now, edge, green, minEdge, darr, D, mom, ret, win, fund:[{key,coin,netUsd}], rows, fees, stable24, algos:[{k,label,edge,level}], scoreDone:[...] }
+// Texto claro, sem símbolos: a IA fala "maior que", "menor que", "positiva", "negativa".
+export function plain(t) {
+  return String(t).replace(/\s*≥\s*/g, ' maior ou igual a ').replace(/\s*≤\s*/g, ' menor ou igual a ').replace(/\s+>\s+/g, ' maior que ').replace(/\s+<\s+/g, ' menor que ')
+    .replace(/±/g, 'mais ou menos ').replace(/\s×\s/g, ' e ').replace(/ {2,}/g, ' ').replace(/\( /g, '(').trim();
+}
+const sgn = (x, d = 1) => (x > 0 ? 'positiva (+' : x < 0 ? 'negativa (' : 'zero (') + f(x, d) + '%)';
+
+// Faixa aprendida (mineração): para cada leitura de margem (a cada 15 min), a IA confere se a média das 2 horas
+// seguintes ficou positiva. Agrupa por faixa de 1 ponto e descobre a partir de qual margem a chance de resultado
+// positivo passa de 60%. Esquece devagar (peso cai à metade em ~1 semana): a faixa acompanha o mercado. Também
+// guarda o próprio placar: nas vezes em que a faixa dizia "boa", quantas acertou.
+export const BAND = { aheadH: 2, minN: 8, minHit: 0.6, decay: 0.999, lo: -8, hi: 10 };
+export function bandThreshold(band) {
+  if (!band || !band.bins) return null;
+  let n = 0, h = 0, sum = 0, best = null;
+  for (let b = BAND.hi; b >= BAND.lo; b--) {
+    const x = band.bins[b]; if (!x) continue; n += x[0]; h += x[1]; sum += x[2];
+    if (n >= BAND.minN && h / n >= BAND.minHit && sum / n > 0) best = { from: b, n, hit: h / n, avgNext: sum / n };
+  }
+  return best;
+}
+function bandStep(band, hist, fixAt, now) {
+  const B = band && band.bins ? band : { bins: {}, lastT: 0, calls: { n: 0, hits: 0 } };
+  const F = 1.058, fx = (x) => (fixAt && x[0] < fixAt ? ((1 + x[1] / 100) / F - 1) * 100 : x[1]);
+  const pts = (hist || []).filter((x) => x && isFinite(x[1]));
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i];
+    if (p[0] <= B.lastT || p[0] > now - BAND.aheadH * H) continue;
+    const nx = pts.filter((q) => q[0] > p[0] && q[0] <= p[0] + BAND.aheadH * H);
+    B.lastT = p[0];
+    if (nx.length < 4) continue;
+    const e = fx(p), avg = nx.reduce((a, q) => a + fx(q), 0) / nx.length, hit = avg >= 0;
+    const T = bandThreshold(B); // o que a faixa dizia ANTES de ver o resultado (placar honesto)
+    if (T && e >= T.from) { B.calls.n++; if (hit) B.calls.hits++; }
+    for (const k of Object.keys(B.bins)) B.bins[k] = B.bins[k].map((v) => v * BAND.decay);
+    const b = Math.max(BAND.lo, Math.min(BAND.hi, Math.floor(e))), x = B.bins[b] || (B.bins[b] = [0, 0, 0]);
+    x[0] += 1; x[1] += hit ? 1 : 0; x[2] += avg;
+  }
+  B.at = now;
+  return B;
+}
+
 export function brainStep(prev, snap) {
   const ai = migrate(prev && prev.since ? JSON.parse(JSON.stringify(prev)) : { since: snap.now, xp: 0, open: [], done: [], stats: {}, last: {}, v: 2 });
   ai.unscored = ai.unscored || {}; ai.ctrl = ai.ctrl || { open: [], stats: {}, last: {} };
   const events = [], now = snap.now;
+  if (snap.hist) ai.band = bandStep(ai.band, snap.hist, snap.fixAt, now);
   // 1) conferir previsões abertas
   const still = [];
   for (const o of ai.open) {
@@ -160,6 +203,7 @@ export function brainStep(prev, snap) {
     if (ai.open.some((o) => o.type === type && o.key === key)) return;
     const rel = reliability(ai, type);
     ai.last[k] = now;
+    text = plain(text); if (extra && extra.why) extra.why = plain(extra.why);
     ai.open.push(Object.assign({ type, key, text, t: now, due: now + (TYPES[type].h || 24) * H, conf: +rel.conf.toFixed(2), trusted: rel.trusted }, extra));
     events.push(`IA prevê: ${text}`);
   };
@@ -177,7 +221,7 @@ export function brainStep(prev, snap) {
   for (const fo of (snap.fund || []).slice(0, 3)) {
     const [c, sv, lv] = fo.key.split('|'), cr = (snap.rows || {})[c] || {};
     const pos = cr[sv] && cr[lv] ? Object.assign({ coin: c, s: sv, l: lv, notional: FUND_RULES.capital / 2 * FUND_RULES.lev, fundingUsd: 0, payments: 0 }, { legs: newLegs(cr[sv], cr[lv], sv, lv) }) : null;
-    add('fund_go', fo.key, `${fo.coin} (${fo.key.split('|').slice(1).join(' × ')}) paga as taxas em 3 dias`, { pos, why: 'diferença acima do empate (ordem limite) nas últimas 24 h e a meia-vida indica que paga as taxas; regra validada em 90 dias (39% de acerto).' });
+    add('fund_go', fo.key, `${fo.coin} (${fo.key.split('|').slice(1).join(' × ')}) paga as taxas em 3 dias`, { pos, why: 'diferença acima do empate (ordem limite) nas últimas 24 h e a meia-vida indica que paga as taxas. Reteste de 90 dias (03/08 a 01/11): 27% de acerto e média negativa (−US$0,34 por operação); a IA confere se agora é diferente.' });
   }
   const spikes = [];
   for (const [c, r] of Object.entries(snap.rows || {})) {
@@ -199,22 +243,25 @@ export function analysis(snap, ai) {
   const L = levelOf(ai), out = [], recs = [];
   const e = snap.edge, d = snap.darr;
   if (isFinite(e)) {
+    const W = snap.mm && (snap.mm.d7 || snap.mm.h24), lab = W ? (W.label || '7 dias') : '';
+    const T = bandThreshold(ai && ai.band), C = ai && ai.band && ai.band.calls;
+    const lim = snap.limits || {};
+    // motivo claro (pausado ou comprando), com a média do mercado
     out.push(snap.green
-      ? `Mineração BCH: janela aberta. Margem de ${f(e, 1)}% no lance (DARR ${d ? f(d, 3) : '—'}). O robô compraria agora.`
-      : `Mineração BCH: o robô está pausado. Margem de ${f(e, 1)}% no lance, abaixo do seu mínimo de ${snap.minEdge}%${d ? ` (DARR ${f(d, 3)})` : ''}.`);
+      ? `Mineração BCH: comprando. A margem agora é ${sgn(e)}, maior que o seu mínimo de ${snap.minEdge}%${d ? `; DARR ${f(d, 3)}` : ''}.`
+      : `Mineração BCH: pausado. Motivo: a margem agora é ${sgn(e)}, menor que o seu mínimo de ${snap.minEdge}%${d ? `; DARR ${f(d, 3)}` : ''}.`);
+    if (W) out.push(`Mercado (${lab}): a margem média foi ${sgn(W.avg)}. Ficou positiva em ${f(W.pctPos, 0)}% do tempo e maior que ${snap.minEdge}% em ${f(W.pctMin, 1)}% do tempo (cerca de ${f(W.hoursMin, 1)} h). A margem de agora é melhor que ${f(W.rankNow || 0, 0)}% das leituras do período.`);
+    // o que a IA aprendeu e onde operar (a regra é sua: a IA só sugere)
+    if (T) {
+      const hrs = (snap.mm && snap.mm.bestHours || []).map((x) => String(x.h).padStart(2, '0') + 'h').join(', ');
+      const sug = T.from > snap.minEdge ? `Aumente a margem mínima para ${T.from}%: abaixo disso o mercado devolveu prejuízo na maior parte das vezes.`
+        : T.from < snap.minEdge ? `Se quiser operar mais vezes, ajuste a margem mínima para ${T.from}%: a partir dela a média das 2 horas seguintes foi positiva. Com ${snap.minEdge}% você opera menos, com folga maior.`
+        : `Mantenha a margem mínima em ${snap.minEdge}%: é exatamente onde a chance passa a ser maior.`;
+      out.push(`O que a IA aprendeu (${f(T.n, 0)} leituras): quando a margem estava a partir de ${T.from}%, as 2 horas seguintes tiveram média positiva em ${f(T.hit * 100, 0)}% das vezes. ${sug}${hrs ? ` Horários com mais chance: ${hrs} (Brasília).` : ''} ${e >= T.from ? 'Agora está dentro dessa faixa.' : `Agora está fora: faltam ${f(T.from - e, 1)} pontos.`}`);
+    } else if (ai && ai.band) out.push(`A IA ainda não achou uma faixa de margem com resultado positivo nas 2 horas seguintes (precisa de pelo menos ${BAND.minN} casos com mais de 60% de acerto). Enquanto isso, a sugestão é manter o robô pausado e acompanhar.`);
+    if (C && C.n >= 5) out.push(`Placar da faixa aprendida: nas ${C.n} vezes em que ela disse "faixa boa", acertou ${C.hits} (${f(C.hits / C.n * 100, 0)}%). Quando erra, a faixa sobe sozinha; quando acerta, ela se mantém.`);
+    if (lim.stopUsd || lim.dailyUsd) out.push(`Limites que a IA respeita (definidos por você): stop-loss de US$${f(lim.stopUsd || 0, 0)} por tentativa, espera de ${f(lim.coolH || 0, 0)} h depois dele e limite diário de US$${f(lim.dailyUsd || 0, 0)}.`);
     if (snap.green) recs.push({ area: 'mineracao', text: 'Janela aberta: com o robô em Ativo, ele compraria agora e pararia no bloco.', type: 'mine_buy' });
-    // comparação com o mercado (média de 7 dias), não só com o cenário ideal
-    const W = snap.mm && (snap.mm.d7 || snap.mm.h24);
-    if (W) {
-      const lab = W.label || (snap.mm.d7 ? '7 dias' : '24 h');
-      out.push(`Mercado (${lab}): margem média ${f(W.avg, 1)}% (mediana ${f(W.median, 1)}%, de ${f(W.min, 1)}% a ${f(W.max, 1)}%). Margem ≥ 0 em ${f(W.pctPos, 0)}% do tempo; ≥ seu mínimo de ${snap.minEdge}% em ${f(W.pctMin, 1)}% (~${f(W.hoursMin, 1)} h). ` +
-        (W.rankNow !== null ? `A margem de agora (${f(e, 1)}%) está melhor que ${f(W.rankNow, 0)}% das leituras: ${W.rankNow >= 80 ? 'momento bom para o padrão do mercado' : W.rankNow <= 20 ? 'momento ruim para o padrão do mercado' : 'momento comum'}.` : ''));
-      // onde a chance é maior (não "não entre"): a faixa dos melhores 10% do tempo, os horários e o DARR desses momentos
-      const M = snap.mm, hrs = (M.bestHours || []).map((x) => `${String(x.h).padStart(2, '0')}h (${f(x.avg, 1)}%)`).join(', ');
-      out.push(`Onde a chance é maior: a média do mercado é ${W.avg >= 0 ? 'positiva' : 'negativa'} (${f(W.avg, 1)}%); os 10% melhores momentos tiveram margem ≥ ${f(W.top10, 1)}% (e os 25% melhores ≥ ${f(W.top25, 1)}%)` +
-        (hrs ? `, mais frequentes às ${hrs} (Brasília)` : '') + (M.darrTop && M.darrAll ? `, com DARR médio ${f(M.darrTop, 3)} contra ${f(M.darrAll, 3)} no geral` : '') +
-        `. Seu mínimo de ${snap.minEdge}% aconteceu em ${f(W.pctMin, 1)}% do tempo (~${f(W.hoursMin, 1)} h). Agora: ${f(e, 1)}%, ${W.rankNow !== null && W.rankNow >= 90 ? 'dentro da faixa dos melhores momentos' : W.rankNow !== null && W.rankNow >= 75 ? 'perto da faixa boa' : 'fora da faixa boa'}.`);
-    }
   }
   if (snap.mom && snap.mom.vsEmaPct >= 2) out.push(`BCH subiu ${f(snap.mom.vsEmaPct, 1)}% acima da média de 2 dias contra o BTC: a dificuldade ainda não reagiu, o que costuma melhorar a margem nas próximas horas.`);
   if (snap.ret && isFinite(snap.ret.darrAfter)) out.push(`Reajuste do BTC em ${snap.ret.remainingBlocks} blocos (${pctTxt(snap.ret.changePct)}): o DARR deve ir para ~${f(snap.ret.darrAfter, 3)}.`);
@@ -224,7 +271,8 @@ export function analysis(snap, ai) {
   for (const fo of (snap.fund || []).slice(0, 2)) recs.push({ area: 'funding', text: `${fo.coin}: short ${fo.key.split('|')[1]}, long ${fo.key.split('|')[2]} com ordem limite (~US$${f((fo.netUsd || 0), 2)} projetado em 3 dias).`, type: 'fund_go' });
   const ag = (snap.algos || []).filter((x) => x.level === 'go' && isFinite(x.edge) && x.edge <= 100);
   if (ag.length) { out.push(`Outras moedas: ${ag.map((a) => a.label + ' ' + f(a.edge, 1) + '%').join(', ')} compensam em pool PPS (ordem manual).`); for (const a of ag.slice(0, 2)) recs.push({ area: 'outras', text: `${a.label}: ordem manual na NiceHash para pool PPS enquanto a margem ficar positiva.`, type: 'algo_go' }); }
-  for (const r of recs) { const rel = reliability(ai, r.type); r.conf = rel.conf; r.trusted = rel.trusted; r.n = rel.n; r.hard = !!TYPES[r.type].hard; r.rate = rel.n ? (ai.stats[r.type].hits / rel.n) : null; }
+  for (let i = 0; i < out.length; i++) out[i] = plain(out[i]);
+  for (const r of recs) { r.text = plain(r.text); const rel = reliability(ai, r.type); r.conf = rel.conf; r.trusted = rel.trusted; r.n = rel.n; r.hard = !!TYPES[r.type].hard; r.rate = rel.n ? (ai.stats[r.type].hits / rel.n) : null; }
   return { level: L, lines: out, recs };
 }
 

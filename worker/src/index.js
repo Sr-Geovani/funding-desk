@@ -21,7 +21,7 @@ import { FUND_MODEL } from './fundmodel.js';
 import { updateHistory, pickCoins, scorePairs, stablePairs, pairStatsOf } from './fundai.js';
 import { blockRecord, blockSummary, poolOf, luckBoard } from './blocks.js';
 import { darrOf, retargetOf, momentumOf, windowMeter, weekAdd, marginStats } from './signals.js';
-import { brainStep, analysis, levelOf, TYPES, actionPlan } from './brain.js';
+import { brainStep, analysis, levelOf, TYPES, actionPlan, bandThreshold, plain } from './brain.js';
 import FDI from '../../insights.js';
 import { withCreds, reloadCreds, saveCreds, credStatus, parseNiceHash, TG_TOKEN_RE, chatFromUpdates } from './creds.js';
 
@@ -475,7 +475,7 @@ export async function tick(env, opts = {}) {
   // Margem média do mercado (24 h e 7 dias): o "normal" contra o qual a IA, a cartilha e o painel comparam o momento.
   const mktMargin = marginStats(state.edgeHist, { now, fixAt: paperArchive && paperArchive.at, minEdge: cfg.minEdgePct, edgeNow: mkt.ok ? mkt.edgeAtBidPct : null });
   // Copiloto IA: analisa tudo e registra previsões conferíveis (XP e maturidade).
-  const snap = { mm: mktMargin, now, edge: mkt.ok ? mkt.edgeAtBidPct : NaN, green: !!(mkt.ok && mkt.green), minEdge: cfg.minEdgePct, darr: darr ? darr.v : NaN,
+  const snap = { mm: mktMargin, hist: state.edgeHist || [], fixAt: paperArchive && paperArchive.at, limits: { stopUsd: cfg.sessionBudgetUsd, coolH: cfg.stopCooldownH, dailyUsd: cfg.dailyBudgetUsd }, now, edge: mkt.ok ? mkt.edgeAtBidPct : NaN, green: !!(mkt.ok && mkt.green), minEdge: cfg.minEdgePct, darr: darr ? darr.v : NaN,
     D: info.ok ? info.v.difficulty : null, mom: msig.mom, ret: retargetOf(msig.adj, darr ? darr.v : NaN), win: windowMeter(recentBlocks, now),
     fund: ((funding && funding.best) || []).map((b) => ({ key: b.key, coin: b.coin, netUsd: b.netUsd })), rows: funding ? funding.rows : null, fees: FD.DEFAULT_FEES, stable24,
     algos: algoPaper ? Object.entries(algoPaper.algos).map(([k, a]) => ({ k, label: a.label, edge: a.edgeNow, level: a.level })) : [],
@@ -496,7 +496,7 @@ export async function tick(env, opts = {}) {
   // Cartilha de entrada: a sequência de fatores (margem real, sem taxa, DARR, preço × dificuldade, hash, reajuste do BTC,
   // horário, tamanho, tentativa) avaliada agora, com veredito. docs/cartilha-mineracao.md.
   const entryCheck = entryChecklist({ mkt, darr: darr ? darr.v : null, mom: msig.mom, ret: snap.ret, win: snap.win, nhWeek, hashMkts,
-    power: plan && plan.mining ? plan.mining.power : null, cfg, now, mm: mktMargin });
+    power: plan && plan.mining ? plan.mining.power : null, cfg, now, mm: mktMargin, band: bandThreshold(br.ai.band), bins: br.ai.band && br.ai.band.bins });
 
   const next = Object.assign({}, dec.state, alertState, {
     lastTick: now, verified: Object.fromEntries(Object.entries(verified).filter(([, x]) => now - x.at <= 6 * 3600e3)), ai: br.ai, aiAnalysis, plan, acct, algoMap, mempool, stable24, pairStats, msig, darr, recentBlocks, nhWeek, paper, paperBurst, paperPlan, paperAlways, hashMkts, fronts, frontsPaper, ltStreak, fundPaperLT, market2, aiPanorama, entryCheck, mktMargin, bestScen, paperArchive, paperPriceV: 2, blockBuf, blockFlush, lastBlockT, real, fundPaper, alertScore, algoPaper, algoTs, aiScores, fundPaperAI, fhistHour, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig,

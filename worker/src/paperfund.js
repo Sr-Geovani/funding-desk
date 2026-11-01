@@ -7,7 +7,7 @@
 //  - Saída: diferença de funding ≤ 0 em 2 leituras seguidas, ou a moeda sumir dos dados por 2 leituras.
 //  - Custos: taxa maker (ordem limite) nas 4 execuções + 0,03% de deslize (metade na entrada, metade na saída).
 //    O resumo mostra também o resultado se uma perna fosse a mercado (taker) na entrada e na saída.
-export const FUND_RULES = { confirm: 2, exitConfirm: 2, maxOpen: 3, capital: 1000, lev: 2, slipPct: 0.03, keepClosed: 200, exec: 'maker' };
+export const FUND_RULES = { confirm: 2, exitConfirm: 2, exitMinutes: 60, maxOpen: 3, capital: 1000, lev: 2, slipPct: 0.03, keepClosed: 200, exec: 'maker' };
 
 export function legsFeePct(fees, s, l, exec = 'maker') {
   const t = (v) => (fees[v] && isFinite(fees[v][exec]) ? fees[v][exec] : (exec === 'maker' ? 0.02 : 0.05));
@@ -45,13 +45,19 @@ export function fundPaperStep(pf, { rows, best, now, fees, rules = FUND_RULES, l
     o.spreadNow = spread;
     if (spread === null) o.missing = (o.missing || 0) + 1; else o.missing = 0;
     o.neg = spread !== null && spread <= 0 ? (o.neg || 0) + 1 : 0;
-    const why = o.neg >= rules.exitConfirm ? 'funding virou contra (diferença ≤ 0 em 2 leituras)'
-      : o.missing >= rules.exitConfirm ? 'moeda saiu dos dados' : null;
+    // Saída só quando a virada dura (01/11): o servidor lê a cada 3 min, e 2 leituras seguidas eram 6 min de oscilação,
+    // pagando as taxas de saída à toa (4 operações reais em 31/10–01/11 duraram 4,7 h em média). O teste de 90 dias usa
+    // leituras de hora em hora: a diferença precisa ficar negativa ou zero por pelo menos 1 h.
+    o.negSince = o.neg ? (o.negSince || now) : null;
+    o.missSince = o.missing ? (o.missSince || now) : null;
+    const lasts = (t) => t && now - t >= rules.exitMinutes * 60e3;
+    const why = o.neg >= rules.exitConfirm && lasts(o.negSince) ? 'funding virou contra (diferença negativa ou zero por 1 h)'
+      : o.missing >= rules.exitConfirm && lasts(o.missSince) ? 'moeda saiu dos dados' : null;
     if (!why) { still.push(o); continue; }
     const exitFee = notional * (legsFeePct(fees, o.s, o.l, rules.exec) + rules.slipPct / 2) / 100;
     const c = Object.assign({}, o, { closedAt: now, reason: why, feesUsd: o.feesUsd + exitFee });
     c.netUsd = c.fundingUsd - c.feesUsd; c.retPct = c.netUsd / rules.capital * 100;
-    delete c.legs; delete c.neg; delete c.missing;
+    delete c.legs; delete c.neg; delete c.missing; delete c.negSince; delete c.missSince;
     p.closed.push(c);
     events.push(`${L}: saiu de ${o.coin} (short ${o.s}, long ${o.l}) após ${o.payments} pagamentos: ${c.netUsd >= 0 ? '+' : '−'}US$${Math.abs(c.netUsd).toFixed(2)} (${why})`);
   }

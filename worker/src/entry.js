@@ -2,6 +2,7 @@
 // cada ciclo. A sorte (qual bloco, quando) não tem padrão; o que tem padrão é a MARGEM (preço do aluguel × quanto o bloco
 // paga) e para onde ela vai nas próximas horas. Explicação completa em docs/cartilha-mineracao.md.
 import { DARR_REF } from './signals.js';
+import { plain } from './brain.js';
 const n = (x, d = 1) => Number(x).toFixed(d).replace('.', ',');
 const ok = (x) => x !== null && x !== undefined && isFinite(x);
 const pctTxt = (x, d = 1) => (x >= 0 ? '+' : '') + n(x, d) + '%';
@@ -16,7 +17,7 @@ function hourOfWeek(nhWeek, now) {
 }
 const DAYS = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
 
-export function entryChecklist({ mkt, darr, mom, ret, win, nhWeek, hashMkts, power, cfg, now, mm }) {
+export function entryChecklist({ mkt, darr, mom, ret, win, nhWeek, hashMkts, power, cfg, now, mm, band, bins }) {
   const steps = [], add = (id, title, status, value, why) => steps.push({ n: steps.length + 1, id, title, status, value, why });
   const minEdge = cfg.minEdgePct || 3, fee = cfg.rentFeePct || 3;
   // 1) margem no preço que de fato recebe hash (NiceHash, com a taxa de 3%). O menor preço recebendo pode ter hash para
@@ -80,12 +81,15 @@ export function entryChecklist({ mkt, darr, mom, ret, win, nhWeek, hashMkts, pow
   if (ok(nh) && nh >= minEdge && trendBad === 0) { verdict = 'entrar'; title = 'Entrada favorável'; text = 'Margem real acima do mínimo e nenhum sinal de que a janela vai fechar já. Tamanho pelo passo 8; stop-loss pelo passo 9.'; }
   else if (ok(nh) && nh >= minEdge) { verdict = 'cautela'; title = 'Margem boa, mas a janela pode fechar'; text = trendBad + ' sinal(is) de piora (passos 4–6): entrar menor e acompanhar.'; }
   else if ((ok(nh) && nh >= 0) || (ok(br) && br >= minEdge)) { verdict = 'esperar'; title = 'Quase'; text = ok(br) && br >= minEdge ? 'Pela Braiins (sem taxa) a margem já passaria do mínimo; na NiceHash ainda não.' : 'Margem positiva mas abaixo do mínimo: esperar subir.'; }
-  else { const Wm = mm && (mm.d7 || mm.h24); verdict = 'nao'; title = 'Fora da faixa boa'; text = 'Margem real negativa agora: em média, cada dólar gasto volta menos de um dólar.' + (Wm && isFinite(Wm.top10) ? ' Os melhores momentos do período (10% do tempo) tiveram margem ≥ ' + n(Wm.top10, 1) + '%.' : '') + (trendBad ? ' ' + trendBad + ' sinal(is) indicam piora.' : ''); }
+  else { const Wm = mm && (mm.d7 || mm.h24); verdict = 'nao'; title = 'Fora da faixa boa'; text = 'Margem real negativa agora: em média, cada dólar gasto volta menos de um dólar.' + (band ? ' A IA aprendeu que a chance passa a ser maior a partir de ' + band.from + '% de margem (' + n(band.hit * 100, 0) + '% de acerto nas 2 horas seguintes).' : Wm && isFinite(Wm.top10) ? ' Os melhores momentos do período (10% do tempo) tiveram margem maior que ' + n(Wm.top10, 1) + '%.' : '') + (trendBad ? ' ' + trendBad + ' sinal(is) indicam piora.' : ''); }
   const lottery = !ok(nh) ? '' : nh < 0
     ? 'Loteria consciente (aceitando perder o orçamento): hoje cada tentativa custa, em média, ' + n(-nh, 1) + '% do que se gasta; os melhores momentos para isso são os de margem menos negativa.'
     : 'Margem positiva: repetindo tentativas, o resultado tende à margem (' + pctTxt(nh) + ' do gasto); a sorte muda o caminho, não a média.';
   // o mercado no período (margem média), para comparar o momento com o normal e não só com o mínimo
+  for (const st of steps) { st.value = plain(st.value); st.why = plain(st.why); }
   const W = mm && (mm.d7 || mm.h24), market = W ? { label: W.label || (mm.d7 ? '7 dias' : '24 h'), avg: W.avg, median: W.median, pctPos: W.pctPos, pctMin: W.pctMin, hoursMin: W.hoursMin, rankNow: ok(nh) && W.rankNow !== null ? W.rankNow : null, top10: W.top10, top25: W.top25, bestHours: mm.bestHours || null,
     h24: mm.h24 && mm.d7 && mm.d7.n > mm.h24.n ? mm.h24.avg : null } : null;
+  market && band && (market.band = band);
+  if (market && bins) market.bins = Object.entries(bins).map(([b, x]) => [+b, +x[0].toFixed(1), x[0] ? +(x[1] / x[0] * 100).toFixed(0) : 0, x[0] ? +(x[2] / x[0]).toFixed(2) : 0]).filter((x) => x[1] >= 3).sort((a, b) => a[0] - b[0]);
   return { market, at: now, verdict, title, text, lottery, steps, okCount: steps.filter((s) => s.status === 'ok').length, scored: steps.filter((s) => s.status !== 'na' && s.status !== 'info').length };
 }
