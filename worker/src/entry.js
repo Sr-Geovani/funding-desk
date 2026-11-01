@@ -86,7 +86,17 @@ export function entryChecklist({ mkt, darr, mom, ret, win, nhWeek, hashMkts, pow
     ? 'Loteria consciente (aceitando perder o orçamento): hoje cada tentativa custa, em média, ' + n(-nh, 1) + '% do que se gasta; os melhores momentos para isso são os de margem menos negativa.'
     : 'Margem positiva: repetindo tentativas, o resultado tende à margem (' + pctTxt(nh) + ' do gasto); a sorte muda o caminho, não a média.';
   // o mercado no período (margem média), para comparar o momento com o normal e não só com o mínimo
-  for (const st of steps) { st.value = plain(st.value); st.why = plain(st.why); }
+  const ACT = {
+    margem_nh: { ok: 'A margem cobre o seu mínimo: é o pré-requisito para entrar.', warn: 'Margem positiva, mas abaixo do mínimo: espere mais alguns pontos ou aceite um lucro médio menor.', bad: 'Margem negativa: cada tentativa perde em média. Não entre, a não ser como loteria consciente.' },
+    margem_braiins: { ok: 'Na Braiins a conta já fecha: vale conferir o pool (botão "Conferir com a Braiins") para operar lá.', warn: 'Sem a taxa a margem quase fecha: a Braiins é o caminho para ter mais janelas.', bad: 'Nem sem a taxa a conta fecha agora.' },
+    darr: { ok: 'O BCH paga o suficiente acima do BTC.', warn: 'O BCH paga mais que o BTC, mas não o bastante para cobrir os ~5% de taxas.', bad: 'O BCH paga menos que o BTC por hash: o aluguel não tem como compensar.' },
+    momento: { ok: 'Preço à frente da dificuldade: a margem tende a melhorar nas próximas horas.', warn: 'Sem tendência clara de preço.', bad: 'Preço caindo contra o BTC: a margem tende a piorar.' },
+    hash: { ok: 'Hash saindo do BCH: a dificuldade vai cair e ajudar a margem.', warn: 'Ritmo de blocos normal.', bad: 'Hash chegando: a dificuldade vai subir e fechar a janela em horas.' },
+    reajuste: { ok: 'O reajuste do BTC vai ajudar o DARR.', bad: 'O reajuste do BTC vai piorar o DARR: evite entrar perto dele.', info: 'Reajuste ainda longe: não pesa agora.' },
+    horario: { ok: 'Esta hora costuma ter aluguel mais barato.', warn: 'Esta hora costuma ser mais cara: se der, espere.', info: 'Hora comum.' },
+    tamanho: { ok: 'Existe uma potência com lucro esperado: use a sugerida (o lance sobe para potências maiores).', bad: 'Nenhuma potência tem lucro esperado no livro de agora.' },
+    tentativa: { info: 'Defina o stop-loss sabendo que, sem bloco, a tentativa perde tudo o que gastou.' } };
+  for (const st of steps) { st.value = plain(st.value); st.why = plain(st.why); const a = ACT[st.id] && ACT[st.id][st.status]; if (a) st.action = plain(a); }
   const W = mm && (mm.d7 || mm.h24), market = W ? { label: W.label || (mm.d7 ? '7 dias' : '24 h'), avg: W.avg, median: W.median, pctPos: W.pctPos, pctMin: W.pctMin, hoursMin: W.hoursMin, rankNow: ok(nh) && W.rankNow !== null ? W.rankNow : null, top10: W.top10, top25: W.top25, bestHours: mm.bestHours || null,
     h24: mm.h24 && mm.d7 && mm.d7.n > mm.h24.n ? mm.h24.avg : null } : null;
   market && band && (market.band = band);

@@ -690,7 +690,7 @@ function loadOps(){
     if(r[2].ok)ops.bal=r[2].v;else ops.err.bal=r[2].e.message;
     if(r[3].ok)ops.pools=r[3].v.list||[];else ops.err.pools=r[3].e.message;
     if(r[4].ok)ops.log=r[4].v.log||[];
-    renderOps();renderHome();renderMine();renderAcct();renderRadar();renderRobo();renderWindow();renderHeat();renderAI();renderNext();renderAct();renderHashMkts();renderFronts();renderEntry();
+    renderOps();renderHome();renderMine();renderAcct();renderRadar();renderRobo();renderWindow();renderHeat();renderAI();renderNext();renderAct();renderHashMkts();renderFronts();renderEntry();renderExec();
   });
 }
 // Dados do servidor em qualquer aba: 30 s em Operar, 60 s nas outras. Ao voltar do segundo plano (iPhone deixa o app
@@ -1051,7 +1051,7 @@ function renderEntry(){
         (M.bins&&M.bins.length?'<details style="margin-top:6px"><summary class="note">O que veio nas 2 horas seguintes, por faixa de margem (lastro da IA)</summary><table style="font-size:12px;width:100%;margin-top:4px"><tr class="note"><th style="text-align:left">Margem</th><th>Leituras</th><th>Positivas depois</th><th style="text-align:right">Média depois</th></tr>'+
           M.bins.map(function(b){return '<tr><td>de '+nf(b[0],0)+'% a '+nf(b[0]+1,0)+'%</td><td style="text-align:center">'+nf(b[1],0)+'</td><td style="text-align:center">'+nf(b[2],0)+'%</td><td style="text-align:right" class="'+(b[3]>=0?'good':'bad')+'">'+pct(b[3],2)+'</td></tr>'}).join('')+'</table><p class="note" style="margin:4px 0 0">A IA marca uma faixa como boa quando, a partir dela, mais de 60% das leituras tiveram média positiva nas 2 horas seguintes. Leituras antigas pesam menos (meia-vida de ~1 semana).</p></details>':'')+'</div>'})(E.market):'')+
     '<div class="stack" style="gap:4px">'+E.steps.map(function(s){var c=S[s.status]||S.na;
-      return '<details class="trow"><summary><span class="chip '+c[0]+'">'+c[1]+'</span> <b>'+s.n+'. '+esc(s.title)+'</b><div class="note" style="margin:2px 0 0 28px">'+esc(s.value)+'</div></summary><p class="note" style="margin:4px 0 0">'+esc(s.why)+'</p></details>'}).join('')+'</div>'+
+      return '<details class="trow"><summary><span class="chip '+c[0]+'">'+c[1]+'</span> <b>'+s.n+'. '+esc(s.title)+'</b><div class="note" style="margin:2px 0 0 28px">'+esc(s.value)+'</div>'+(s.action?'<div class="note" style="margin:2px 0 0 28px"><b>Leitura:</b> '+esc(s.action)+'</div>':'')+'</summary><p class="note" style="margin:4px 0 0"><b>Por que importa:</b> '+esc(s.why)+'</p></details>'}).join('')+'</div>'+
     (E.lottery?'<p class="note" style="margin:8px 0 0">'+esc(E.lottery)+'</p>':'')+
     '<details style="margin-top:8px"><summary>Como funciona esse ecossistema</summary><ul class="note" style="margin:6px 0 0;padding-left:18px">'+
     '<li><b>Quem vende o hash</b> na NiceHash são donos de máquinas. Eles poderiam minerar BTC, então só vendem pelo que o BTC paga: o aluguel fica ~ no hashprice do BTC.</li>'+
@@ -1077,7 +1077,7 @@ function skillHTML(A,T){
     (uk.length?'<p class="note" style="margin:6px 0 0">Ficaram sem conferir (faltou dado no prazo): '+uk.map(function(k){return esc((T[k]||{}).label||k)+' '+un[k]}).join(' · ')+'.</p>':'')+'</details>';
 }
 function renderAI(){
-  var st=ops.status&&ops.status.state,A=st&&st.ai,an=st&&st.aiAnalysis,T=(st&&st.aiTypes)||{};
+  var st=ops.status&&ops.status.state,A=st&&st.ai,an=st&&st.aiAnalysis,R=st&&st.aiReport,T=(st&&st.aiTypes)||{};
   var bar=$('aibar'),card=$('h_ai');
   if(!A){bar.style.display='none';card.hidden=true;return}
   bar.style.display='block';card.hidden=false;
@@ -1091,7 +1091,7 @@ function renderAI(){
     return r.trusted?'<span class="chip ok">confiável · '+r.n+' conferidas</span>':'<span class="chip">em teste · '+(r.n||0)+' conferidas</span>'};
   var dueTxt=function(o){var ms=o.due-Date.now();return ms>0?'confere em '+FDI.dur(ms):'conferindo'};
   var h='<div class="row between"><div class="eyebrow">Copiloto IA</div><span class="chip">Nível '+A.level.n+' · '+esc(A.level.name)+'</span></div>'+
-    '<div class="lead">O que está acontecendo agora</div>'+(an?'<ul class="note" style="margin:6px 0 0;padding-left:18px">'+an.lines.map(function(l){return '<li>'+esc(l)+'</li>'}).join('')+'</ul>':'')+panoramaHTML(st&&st.aiPanorama,false);
+    (R&&R.sections?'<div class="box" style="margin:6px 0 0"><span class="chip '+({favoravel:'ok',neutro:'warn',desfavoravel:'bad'}[R.tone]||'')+'">'+({favoravel:'favorável',neutro:'neutro',desfavoravel:'desfavorável'}[R.tone]||'—')+'</span> <b>'+esc(R.headline)+'</b></div>'+R.sections.map(function(x,i){return '<details'+(i<2||x.id==='ajustes'||x.id==='niveis'?' open':'')+' style="margin-top:6px"><summary><b>'+esc(x.title)+'</b></summary><ul class="note" style="margin:4px 0 0;padding-left:18px">'+x.items.map(function(l){return '<li>'+esc(l)+'</li>'}).join('')+'</ul></details>'}).join(''):'<div class="lead">O que está acontecendo agora</div>'+(an?'<ul class="note" style="margin:6px 0 0;padding-left:18px">'+an.lines.map(function(l){return '<li>'+esc(l)+'</li>'}).join('')+'</ul>':''))+panoramaHTML(st&&st.aiPanorama,false);
   if(an&&an.recs.length)h+='<div class="eyebrow" style="margin:12px 0 6px">Sugestões</div><div class="stack" style="gap:6px">'+an.recs.map(function(r){return '<div class="box" style="margin:0">'+esc(r.text)+' '+conf(r)+'</div>'}).join('')+'</div>';
   h+='<div class="eyebrow" style="margin:12px 0 6px">Previsões em aberto ('+A.open.length+')</div>'+(A.open.length?'<div class="stack" style="gap:4px">'+A.open.slice(0,8).map(function(o){return '<div class="trow"><div class="note">'+esc(o.text)+'</div>'+(o.why?'<div class="note"><b>Por quê:</b> '+esc(o.why)+'</div>':'')+'<div class="note">'+dueTxt(o)+' · confiança '+pctp(o.conf*100,0)+(o.trusted?' · confiável':'')+'</div></div>'}).join('')+'</div>':'<p class="note" style="margin:0">Nenhuma agora: ela prevê quando algum sinal aparece.</p>');
   var dn=A.done.filter(function(d){return d.hit!==null&&d.hit!==undefined});
@@ -1283,6 +1283,16 @@ function renderHashMkts(){
     row('Braiins Hashpower',B.matchEH,B.feePct||0,'Taxa 0% no beta (pode mudar). Disponível ~'+nf((B.availPH||0)/1000,1)+' EH/s. <b>Exige pool com extranonce2 ≥ 7: a maioria dos pools de BCH usa 4.</b> Use "Conferir com a Braiins" no cadastro de pool.')+
     row('MiningRigRentals',M.suggestedEH,0,'Preço sugerido do SHA-256 (o menor anúncio: '+(isFinite(M.lowestEH)?M.lowestEH.toFixed(4):'—')+'). Aluga máquinas por horas fixas; caro para o BCH solo.')+'</table></div>'+
     ((H.err||[]).length?'<p class="note warn" style="margin:6px 0 0">'+esc(H.err.join(' · '))+'</p>':'');
+}
+// Execução real × simulação (calibração): o que de fato aconteceu com as ordens do robô no modo Ativo.
+function renderExec(){
+  var el=$('o_exec');if(!el)return;var X=ops.status&&ops.status.state&&ops.status.state.exec;
+  var h='<h2 style="margin:0 0 4px">Execução real (calibração)</h2>';
+  if(!X){el.innerHTML=h+'<p class="note" style="margin:0">Aparece quando o robô operar em Ativo. Mostra, ordem por ordem, quanto tempo o hash demorou a chegar, quanto da potência pedida foi entregue e o preço efetivo pago. É a régua do teste de calibração (10 PH/s por 1 a 2 horas): se esses números baterem com a simulação, dá para escalar.</p>';return}
+  h+='<div class="kv"><div><small>Tempo até o hash</small><span>'+(X.avgToHashMin!==null?nf(X.avgToHashMin,0)+' min':'—')+'</span></div><div><small>Entrega média</small><span class="'+(X.avgDelivered!==null&&X.avgDelivered<0.9?'warn':'')+'">'+(X.avgDelivered!==null?pctp(X.avgDelivered*100,0):'—')+'</span></div><div><small>Preço efetivo × lance</small><span>'+(X.avgEffVsBid!==null?pct((X.avgEffVsBid-1)*100,1):'—')+'</span></div></div>'+
+    '<p class="note" style="margin:6px 0">A simulação supõe hash chegando na hora, 100% entregue e preço igual ao lance. Diferenças aqui entram como custo extra na conta: entrega de 90% significa pagar ~10% a mais por hash recebido.</p>'+
+    '<div class="stack" style="gap:4px">'+X.orders.map(function(o){return '<div class="note">'+dt2(o.created)+' · '+nf(o.limitPH,1)+' PH/s a '+o.priceEH.toFixed(4)+(o.alive?' · ativa':'')+' · hash em '+(o.toHashMin!==null?nf(o.toHashMin,0)+' min':'—')+' · entrega '+(o.delivered!==null?pctp(o.delivered*100,0):'—')+(o.effEH?' · efetivo '+o.effEH.toFixed(4):'')+'</div>'}).join('')+'</div>';
+  el.innerHTML=h;
 }
 function renderOps(){
   var c=apiCfg(),st=ops.status;

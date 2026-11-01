@@ -131,3 +131,35 @@ export function realStep(real, { orders, managedIds, btcUsd, bchUsd, blockEvent,
   trimDays(r.days);
   return r;
 }
+
+// Registro de execução (modo Ativo): o que de fato aconteceu com cada ordem do robô, para comparar com a simulação.
+// Por ordem: preço e potência pedidos, tempo até o hash chegar, entrega média (recebido ÷ pedido) e preço efetivo
+// (BTC pago ÷ hash entregue). É a base do teste de calibração antes de escalar.
+export function execStep(log, { orders, managedIds, now, keep = 30 }) {
+  const L = log && log.orders ? JSON.parse(JSON.stringify(log)) : { orders: {} };
+  for (const o of orders || []) {
+    if (!(managedIds || []).includes(o.id)) continue;
+    const e = L.orders[o.id] || (L.orders[o.id] = { id: o.id, created: o.createdTs || now, firstSeen: now, priceEH: o.priceEH, limitPH: o.limitPH, firstHash: null, n: 0, ratioSum: 0, ehDays: 0, paid0: o.paidBtc || 0, paidBtc: 0, lastTs: now });
+    const dt = Math.min(Math.max(0, now - e.lastTs), 15 * 60e3);
+    if (o.alive && o.limitPH > 0) {
+      if (o.speedPH > 0 && !e.firstHash) e.firstHash = now;
+      e.n++; e.ratioSum += Math.min(2, (o.speedPH || 0) / o.limitPH);
+      e.ehDays += (o.speedPH || 0) / 1000 * dt / 864e5;
+    }
+    e.priceEH = o.priceEH; e.limitPH = o.limitPH; e.paidBtc = Math.max(0, (o.paidBtc || 0) - e.paid0); e.alive = !!o.alive; e.lastTs = now;
+  }
+  const ids = Object.keys(L.orders).sort((a, b) => L.orders[b].lastTs - L.orders[a].lastTs);
+  for (const id of ids.slice(keep)) delete L.orders[id];
+  return L;
+}
+export function execSummary(L) {
+  const v = Object.values((L && L.orders) || {});
+  if (!v.length) return null;
+  const rows = v.map((e) => ({ id: e.id, created: e.created, priceEH: e.priceEH, limitPH: e.limitPH, alive: e.alive,
+    toHashMin: e.firstHash ? Math.round((e.firstHash - Math.max(e.created, e.firstSeen - 5 * 60e3)) / 60e3) : null,
+    delivered: e.n ? e.ratioSum / e.n : null, effEH: e.ehDays > 0 ? e.paidBtc / e.ehDays : null, paidBtc: e.paidBtc }));
+  const with_ = (k) => rows.filter((r) => r[k] !== null && isFinite(r[k]));
+  const avg = (k) => { const a = with_(k); return a.length ? a.reduce((s, r) => s + r[k], 0) / a.length : null; };
+  return { orders: rows.sort((a, b) => b.created - a.created).slice(0, 10), avgToHashMin: avg('toHashMin'), avgDelivered: avg('delivered'),
+    avgEffVsBid: with_('effEH').length ? with_('effEH').reduce((s, r) => s + r.effEH / r.priceEH, 0) / with_('effEH').length : null };
+}

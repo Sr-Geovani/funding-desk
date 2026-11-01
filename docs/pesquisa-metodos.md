@@ -48,7 +48,12 @@ Ressalva: boa parte do material de prática é de blogs e fóruns, não de estud
 4. Faixa aprendida por regime (DARR alto/baixo, alavancagem quente/fria).
 5. PBO em vários cortes da janela, e Kelly fracionado com amostra mínima.
 
+## Padrão de texto do copiloto (aplicado em 01/11)
+Notas matinais de mesa: manchete com a conclusão, números que movem o resultado, eventos e níveis de decisão concretos, ideia com tese, gatilho e risco explícito, correção de chamadas erradas. Relatório semanal da Luxor (Hashrate Index): resumo com selo, hashprice, dificuldade e estimativa do próximo ajuste, mercado futuro. Aplicado em `worker/src/report.js`.
+
 ## Fontes
+- Nota matinal (estrutura): https://mcpservers.org/agent-skills/anthropic/financial-services/morning-note
+- Hashrate Index Roundup: https://hashrateindex.com/blog/hashrate-index-roundup-september-28-2026/
 - MiningBoard, pool BCH solo: https://miningboard.com/pools/bch.solo-pool.org
 - Empirical analysis of the ASERT's performance: https://bitcoincashresearch.org/t/empirical-analysis-of-the-aserts-performance/708
 - Especificação ASERT: https://upgradespecs.bitcoincashnode.org/2020-11-15-asert/

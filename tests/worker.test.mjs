@@ -1258,3 +1258,46 @@ test('IA aprende a faixa de margem com mais chance (2 h seguintes) e ajusta com 
   // incremental: rodar de novo no mesmo instante não conta duas vezes
   const again = brainStep(ai, sn).ai; assert.equal(again.band.calls.n, ai.band.calls.n);
 });
+
+test('ASERT: previsão da dificuldade pelo ritmo de blocos e margem depois', async () => {
+  const { asertFactor, asertForecast } = await import('../worker/src/signals.js');
+  assert.ok(Math.abs(asertFactor(6, 5) - 1) < 1e-12, 'ritmo normal: não muda');
+  assert.ok(Math.abs(asertFactor(12, 1) - Math.pow(2, 3600 / 172800)) < 1e-12); // +1,455% em 1 h com o dobro de blocos
+  assert.ok(asertFactor(3, 24) < 1, 'blocos lentos: dificuldade cai');
+  const now = Date.UTC(2026, 10, 1, 18), rb = [];
+  for (let i = 0; i < 54; i++) rb.push({ t: now - i * 400e3 }); // um bloco a cada 6min40s: 9 por hora
+  const F = asertForecast({ recentBlocks: rb, now, edgeNow: -1 });
+  assert.equal(F.last6h, 54); assert.ok(Math.abs(F.pace6h - 9) < 1e-9);
+  assert.ok(F.h6.dPct > 0 && F.h6.edge < -1, 'hash chegando: dificuldade sobe e a margem piora');
+  assert.ok(Math.abs(F.h1.dPct - (Math.pow(2, 1800 / 172800) - 1) * 100) < 1e-9);
+});
+
+test('registro de execução: tempo até o hash, entrega e preço efetivo', async () => {
+  const { execStep, execSummary } = await import('../worker/src/paper.js');
+  const t0 = Date.UTC(2026, 10, 1, 12), M = 60e3;
+  const o = (min, speed, paid) => ({ id: 'A', alive: true, priceEH: 0.43, limitPH: 10, speedPH: speed, paidBtc: paid, createdTs: t0 });
+  let L = execStep(null, { orders: [o(0, 0, 0)], managedIds: ['A'], now: t0 });
+  L = execStep(L, { orders: [o(3, 0, 0)], managedIds: ['A'], now: t0 + 3 * M });
+  L = execStep(L, { orders: [o(6, 8, 0.00001)], managedIds: ['A'], now: t0 + 6 * M });
+  for (let i = 3; i <= 22; i++) L = execStep(L, { orders: [o(i * 3, 9, 0.00001 * i)], managedIds: ['A'], now: t0 + i * 3 * M });
+  const S = execSummary(L);
+  assert.equal(S.orders[0].toHashMin, 6); assert.ok(S.avgDelivered > 0.7 && S.avgDelivered < 0.95);
+  assert.ok(S.orders[0].effEH > 0 && S.avgEffVsBid > 0);
+  assert.equal(execStep(L, { orders: [Object.assign(o(0, 9, 0), { id: 'X' })], managedIds: ['A'], now: t0 + 70 * M }).orders.X, undefined, 'só ordens do robô');
+});
+
+test('relatório do copiloto: manchete, números, níveis de decisão, ajustes, riscos e confiança, sem símbolos', async () => {
+  const { aiReport } = await import('../worker/src/report.js');
+  const mkt = { ok: true, edgeAtBidPct: -3.2, green: false, bidEH: 0.4262, breakEvenEH: 0.4127, capEH: 0.4003, bchUsd: 283.2, costPerBlockUsd: 896, D: 5.26e11 };
+  const cfg = Object.assign({}, DEFAULT_CONFIG, { targetPh: 100, minEdgePct: 3, sessionBudgetUsd: 300, dailyBudgetUsd: 500, weeklyLossUsd: 1000 });
+  const asert = { last6h: 40, last1h: 7, h1: { dPct: 0.16, edge: -3.35 }, h6: { dPct: 0.97, edge: -4.1 }, calm: { dPct: 0, edge: -3.2 } };
+  const R = aiReport({ now: Date.now(), mkt, cfg, asert, mm: { d7: { label: '7 dias', avg: -1.2, pctPos: 23, pctMin: 4.8, hoursMin: 1.8, rankNow: 20 } }, ai: null, darr: 1.017,
+    mom: { vsEmaPct: 0.8 }, ret: null, power: { idealPh: 0 }, algos: [], fund: { passing: 0, sim: null } });
+  assert.equal(R.tone, 'desfavoravel'); assert.match(R.headline, /negativa/);
+  const ids = R.sections.map((x) => x.id);
+  for (const k of ['numeros', 'porque', 'esperar', 'niveis', 'fazer', 'ajustes', 'riscos']) assert.ok(ids.includes(k), k);
+  const N = R.sections.find((x) => x.id === 'niveis').items.join(' ');
+  assert.match(N, /0,4003/); assert.match(N, /US\$301/); assert.match(N, /cerca de 9 horas/);
+  assert.ok(R.sections.find((x) => x.id === 'ajustes').items.some((t) => /28% de chance/.test(t)));
+  assert.ok(R.sections.every((x) => x.items.every((t) => !/[≥≤<>]/.test(t))) && !/[≥≤<>]/.test(R.headline));
+});

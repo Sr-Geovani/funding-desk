@@ -98,3 +98,22 @@ export function marginStats(edgeHist, { now, fixAt, minEdge = 3, edgeNow = null 
   }
   return { at: now, minEdge, now: isFinite(edgeNow) ? edgeNow : null, h24: win(24), d7: win(24 * 7), bestHours, darrTop, darrAll };
 }
+
+// Previsão da dificuldade do BCH pela fórmula do ASERT (aserti3-2d, meia-vida de 2 dias = 172.800 s): a cada bloco a
+// dificuldade é multiplicada por 2^((600 − intervalo) / 172800). Em H horas com b blocos por hora:
+// fator = 2^((600·b·H − 3600·H) / 172800). Blocos mais rápidos que 10 min (hash chegando) sobem a dificuldade.
+// A margem depois disso: (1 + margem) ÷ fator − 1 (o resto igual: preço do aluguel e cotações).
+export const ASERT_HALFLIFE = 172800;
+export function asertFactor(blocksPerHour, hours) {
+  return Math.pow(2, (600 * blocksPerHour * hours - 3600 * hours) / ASERT_HALFLIFE);
+}
+export function asertForecast({ recentBlocks, now, edgeNow }) {
+  const ts = (recentBlocks || []).map((b) => b.t).filter((t) => t && t <= now).sort((a, b) => a - b);
+  if (ts.length < 6) return null;
+  const n6 = ts.filter((t) => t > now - 6 * 3600e3).length, n1 = ts.filter((t) => t > now - 3600e3).length;
+  const pace = n6 / 6, after = (f) => (isFinite(edgeNow) && edgeNow !== null ? ((1 + edgeNow / 100) / f - 1) * 100 : null);
+  const at = (b, h) => { const f = asertFactor(b, h); return { hours: h, dPct: (f - 1) * 100, edge: after(f) }; };
+  return { pace6h: pace, last1h: n1, last6h: n6, h1: at(pace, 1), h6: at(pace, 6), h24: at(pace, 24),
+    // se o ritmo voltar ao normal (6 por hora) a dificuldade para de mudar; se o hash que entrou sair, cai
+    calm: at(6, 6), sinceLast: ts.length ? Math.round((now - ts[ts.length - 1]) / 60e3) : null };
+}

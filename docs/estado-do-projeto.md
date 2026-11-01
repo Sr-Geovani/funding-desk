@@ -154,6 +154,9 @@ sempre identificado; nada de prometer previsão de sorte (Poisson é sem memóri
 - Margem de erro e lucro esperado (01/11): a faixa aprendida só vale se o lucro esperado das 2 h seguintes, já descontado 0,5 ponto de execução, ficar positivo no limite de baixo do intervalo (80%) e o acerto ficar acima de 50% no limite de baixo (Wilson). Placar da faixa com intervalo.
 - Teste fora da amostra (01/11): os melhores cenários escolhidos na 1ª metade da janela são conferidos na 2ª metade (`bestScen.oos`), pela sorte e pela média.
 - Limite de perda semanal (01/11, `weeklyLossUsd`, padrão US$1.000): perda real em 7 dias (gasto − recebido) acima do limite encerra as ordens, bloqueia novas e avisa no Telegram; a simulação segue a mesma regra.
+- Previsão ASERT (01/11, `asertForecast` em `worker/src/signals.js`): dificuldade em 1, 6 e 24 h pelo ritmo de blocos (fator 2^((600·b·H − 3600·H)/172800)) e a margem depois disso.
+- Registro de execução (01/11, `execStep`/`execSummary` em `worker/src/paper.js`, modo Ativo): por ordem do robô, tempo até o hash chegar, entrega média e preço efetivo; cartão "Execução real (calibração)" em Mineração → Operar.
+- Relatório do copiloto (01/11, `worker/src/report.js`, `state.aiReport`): padrão de nota de mercado (manchete com selo, números do momento, por que está assim, o que esperar, níveis de decisão concretos, o que fazer, ajustes sugeridos, riscos, confiança da IA, funding e outras moedas). Cartilha: cada passo com "Leitura" (o que o valor de agora significa) e "Por que importa". Referências: notas matinais de mesa e Hashrate Index (Luxor), em `docs/pesquisa-metodos.md`.
 - Ciclo do servidor: 3 min. Mínimo do Cloudflare é 1 min, mas o KV grátis aceita 1.000 gravações/dia e propaga em até
   60 s; abaixo de 3 min exige plano pago + Durable Objects. Atraso de 3 min custa < US$1 com 10 PH/s.
 
