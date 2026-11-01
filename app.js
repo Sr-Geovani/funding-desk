@@ -1297,7 +1297,8 @@ function renderReady(){
     [(A.hard&&A.hard.n>=20)&&lift.pts>0,'IA melhor que o acaso','Pelo menos 20 previsões difíceis conferidas e acerto acima do grupo de controle.',(A.hard?A.hard.hits+' de '+A.hard.n+' difíceis':'0 difíceis')+(lift.pts!==null&&lift.pts!==undefined?'; contra o acaso: '+(lift.pts>0?'+':'')+nf(lift.pts,0)+' pontos':'; sem comparação ainda')+'.'],
     [ev!==null&&ev>0&&P.spendUsd>=1000,'Simulação da sua regra com média positiva','O cenário "Sua" com pelo menos US$1.000 de compras simuladas e média (sem sorte) positiva.',P.spendUsd>0?usd(P.spendUsd,0)+' simulados; média '+pct(ev,1)+'.':'Sem compras simuladas: a sua regra ainda não ficou verde.'],
     [F.closed>=10&&F.netUsd>0,'Funding simulado positivo','Pelo menos 10 operações fechadas com resultado positivo depois das taxas.',(F.closed||0)+' fechadas; resultado '+signUsd(F.netUsd||0)+'.'],
-    [!!(X&&X.orders&&X.orders.length),'Teste de calibração feito','10 PH/s por 1 a 2 horas em Ativo, comparando entrega e preço com a simulação.',X&&X.orders&&X.orders.length?'Feito: entrega média '+(X.avgDelivered!==null?pctp(X.avgDelivered*100,0):'—')+'.':'Ainda não (é o último passo, com sua aprovação).'],
+    (function(){var C=S.calib||S.calibPrev,R=C&&C.done&&C.result,good=!!(R&&R.delivered>=0.9&&R.diffPct!==null&&Math.abs(R.diffPct)<=10);
+      return [good,'Teste de calibração aprovado','10 PH/s por 2 horas (Mineração → Operar): entrega de 90% ou mais e custo real até 10% diferente da simulação.',R?('Feito: entrega '+(R.delivered!==null?pctp(R.delivered*100,0):'—')+', custo '+(R.diffPct!==null?pct(R.diffPct,1):'—')+' contra a simulação'+(good?'.':': precisa de ajuste.')):C&&!C.done?'Em andamento.':'Ainda não (botão em Mineração → Operar).']})(),
     [cfg.sessionBudgetUsd>0&&cfg.dailyBudgetUsd>0&&cfg.weeklyLossUsd>0,'Limites de perda configurados','Stop-loss por tentativa, limite diário e perda máxima em 7 dias.','Stop-loss US$'+nf(cfg.sessionBudgetUsd||0,0)+', diário US$'+nf(cfg.dailyBudgetUsd||0,0)+', semanal US$'+nf(cfg.weeklyLossUsd||0,0)+'.']
   ];
   var done=items.filter(function(i){return i[0]}).length;
@@ -1307,14 +1308,40 @@ function renderReady(){
 }
 // Execução real × simulação (calibração): o que de fato aconteceu com as ordens do robô no modo Ativo.
 function renderExec(){
-  var el=$('o_exec');if(!el)return;var X=ops.status&&ops.status.state&&ops.status.state.exec;
-  var h='<h2 style="margin:0 0 4px">Execução real (calibração)</h2>';
-  if(!X){el.innerHTML=h+'<p class="note" style="margin:0">Aparece quando o robô operar em Ativo. Mostra, ordem por ordem, quanto tempo o hash demorou a chegar, quanto da potência pedida foi entregue e o preço efetivo pago. É a régua do teste de calibração (10 PH/s por 1 a 2 horas): se esses números baterem com a simulação, dá para escalar.</p>';return}
-  h+='<div class="kv"><div><small>Tempo até o hash</small><span>'+(X.avgToHashMin!==null?nf(X.avgToHashMin,0)+' min':'—')+'</span></div><div><small>Entrega média</small><span class="'+(X.avgDelivered!==null&&X.avgDelivered<0.9?'warn':'')+'">'+(X.avgDelivered!==null?pctp(X.avgDelivered*100,0):'—')+'</span></div><div><small>Preço efetivo × lance</small><span>'+(X.avgEffVsBid!==null?pct((X.avgEffVsBid-1)*100,1):'—')+'</span></div></div>'+
-    '<p class="note" style="margin:6px 0">A simulação supõe hash chegando na hora, 100% entregue e preço igual ao lance. Diferenças aqui entram como custo extra na conta: entrega de 90% significa pagar ~10% a mais por hash recebido.</p>'+
-    '<div class="stack" style="gap:4px">'+X.orders.map(function(o){return '<div class="note">'+dt2(o.created)+' · '+nf(o.limitPH,1)+' PH/s a '+o.priceEH.toFixed(4).replace('.',',')+(o.alive?' · ativa':'')+' · hash em '+(o.toHashMin!==null?nf(o.toHashMin,0)+' min':'—')+' · entrega '+(o.delivered!==null?pctp(o.delivered*100,0):'—')+(o.effEH?' · efetivo '+o.effEH.toFixed(4).replace('.',','):'')+'</div>'}).join('')+'</div>';
+  var el=$('o_exec');if(!el)return;var st=ops.status,S=st&&st.state,X=S&&S.exec,C=S&&S.calib,cfg=(st&&st.config)||{};
+  var h='<h2 style="margin:0 0 4px">Teste de calibração (simulado × real)</h2>';
+  if(!S){el.innerHTML=h+'<p class="note">Conecte o backend.</p>';return}
+  var mk=S.market||{},bl=(S.plan&&S.plan.blockers)||[],poolFix=bl.filter(function(b){return b.id==='pool'&&b.poolId})[0],pool=cfg.poolId||(poolFix&&poolFix.poolId)||'';
+  var cost=mk.bidEH&&mk.btcUsd?10/1000*mk.bidEH*mk.btcUsd*1.03*2/24:null;
+  if(!C){
+    h+='<p class="note" style="margin:0 0 8px">O último passo antes do dinheiro real. O painel abre uma ordem pequena de <b>10 PH/s por 2 horas</b> no preço que entrega essa potência, mede quanto tempo o hash demora a chegar, quanto foi entregue e quanto custou de verdade, e compara com a simulação do mesmo período. A ordem fica fora do controle do robô e o servidor a encerra sozinho no prazo; o que sobrar do valor volta para a sua carteira na NiceHash.</p>'+
+      '<div class="kv"><div><small>Valor da ordem</small><span>0,001 BTC</span></div><div><small>Gasto esperado</small><span>'+(cost?'~'+usd(cost,0):'—')+'</span></div><div><small>Chance de bloco</small><span>'+(S.market&&S.market.phDaysPerBlock?pctp((1-Math.exp(-10/S.market.phDaysPerBlock*2/24))*100,1):'~3%')+'</span></div></div>'+
+      '<p class="note" style="margin:6px 0">Precisa de: chaves da NiceHash conectadas, pool escolhido'+(pool?' (ok)':' <b class="bad">(falta: Mineração → Robô → Pool para ordens novas)</b>')+' e pelo menos 0,001 BTC de saldo na NiceHash (mínimo da NiceHash por ordem). Com margem negativa, o gasto esperado vira perda esperada de poucos dólares: o objetivo é medir, não lucrar.</p>'+
+      '<button class="pri" id="cal_go"'+(pool?'':' disabled')+'>Iniciar teste de calibração</button><p class="note" id="cal_msg" style="margin:6px 0 0"></p>';
+  }else if(!C.done){
+    var left=Math.max(0,C.until-Date.now());
+    h+='<div class="box" style="margin:0 0 8px"><b>Em andamento</b>'+nf(C.ph,0)+' PH/s a '+C.priceEH.toFixed(4).replace('.',',')+' · começou '+dt2(C.start)+' · encerra em '+FDI.dur(left)+'.</div>'+
+      '<button id="cal_stop">Encerrar agora</button><p class="note" id="cal_msg" style="margin:6px 0 0">O resultado aparece aqui e no Telegram quando encerrar.</p>';
+  }else{
+    var R=C.result||{},ok1=R.delivered!==null&&R.delivered>=0.9,ok2=R.diffPct!==null&&Math.abs(R.diffPct)<=10,ok3=R.toHashMin!==null&&R.toHashMin<=10;
+    h+='<div class="box" style="margin:0 0 8px"><b>Resultado ('+dt2(C.start)+', '+nf(R.hours||0,1)+' h)</b>'+
+      '<div class="kv" style="margin-top:4px"><div><small>Pago de verdade</small><span>'+usd(R.paidUsd||0)+'</span></div><div><small>Simulação</small><span>'+usd(R.simUsd||0)+'</span></div><div><small>Diferença</small><span class="'+(ok2?'good':'bad')+'">'+(R.diffPct!==null?pct(R.diffPct,1):'—')+'</span></div>'+
+      '<div><small>Entrega média</small><span class="'+(ok1?'good':'bad')+'">'+(R.delivered!==null?pctp(R.delivered*100,0):'—')+'</span></div><div><small>Hash chegou em</small><span class="'+(ok3?'good':'warn')+'">'+(R.toHashMin!==null?nf(R.toHashMin,0)+' min':'—')+'</span></div></div>'+
+      '<p class="note" style="margin:6px 0 0">'+(ok1&&ok2&&ok3?'<b class="good">Calibrado:</b> a execução real bate com a simulação (entrega de 90% ou mais, custo até 10% diferente, hash em até 10 min). Os resultados simulados valem como prévia do real.':'<b class="warn">Diferenças a corrigir:</b> '+[!ok1?'a entrega ficou abaixo de 90% (o hash real custa mais do que a simulação supõe)':'',!ok2?'o custo real diferiu mais de 10% da simulação':'',!ok3?'o hash demorou mais de 10 min para chegar':''].filter(Boolean).join('; ')+'. Me mande este resultado para ajustar a simulação antes de escalar.')+'</p></div>'+
+      '<button id="cal_again">Fazer outro teste</button>';
+  }
+  if(X&&X.orders&&X.orders.length)h+='<details style="margin-top:8px"><summary>Ordens registradas</summary><div class="stack" style="gap:4px;margin-top:4px">'+X.orders.map(function(o){return '<div class="note">'+dt2(o.created)+' · '+nf(o.limitPH,1)+' PH/s a '+o.priceEH.toFixed(4).replace('.',',')+(o.alive?' · ativa':'')+' · hash em '+(o.toHashMin!==null?nf(o.toHashMin,0)+' min':'—')+' · entrega '+(o.delivered!==null?pctp(o.delivered*100,0):'—')+'</div>'}).join('')+'</div></details>';
   el.innerHTML=h;
 }
+document.addEventListener('click',function(e){
+  var id=e.target.id;if(['cal_go','cal_stop','cal_again'].indexOf(id)<0)return;
+  var st=ops.status,cfg=(st&&st.config)||{},bl=(st&&st.state&&st.state.plan&&st.state.plan.blockers)||[],pf=bl.filter(function(b){return b.id==='pool'&&b.poolId})[0];
+  if(id==='cal_go'&&!confirm('Abrir a ordem de teste: 10 PH/s por 2 horas, 0,001 BTC, encerrada sozinha no prazo?'))return;
+  if(id==='cal_stop'&&!confirm('Encerrar a ordem de teste agora?'))return;
+  var b=e.target;b.disabled=true;
+  var go=id==='cal_go'?apiCall('POST','/calib/start',{ph:10,hours:2,poolId:cfg.poolId||(pf&&pf.poolId)}):id==='cal_stop'?apiCall('POST','/calib/stop',{}):apiCall('POST','/calib/clear',{});
+  go.then(function(){$('cal_msg')&&($('cal_msg').textContent='Feito. Atualizando…');loadOps()},function(er){b.disabled=false;if($('cal_msg'))$('cal_msg').textContent='Não deu: '+er.message});
+});
 function renderOps(){
   var c=apiCfg(),st=ops.status;
   if(!c.url){

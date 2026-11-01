@@ -1301,3 +1301,24 @@ test('relatório do copiloto: manchete, números, níveis de decisão, ajustes, 
   assert.ok(R.sections.find((x) => x.id === 'ajustes').items.some((t) => /28% de chance/.test(t)));
   assert.ok(R.sections.every((x) => x.items.every((t) => !/[≥≤<>]/.test(t))) && !/[≥≤<>]/.test(R.headline));
 });
+
+test('integração: teste de calibração abre ordem pequena fora do robô, mede e encerra sozinho no prazo', async () => {
+  const t = await setup();
+  try {
+    assert.equal((await t.call('POST', '/api/calib/start', { ph: 1, hours: 1 })).status, 400, 'sem pool');
+    const r = await t.call('POST', '/api/calib/start', { ph: 1, hours: 1, poolId: 'pool-1' });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    const id = r.body.id, cfg = (await t.call('GET', '/api/status')).body.config;
+    assert.ok(!(cfg.managed || []).includes(id), 'o robô não mexe na ordem do teste');
+    assert.equal((await t.call('POST', '/api/calib/start', { ph: 1, poolId: 'pool-1' })).status, 400, 'um teste por vez');
+    const now = Date.now();
+    await tick(t.env, { now: now + 3 * 60e3 });
+    await tick(t.env, { now: now + 6 * 60e3 });
+    assert.ok(t.state.orders[id].alive, 'antes do prazo continua');
+    await tick(t.env, { now: now + 61 * 60e3 });
+    assert.equal(t.state.orders[id].alive, false, 'encerrada no prazo');
+    const st = (await t.call('GET', '/api/status')).body.state;
+    assert.ok(st.calib.done && st.calib.result && st.calib.result.toHashMin !== undefined, JSON.stringify(st.calib));
+    assert.ok(st.calib.result.delivered > 0.9, 'a NiceHash falsa entrega 100%');
+  } finally { t.server.close(); }
+});

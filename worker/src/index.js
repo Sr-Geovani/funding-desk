@@ -258,8 +258,27 @@ export async function tick(env, opts = {}) {
       bestScen = bestScenarios(list, { now, since: (paperAlways && paperAlways.since) || (paper && paper.since) || null, fixAt: paperArchive && paperArchive.at, cfg, btcUsd: mkt.btcUsd, blockUsd: mkt.blockNetUsd }) || bestScen;
     } catch (e) { errors.push('melhores cenários: ' + (e.message || e)); }
   }
-  const execLog = cfg.mode === 'active' ? execStep(state.execLog, { orders, managedIds: cfg.managed, now }) : (state.execLog || null);
-  const real = realStep(state.real, { orders, managedIds: cfg.managed, blockEvent, now,
+  // Registro de execução em qualquer modo (o teste de calibração roda em Observar) e o teste de calibração em si:
+  // ordem pequena fora do controle do robô, encerrada sozinha no prazo, com o resultado comparado à simulação.
+  let calib = state.calib || null;
+  const calibId = calib && !calib.done ? calib.id : null;
+  const execLog = orders.length ? execStep(state.execLog, { orders, managedIds: (cfg.managed || []).concat(calib ? [calib.id] : []), now }) : (state.execLog || null);
+  if (calibId && hasKeys(env)) {
+    const o = orders.find((x) => x.id === calibId), over = now >= calib.until;
+    if (over && o && o.alive) { const r = await settle(nh.cancelOrder(calibId)); if (!r.ok) errors.push('calibração: ' + r.e); }
+    if (over || (o && !o.alive) || (!o && now - calib.start > 15 * 60e3)) {
+      const e = execLog && execLog.orders && execLog.orders[calibId], btc = mkt.ok ? mkt.btcUsd : (state.market && state.market.btcUsd) || 0;
+      const hours = Math.max(0, ((e && e.lastTs) || now) - calib.start) / 3600e3;
+      const paidUsd = e ? e.paidBtc * btc : 0, simUsd = calib.ph / 1000 * calib.priceEH * btc * hours / 24; // sem a taxa de 3%: compara com o pago na ordem
+      const delivered = e && e.n ? e.ratioSum / e.n : null, toHashMin = e && e.firstHash ? Math.round((e.firstHash - calib.start) / 60e3) : null;
+      calib = Object.assign({}, calib, { done: now, result: { hours, paidUsd, simUsd, diffPct: simUsd > 0 ? (paidUsd / simUsd - 1) * 100 : null, delivered, toHashMin,
+        effEH: e && e.ehDays > 0 ? e.paidBtc / e.ehDays : null } });
+      const R = calib.result;
+      log.push({ t: now, kind: 'acao', text: `Teste de calibração encerrado: ${R.hours.toFixed(1)} h, pago US$${R.paidUsd.toFixed(2)} contra US$${R.simUsd.toFixed(2)} da simulação; entrega média ${delivered !== null ? (delivered * 100).toFixed(0) + '%' : 'sem dado'}; hash chegou em ${toHashMin !== null ? toHashMin + ' min' : 'sem dado'}` });
+      await notify(env, `Funding Desk: teste de calibração encerrado. ${R.hours.toFixed(1)} h; pago US$${R.paidUsd.toFixed(2)} (simulação: US$${R.simUsd.toFixed(2)}); entrega média ${delivered !== null ? (delivered * 100).toFixed(0) + '%' : 'sem dado'}; hash chegou em ${toHashMin !== null ? toHashMin + ' min' : 'sem dado'}. Detalhes em Mineração → Operar.`, fetchFn);
+    }
+  }
+  const real = realStep(state.real, { orders, managedIds: (cfg.managed || []).concat(calib ? [calib.id] : []), blockEvent, now,
     btcUsd: mkt.btcUsd || (prices.ok ? prices.v.btcUsd : 0), bchUsd: mkt.bchUsd || (prices.ok ? prices.v.bchUsd : 0) });
 
   // Execução: só no modo ativo. No modo observar, registra o que faria.
@@ -509,7 +528,7 @@ export async function tick(env, opts = {}) {
     fund: { passing: ((funding && funding.best) || []).length, sim: fundPaper ? fundPaperSummary(fundPaper, FD.DEFAULT_FEES) : null } });
 
   const next = Object.assign({}, dec.state, alertState, {
-    lastTick: now, verified: Object.fromEntries(Object.entries(verified).filter(([, x]) => now - x.at <= 6 * 3600e3)), ai: br.ai, aiAnalysis, plan, acct, algoMap, mempool, stable24, pairStats, msig, darr, recentBlocks, nhWeek, paper, paperBurst, paperPlan, paperAlways, hashMkts, fronts, frontsPaper, ltStreak, fundPaperLT, market2, aiPanorama, entryCheck, aiReport: aiRep, mktMargin, asertF, execLog, bestScen, paperArchive, paperPriceV: 2, blockBuf, blockFlush, lastBlockT, real, fundPaper, alertScore, algoPaper, algoTs, aiScores, fundPaperAI, fhistHour, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig,
+    lastTick: now, verified: Object.fromEntries(Object.entries(verified).filter(([, x]) => now - x.at <= 6 * 3600e3)), ai: br.ai, aiAnalysis, plan, acct, algoMap, mempool, stable24, pairStats, msig, darr, recentBlocks, nhWeek, paper, paperBurst, paperPlan, paperAlways, hashMkts, fronts, frontsPaper, ltStreak, fundPaperLT, market2, aiPanorama, entryCheck, calib, aiReport: aiRep, mktMargin, asertF, execLog, bestScen, paperArchive, paperPriceV: 2, blockBuf, blockFlush, lastBlockT, real, fundPaper, alertScore, algoPaper, algoTs, aiScores, fundPaperAI, fhistHour, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig,
     market: mkt.ok ? { breakEvenEH: mkt.breakEvenEH, capEH: mkt.capEH, fillEH: mkt.fillEH, medianEH: mkt.medianEH, bidEH: mkt.bidEH,
       edgeAtBidPct: mkt.edgeAtBidPct, green: mkt.green, D: mkt.D, bookTotalPH: book ? book.totalPH : 0, bchUsd: mkt.bchUsd, btcUsd: mkt.btcUsd, costPerBlockUsd: mkt.costPerBlockUsd,
       hashpriceNet: mkt.hashpriceNet, blockNetUsd: mkt.blockNetUsd, phDaysPerBlock: mkt.phDaysPerBlock, market: mkt.market } : { ok: false, reason: mkt.reason },
@@ -620,7 +639,7 @@ async function api(req, env, url, fetchFn) {
       telegram: !!(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID), creds: credStatus(env), limits, config: cfg,
       state: { lastTick: state.lastTick, lastHeight: state.lastHeight, market: state.market, myBlocks: state.myBlocks || [], dailyUsd: state.dailyUsd || 0,
         errors: state.errors || [], edgeHist: state.edgeHist || [], alerts: (state.alerts || []).slice(-30).reverse(),
-        paper: state.paper || null, paperBurst: state.paperBurst || null, paperPlan: state.paperPlan || null, paperAlways: state.paperAlways || null, paperArchive: state.paperArchive || null, entryCheck: state.entryCheck || null, aiReport: state.aiReport || null, mktMargin: state.mktMargin || null, asertF: state.asertF || null, exec: execSummary(state.execLog), bestScen: state.bestScen || null, hashMkts: state.hashMkts || null, fronts: state.fronts || null, frontsPaper: state.frontsPaper || null, market2: state.market2 || null, aiPanorama: state.aiPanorama || null,
+        paper: state.paper || null, paperBurst: state.paperBurst || null, paperPlan: state.paperPlan || null, paperAlways: state.paperAlways || null, paperArchive: state.paperArchive || null, entryCheck: state.entryCheck || null, calib: state.calib || null, calibPrev: state.calibPrev || null, aiReport: state.aiReport || null, mktMargin: state.mktMargin || null, asertF: state.asertF || null, exec: execSummary(state.execLog), bestScen: state.bestScen || null, hashMkts: state.hashMkts || null, fronts: state.fronts || null, frontsPaper: state.frontsPaper || null, market2: state.market2 || null, aiPanorama: state.aiPanorama || null,
         fundPaperLT: state.fundPaperLT ? { summary: fundPaperSummary(state.fundPaperLT, LT_FEES), open: state.fundPaperLT.open, closed: state.fundPaperLT.closed.slice(-50).reverse() } : null, opLog: (state.opLog || []).slice(-20).reverse(), real: state.real ? Object.assign({}, state.real, { paid: undefined }) : null,
         fundPaper: state.fundPaper ? { summary: fundPaperSummary(state.fundPaper, FD.DEFAULT_FEES), open: state.fundPaper.open, closed: state.fundPaper.closed.slice(-100).reverse() } : null,
         algoPaper: state.algoPaper || null,
@@ -737,6 +756,33 @@ async function api(req, env, url, fetchFn) {
     const [orders, cfg] = await Promise.all([nh.myOrders(book.market), getConfig(env)]);
     return json({ market: book.market, orders: orders.map((o) => Object.assign(o, { managed: (cfg.managed || []).includes(o.id) })) });
   }
+  if (p === '/calib/start' && m === 'POST') {
+    // Teste de calibração: ordem pequena (mínimo da NiceHash) na potência pedida, no preço que entrega essa potência
+    // (profundidade do livro + 0,5%), fora do controle do robô; o servidor encerra sozinho no prazo.
+    need();
+    const st = await kvGet(env, 'state', {}), cfg = await getConfig(env);
+    if (st.calib && !st.calib.done) return json({ error: 'já existe um teste de calibração em andamento' }, 400);
+    const u = await nh.units(), ph = Math.max(u.minLimitPH, Math.min(+body.ph || 10, limits.maxLimitPh)), hours = Math.max(0.5, Math.min(+body.hours || 2, 6));
+    const poolId = body.poolId || cfg.poolId; if (!poolId) return json({ error: 'escolha o pool (Mineração → Robô → Pool para ordens novas)' }, 400);
+    const book = parseBook(await nh.orderBook()), d = (book && book.depth) || [];
+    const lv = d.find((x) => x[1] >= ph) || d[d.length - 1]; if (!lv) return json({ error: 'livro da NiceHash vazio agora' }, 400);
+    const priceEH = Math.ceil(lv[0] * (1 + (cfg.bidPremiumPct || 0.5) / 100) * 1e4) / 1e4, amount = Math.max(u.minOrderBtc, +body.amountBtc || 0);
+    if (amount > limits.maxOrderBtc) return json({ error: 'valor acima do teto do servidor' }, 400);
+    const o = await nh.createOrder({ market: book.market, priceEH, limitPH: ph, amountBtc: amount, poolId });
+    const now = Date.now();
+    st.calib = { id: o.id, start: now, until: now + hours * 3600e3, ph, priceEH, amountBtc: amount, poolId, hours };
+    await kvPut(env, 'state', st);
+    await appendLog(env, [{ t: now, kind: 'acao', text: `Teste de calibração iniciado: ${ph} PH/s a ${priceEH.toFixed(4).replace('.', ',')} BTC/EH/dia por ${hours} h, ordem de ${amount} BTC (o que sobrar volta para a carteira ao encerrar)` }]);
+    return json(st.calib);
+  }
+  if (p === '/calib/stop' && m === 'POST') {
+    need();
+    const st = await kvGet(env, 'state', {});
+    if (!st.calib || st.calib.done) return json({ error: 'nenhum teste em andamento' }, 400);
+    st.calib.until = Date.now(); await kvPut(env, 'state', st); // o próximo ciclo encerra a ordem e calcula o resultado
+    return json({ ok: true });
+  }
+  if (p === '/calib/clear' && m === 'POST') { const st = await kvGet(env, 'state', {}); if (st.calib && st.calib.done) { st.calibPrev = st.calib; st.calib = null; await kvPut(env, 'state', st); } return json({ ok: true }); }
   if (p === '/orders' && m === 'POST') {
     need();
     const u = await nh.units();
