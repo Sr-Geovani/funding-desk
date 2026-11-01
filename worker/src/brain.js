@@ -114,18 +114,32 @@ const sgn = (x, d = 1) => (x > 0 ? 'positiva (+' : x < 0 ? 'negativa (' : 'zero 
 // seguintes ficou positiva. Agrupa por faixa de 1 ponto e descobre a partir de qual margem a chance de resultado
 // positivo passa de 60%. Esquece devagar (peso cai à metade em ~1 semana): a faixa acompanha o mercado. Também
 // guarda o próprio placar: nas vezes em que a faixa dizia "boa", quantas acertou.
-export const BAND = { aheadH: 2, minN: 8, minHit: 0.6, decay: 0.999, lo: -8, hi: 10 };
+export const BAND = { aheadH: 2, minN: 8, minHitLo: 0.5, haircut: 0.5, z: 1.28, decay: 0.999, lo: -8, hi: 10 };
+// Intervalo de confiança do acerto (Wilson, 80%): com poucos casos, "67%" pode ser sorte; o intervalo mostra o quanto.
+export function wilson(h, n, z = BAND.z) {
+  if (!(n > 0)) return { lo: 0, hi: 1 };
+  const p = h / n, d = 1 + z * z / n, c = p + z * z / (2 * n), m = z * Math.sqrt(p * (1 - p) / n + z * z / (4 * n * n));
+  return { lo: Math.max(0, (c - m) / d), hi: Math.min(1, (c + m) / d) };
+}
+// Faixa boa = a menor margem a partir da qual, juntando todas as leituras acima dela:
+//  (1) o lucro esperado por dólar nas 2 h seguintes, já descontada a execução (hash demora a chegar, degrau de preço:
+//      0,5 ponto), fica positivo MESMO no limite de baixo do intervalo; e (2) o acerto fica acima de 50% no limite de baixo.
+// Decide pelo lucro esperado, não só pelo acerto; e só confia quando a margem de erro deixa.
 export function bandThreshold(band) {
   if (!band || !band.bins) return null;
-  let n = 0, h = 0, sum = 0, best = null;
+  let n = 0, h = 0, sum = 0, sq = 0, best = null;
   for (let b = BAND.hi; b >= BAND.lo; b--) {
-    const x = band.bins[b]; if (!x) continue; n += x[0]; h += x[1]; sum += x[2];
-    if (n >= BAND.minN && h / n >= BAND.minHit && sum / n > 0) best = { from: b, n, hit: h / n, avgNext: sum / n };
+    const x = band.bins[b]; if (!x) continue;
+    n += x[0]; h += x[1]; sum += x[2]; sq += x[3] !== undefined ? x[3] : x[2] * x[2] / (x[0] || 1);
+    if (n < BAND.minN) continue;
+    const mean = sum / n, sd = Math.sqrt(Math.max(0, sq / n - mean * mean)), ev = mean - BAND.haircut, evLo = ev - BAND.z * sd / Math.sqrt(n), w = wilson(h, n);
+    if (evLo > 0 && w.lo >= BAND.minHitLo) best = { from: b, n, hit: h / n, hitLo: w.lo, hitHi: w.hi, avgNext: mean, ev, evLo };
   }
   return best;
 }
 function bandStep(band, hist, fixAt, now) {
   const B = band && band.bins ? band : { bins: {}, lastT: 0, calls: { n: 0, hits: 0 } };
+  B.calls = B.calls || { n: 0, hits: 0 };
   const F = 1.058, fx = (x) => (fixAt && x[0] < fixAt ? ((1 + x[1] / 100) / F - 1) * 100 : x[1]);
   const pts = (hist || []).filter((x) => x && isFinite(x[1]));
   for (let i = 0; i < pts.length; i++) {
@@ -138,8 +152,8 @@ function bandStep(band, hist, fixAt, now) {
     const T = bandThreshold(B); // o que a faixa dizia ANTES de ver o resultado (placar honesto)
     if (T && e >= T.from) { B.calls.n++; if (hit) B.calls.hits++; }
     for (const k of Object.keys(B.bins)) B.bins[k] = B.bins[k].map((v) => v * BAND.decay);
-    const b = Math.max(BAND.lo, Math.min(BAND.hi, Math.floor(e))), x = B.bins[b] || (B.bins[b] = [0, 0, 0]);
-    x[0] += 1; x[1] += hit ? 1 : 0; x[2] += avg;
+    const b = Math.max(BAND.lo, Math.min(BAND.hi, Math.floor(e))), x = B.bins[b] || (B.bins[b] = [0, 0, 0, 0]);
+    x[0] += 1; x[1] += hit ? 1 : 0; x[2] += avg; x[3] = (x[3] !== undefined ? x[3] : x[2] * x[2] / x[0]) + avg * avg;
   }
   B.at = now;
   return B;
@@ -257,10 +271,10 @@ export function analysis(snap, ai) {
       const sug = T.from > snap.minEdge ? `Aumente a margem mínima para ${T.from}%: abaixo disso o mercado devolveu prejuízo na maior parte das vezes.`
         : T.from < snap.minEdge ? `Se quiser operar mais vezes, ajuste a margem mínima para ${T.from}%: a partir dela a média das 2 horas seguintes foi positiva. Com ${snap.minEdge}% você opera menos, com folga maior.`
         : `Mantenha a margem mínima em ${snap.minEdge}%: é exatamente onde a chance passa a ser maior.`;
-      out.push(`O que a IA aprendeu (${f(T.n, 0)} leituras): quando a margem estava a partir de ${T.from}%, as 2 horas seguintes tiveram média positiva em ${f(T.hit * 100, 0)}% das vezes. ${sug}${hrs ? ` Horários com mais chance: ${hrs} (Brasília).` : ''} ${e >= T.from ? 'Agora está dentro dessa faixa.' : `Agora está fora: faltam ${f(T.from - e, 1)} pontos.`}`);
-    } else if (ai && ai.band) out.push(`A IA ainda não achou uma faixa de margem com resultado positivo nas 2 horas seguintes (precisa de pelo menos ${BAND.minN} casos com mais de 60% de acerto). Enquanto isso, a sugestão é manter o robô pausado e acompanhar.`);
-    if (C && C.n >= 5) out.push(`Placar da faixa aprendida: nas ${C.n} vezes em que ela disse "faixa boa", acertou ${C.hits} (${f(C.hits / C.n * 100, 0)}%). Quando erra, a faixa sobe sozinha; quando acerta, ela se mantém.`);
-    if (lim.stopUsd || lim.dailyUsd) out.push(`Limites que a IA respeita (definidos por você): stop-loss de US$${f(lim.stopUsd || 0, 0)} por tentativa, espera de ${f(lim.coolH || 0, 0)} h depois dele e limite diário de US$${f(lim.dailyUsd || 0, 0)}.`);
+      out.push(`O que a IA aprendeu (${f(T.n, 0)} leituras): quando a margem estava a partir de ${T.from}%, as 2 horas seguintes tiveram média positiva em ${f(T.hit * 100, 0)}% das vezes (margem de erro: entre ${f(T.hitLo * 100, 0)}% e ${f(T.hitHi * 100, 0)}%). Lucro esperado, já com o custo de execução: US$${f(T.ev, 2)} a cada US$100 gastos (no pior caso do intervalo, US$${f(T.evLo, 2)}). ${sug}${hrs ? ` Horários com mais chance: ${hrs} (Brasília).` : ''} ${e >= T.from ? 'Agora está dentro dessa faixa.' : `Agora está fora: faltam ${f(T.from - e, 1)} pontos.`}`);
+    } else if (ai && ai.band) out.push(`A IA ainda não achou uma faixa de margem em que o lucro esperado das 2 horas seguintes fique positivo com segurança (já descontado o custo de execução e a margem de erro; precisa de pelo menos ${BAND.minN} casos). Enquanto isso, a sugestão é manter o robô pausado e acompanhar.`);
+    if (C && C.n >= 5) { const w = wilson(C.hits, C.n); out.push(`Placar da faixa aprendida: nas ${C.n} vezes em que ela disse "faixa boa", acertou ${C.hits} (${f(C.hits / C.n * 100, 0)}%; margem de erro entre ${f(w.lo * 100, 0)}% e ${f(w.hi * 100, 0)}%). Quando erra, a faixa sobe sozinha; quando acerta, ela se mantém.`); }
+    if (lim.stopUsd || lim.dailyUsd) out.push(`Limites que a IA respeita (definidos por você): stop-loss de US$${f(lim.stopUsd || 0, 0)} por tentativa, espera de ${f(lim.coolH || 0, 0)} h depois dele e limite diário de US$${f(lim.dailyUsd || 0, 0)}${lim.weekUsd ? `; perda máxima de US$${f(lim.weekUsd, 0)} em 7 dias` : ''}.`);
     if (snap.green) recs.push({ area: 'mineracao', text: 'Janela aberta: com o robô em Ativo, ele compraria agora e pararia no bloco.', type: 'mine_buy' });
   }
   if (snap.mom && snap.mom.vsEmaPct >= 2) out.push(`BCH subiu ${f(snap.mom.vsEmaPct, 1)}% acima da média de 2 dias contra o BTC: a dificuldade ainda não reagiu, o que costuma melhorar a margem nas próximas horas.`);

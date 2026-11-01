@@ -169,7 +169,11 @@ export async function tick(env, opts = {}) {
     const r = await settle(nh.myOrders(book.market));
     if (r.ok) orders = r.v; else errors.push('ordens: ' + r.e);
   }
-  const dec = decide({ cfg, mkt, orders, state, now, units, limits, blockEvent });
+  // perda real dos últimos 7 dias (UTC): gasto − recebido das ordens gerenciadas e blocos pagos
+  const weekLossUsd = (() => { const d = (state.real && state.real.days) || {}, from = new Date(now - 6 * 864e5).toISOString().slice(0, 10);
+    return Object.entries(d).filter(([k]) => k >= from).reduce((a, [, x]) => a + (x.spendUsd || 0) - (x.revenueUsd || 0), 0); })();
+  const dec = decide({ cfg, mkt, orders, state, now, units, limits, blockEvent, weekLossUsd });
+  if (dec.state.weekStop && !state.weekStop) await notify(env, `Funding Desk: limite de perda semanal atingido (perda real de US$${weekLossUsd.toFixed(2)} em 7 dias; limite US$${cfg.weeklyLossUsd}). Robô encerrou as ordens e não cria novas até a perda da semana baixar.`, fetchFn);
 
   // Simulação (só no modo Observar) e resultado real (ordens gerenciadas + blocos).
   // Preço v2 (31/10): o lance simulado passou a sair do preço que de fato recebe hash (ordens com máquinas). Até aqui as
@@ -475,7 +479,7 @@ export async function tick(env, opts = {}) {
   // Margem média do mercado (24 h e 7 dias): o "normal" contra o qual a IA, a cartilha e o painel comparam o momento.
   const mktMargin = marginStats(state.edgeHist, { now, fixAt: paperArchive && paperArchive.at, minEdge: cfg.minEdgePct, edgeNow: mkt.ok ? mkt.edgeAtBidPct : null });
   // Copiloto IA: analisa tudo e registra previsões conferíveis (XP e maturidade).
-  const snap = { mm: mktMargin, hist: state.edgeHist || [], fixAt: paperArchive && paperArchive.at, limits: { stopUsd: cfg.sessionBudgetUsd, coolH: cfg.stopCooldownH, dailyUsd: cfg.dailyBudgetUsd }, now, edge: mkt.ok ? mkt.edgeAtBidPct : NaN, green: !!(mkt.ok && mkt.green), minEdge: cfg.minEdgePct, darr: darr ? darr.v : NaN,
+  const snap = { mm: mktMargin, hist: state.edgeHist || [], fixAt: paperArchive && paperArchive.at, limits: { stopUsd: cfg.sessionBudgetUsd, coolH: cfg.stopCooldownH, dailyUsd: cfg.dailyBudgetUsd, weekUsd: cfg.weeklyLossUsd }, now, edge: mkt.ok ? mkt.edgeAtBidPct : NaN, green: !!(mkt.ok && mkt.green), minEdge: cfg.minEdgePct, darr: darr ? darr.v : NaN,
     D: info.ok ? info.v.difficulty : null, mom: msig.mom, ret: retargetOf(msig.adj, darr ? darr.v : NaN), win: windowMeter(recentBlocks, now),
     fund: ((funding && funding.best) || []).map((b) => ({ key: b.key, coin: b.coin, netUsd: b.netUsd })), rows: funding ? funding.rows : null, fees: FD.DEFAULT_FEES, stable24,
     algos: algoPaper ? Object.entries(algoPaper.algos).map(([k, a]) => ({ k, label: a.label, edge: a.edgeNow, level: a.level })) : [],

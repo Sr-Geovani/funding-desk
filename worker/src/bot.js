@@ -16,6 +16,7 @@ export const DEFAULT_CONFIG = {
   sessionBudgetUsd: 300,    // stop-loss: gasto máximo por tentativa (até achar bloco), somando todas as ordens (0 = desligado)
   stopCooldownH: 6,         // depois do stop-loss, horas sem criar ordem nova (a janela que comeu o orçamento passa)
   dailyBudgetUsd: 500,      // gasto máximo por dia (UTC); ao atingir, reduz para a potência de pausa
+  weeklyLossUsd: 1000,      // perda máxima em 7 dias (gasto − recebido, resultado real); ao atingir, encerra tudo e avisa (0 = desligado)
   autoCreate: false,        // criar ordem quando o sinal ficar verde e não houver ordem gerenciada
   orderAmountBtc: 0.002,
   managed: [],              // ids das ordens que o robô pode alterar ou cancelar
@@ -56,7 +57,7 @@ export function sanitizeConfig(input = {}, prev = DEFAULT_CONFIG, limits = limit
   if (input.poolId !== undefined) c.poolId = String(input.poolId).slice(0, 64);
   num('poolFeePct', 0, 20); num('rentFeePct', 0, 20); num('minEdgePct', -50, 100); num('bidPremiumPct', 0, 50);
   num('targetPh', 0, limits.maxLimitPh); num('minPh', 0, limits.maxLimitPh);
-  num('sessionBudgetUsd', 0, limits.maxDailyUsd); num('dailyBudgetUsd', 0, limits.maxDailyUsd); num('stopCooldownH', 0, 72);
+  num('sessionBudgetUsd', 0, limits.maxDailyUsd); num('dailyBudgetUsd', 0, limits.maxDailyUsd); num('stopCooldownH', 0, 72); num('weeklyLossUsd', 0, limits.maxDailyUsd * 7);
   num('orderAmountBtc', 0, limits.maxOrderBtc);
   if (input.autoCreate !== undefined) c.autoCreate = !!input.autoCreate;
   if (input.alerts !== undefined) c.alerts = !!input.alerts;
@@ -134,7 +135,7 @@ function utcDay(ms) { return new Date(ms).toISOString().slice(0, 10); }
 // Decide as ações do ciclo. Não executa nada: devolve ações, notas e o novo estado.
 // orders: ordens normalizadas (priceEH, limitPH, paidBtc, alive, createdTs).
 // blockEvent: { height, bch } quando a recompensa de um bloco caiu no endereço desde o último ciclo.
-export function decide({ cfg, mkt, orders, state = {}, now, units, limits = limitsFromEnv(), blockEvent = null }) {
+export function decide({ cfg, mkt, orders, state = {}, now, units, limits = limitsFromEnv(), blockEvent = null, weekLossUsd = 0 }) {
   const st = JSON.parse(JSON.stringify(state || {}));
   st.lastDecrease = st.lastDecrease || {}; st.dayStart = st.dayStart || {};
   const actions = [], notes = [];
@@ -156,6 +157,15 @@ export function decide({ cfg, mkt, orders, state = {}, now, units, limits = limi
   if (dailyHit) notes.push(`limite diário atingido (US$${dailyUsd.toFixed(2)})`);
 
   if (cfg.mode === 'off') return { actions, notes: notes.concat('robô desligado'), state: st };
+
+  // Limite de perda da carteira (7 dias, resultado real): acima dele encerra todas as ordens e não cria novas até a perda
+  // da semana voltar para baixo do limite (os dias mais antigos saem da conta).
+  if (cfg.weeklyLossUsd > 0 && weekLossUsd >= cfg.weeklyLossUsd) {
+    for (const o of managed) actions.push({ type: 'cancel', id: o.id, reason: `limite de perda semanal: perda real de US$${weekLossUsd.toFixed(2)} em 7 dias (limite US$${cfg.weeklyLossUsd}); encerrando` });
+    st.weekStop = true;
+    return { actions, notes: notes.concat(`limite de perda semanal atingido (US$${weekLossUsd.toFixed(2)} de US$${cfg.weeklyLossUsd})`), state: st };
+  }
+  st.weekStop = false;
 
   // Sessão = uma tentativa de achar bloco. Soma o gasto de TODAS as ordens gerenciadas, inclusive as que já acabaram
   // (orçamento da ordem esgotado ou cancelada), em BTC. Zera no bloco. No stop-loss cancela tudo e fica stopCooldownH

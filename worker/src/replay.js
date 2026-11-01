@@ -75,5 +75,24 @@ export function bestScenarios(list, { now, since, fixAt, cfg, btcUsd, blockUsd }
   const eff = uniq(all.slice().sort((a, b) => b.profitUsd / b.costUsd - a.profitUsd / a.costUsd || a.costUsd - b.costUsd))
     .filter((r) => !best.some((z) => same(z, r))).slice(0, 5);
   const top = best.map(out), effTop = eff.map(out);
-  return { at: now, from, blocks: L.filter((r) => r.t > from).length, tested: all.length, top, eff: effTop };
+  // Fora da amostra: escolhe a melhor combinação só com a 1ª metade da janela e mede na 2ª metade. Se a "melhor" foi
+  // sorte, na 2ª metade ela volta para perto da média. Pela sorte (lucro) e pela média (lucro esperado).
+  let oos = null;
+  const mid = from + (now - from) / 2;
+  if (L.filter((r) => r.t > from && r.t <= mid).length >= 30 && L.filter((r) => r.t > mid).length >= 30) {
+    const o1 = Object.assign({}, o, { to: mid }), o2 = Object.assign({}, o, { from: mid });
+    const first = [];
+    for (const ph of BEST_PH) for (const filter of RP_FILTERS) for (const stopUsd of stops) {
+      const s0 = { ph, filter, stopUsd, coolH: stopUsd ? cool : 0 }, r = runStrategy(L, s0, o1);
+      if (r.costUsd > 0) first.push([s0, r]);
+    }
+    const judge = (f) => {
+      if (!first.length) return null;
+      const [s0, r1] = first.slice().sort((a, b) => f(b[1]) - f(a[1]))[0], r2 = runStrategy(L, s0, o2);
+      const pk = (r) => ({ costUsd: +r.costUsd.toFixed(2), profitUsd: +r.profitUsd.toFixed(2), pct: r.pct === null ? null : +r.pct.toFixed(1), evPct: r.evPct === null ? null : +r.evPct.toFixed(2), blocks: r.blocks });
+      return { ph: s0.ph, filter: s0.filter === 'min' ? o.minEdgePct : s0.filter, stopUsd: s0.stopUsd, coolH: s0.coolH, first: pk(r1), second: pk(r2) };
+    };
+    oos = { mid, byLuck: judge((r) => r.profitUsd), byAvg: judge((r) => (r.evPct === null ? -1e9 : r.evPct)) };
+  }
+  return { at: now, from, blocks: L.filter((r) => r.t > from).length, tested: all.length, top, eff: effTop, oos };
 }

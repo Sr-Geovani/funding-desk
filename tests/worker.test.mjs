@@ -90,6 +90,17 @@ test('robô: sinal verde sobe para a potência alvo no lance', () => {
   assert.deepEqual([d.actions[0].type, d.actions[0].priceEH, d.actions[0].limitPH], ['update', 0.40, 20]);
 });
 
+test('robô: limite de perda semanal encerra tudo e não cria ordem nova', () => {
+  const d = decide({ cfg: cfgOf({ weeklyLossUsd: 1000, autoCreate: true, poolId: 'p' }), mkt: mk(), orders: [order({ limitPH: 20 })], now: NOW, units, limits: lim, weekLossUsd: 1200 });
+  assert.equal(d.actions.length, 1); assert.equal(d.actions[0].type, 'cancel'); assert.match(d.actions[0].reason, /limite de perda semanal/); assert.equal(d.state.weekStop, true);
+  const ok = decide({ cfg: cfgOf({ weeklyLossUsd: 1000 }), mkt: mk(), orders: [order({ priceEH: 0.39 })], now: NOW, units, limits: lim, weekLossUsd: 400 });
+  assert.equal(ok.actions[0].type, 'update'); assert.equal(ok.state.weekStop, false);
+  // a simulação segue a mesma regra
+  let p = { since: NOW - 864e5, lastTs: NOW - 180e3, on: false, spendUsd: 1300, evUsd: 0, lambda: 0, hoursOn: 0, sessions: 0, stops: 0, sess: null, days: { [new Date(NOW).toISOString().slice(0, 10)]: { spendUsd: 1300, evUsd: 0, lambda: 0, hoursOn: 0 } } };
+  const r = paperStep(p, { cfg: Object.assign({}, cfgOf({ weeklyLossUsd: 1000, dailyBudgetUsd: 0 })), mkt: Object.assign(mk(), { D: 5e11, blockNetUsd: 900, breakEvenEH: 0.43 }), now: NOW, units, limits: lim, blocks: [] });
+  assert.equal(r.paper.on, false);
+});
+
 test('robô: acima do teto pausa e baixa o preço só um degrau a cada 10 min', () => {
   const m = mk({ green: false, bidEH: 0.47, capEH: 0.42 });
   const d1 = decide({ cfg: cfgOf(), mkt: m, orders: [order({ priceEH: 0.46, limitPH: 20 })], now: NOW, units, limits: lim });
@@ -1200,6 +1211,8 @@ test('replay: mesmas regras refeitas com os blocos registrados (mesmo sorteio, s
   const B = bestScenarios(list, { now, since: list[100].t, fixAt: null, cfg, btcUsd: 110000, blockUsd: 900 });
   assert.ok(B.top.length >= 1 && B.top.length <= 5 && B.tested > 20 && B.from === list[100].t);
   for (let i = 1; i < B.top.length; i++) assert.ok(B.top[i - 1].wonUsd - B.top[i - 1].spendUsd >= B.top[i].wonUsd - B.top[i].spendUsd);
+  assert.ok(B.oos && B.oos.byLuck && B.oos.byAvg && B.oos.mid > B.from, 'teste fora da amostra');
+  assert.ok(B.oos.byLuck.first.profitUsd >= B.oos.byAvg.first.profitUsd, 'pela sorte escolhe o maior lucro da 1ª metade');
   const roi = (x) => (x.wonUsd - x.spendUsd) / x.spendUsd;
   for (let i = 1; i < B.eff.length; i++) assert.ok(roi(B.eff[i - 1]) >= roi(B.eff[i]));
   assert.ok(B.eff.every((e) => !B.top.some((t) => t.ph === e.ph && t.blocks === e.blocks && Math.abs(t.spendUsd - e.spendUsd) < 0.5)));
@@ -1231,11 +1244,13 @@ test('IA aprende a faixa de margem com mais chance (2 h seguintes) e ajusta com 
   const { bandThreshold } = await import('../worker/src/brain.js');
   const now = Date.UTC(2026, 10, 1, 18), hist = [];
   // blocos de 3 h: margem +3% e depois −3%, por 2 dias
-  for (let i = 0; i < 192; i++) hist.push([now - (192 - i) * 15 * 60e3, Math.floor(i / 12) % 2 ? -3 : 3, 0.42]);
+  for (let i = 0; i < 192; i++) hist.push([now - (192 - i) * 15 * 60e3, Math.floor(i / 24) % 2 ? -3 : 3, 0.42]); // blocos de 6 h
   const sn = { now, edge: -3, green: false, minEdge: 1, darr: 1, D: 5e11, mom: null, ret: null, win: null, hist, fixAt: null, fund: [], rows: {}, stable24: {}, algos: [],
     limits: { stopUsd: 300, coolH: 6, dailyUsd: 500 } };
   const ai = brainStep(null, sn).ai, T = bandThreshold(ai.band);
-  assert.equal(T.from, 3); assert.ok(T.hit >= 0.6 && T.n >= 8);
+  assert.equal(T.from, 3); assert.ok(T.hit >= 0.6 && T.n >= 8 && T.evLo > 0 && T.hitLo >= 0.5 && T.hitHi <= 1);
+  // poucos casos não bastam: o mesmo padrão com 6 leituras não vira faixa (margem de erro grande)
+  const { wilson } = await import('../worker/src/brain.js'); const w = wilson(4, 6); assert.ok(w.lo < 0.45 && w.hi > 0.85); // 67% com 6 casos: de 41% a 85%
   const a = analysis(sn, ai);
   assert.ok(a.lines.some((l) => /O que a IA aprendeu/.test(l) && /Aumente a margem mínima para 3%/.test(l) && /Agora está fora: faltam 6,0 pontos/.test(l)), a.lines.join('\n'));
   assert.ok(a.lines.some((l) => /stop-loss de US\$300 por tentativa/.test(l)));
