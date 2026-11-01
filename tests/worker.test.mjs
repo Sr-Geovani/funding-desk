@@ -785,6 +785,7 @@ test('blocos: assinatura do pool, recompensa, taxas, hash da rede e contexto', (
   assert.equal(tagFrom('03a7e10e042553e56a0e736f6c6f706f6f6c2e6f7267eeac348e3d15cb587f3b80000088'), 'solopool.org', 'bloco 975271 de verdade');
   assert.deepEqual(poolOf('/BlockSniper/ x'), { pool: 'BlockSniper', solo: true });
   assert.deepEqual(poolOf('/ViaBTC/Mined by y'), { pool: 'ViaBTC', solo: false });
+  assert.deepEqual(poolOf('/Mining-Dutch/-SOLO'), { pool: 'Mining-Dutch', solo: true });
   const b = { height: 975271, hash: '00ab', time: 1793413925000, difficulty: 522769773689.7484, size: 23618, txs: 46, tag: 'solopool.org',
     outs: [{ value: 3.06350017 }, { value: 0.06252041 }] };
   const r = blockRecord(b, { prevT: 1793413925000 - 540e3, mkt: { ok: true, bchUsd: 290, bidEH: 0.41, medianEH: 0.42, breakEvenEH: 0.4380, edgeAtBidPct: 6.8 }, book: { totalPH: 19450.2 }, sim: { ph: 10, prob: 0.0026, won: false } });

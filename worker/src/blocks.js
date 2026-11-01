@@ -13,7 +13,8 @@ const POOLS = [
   [/kardan/i, 'KardanPool', false], [/k1pool/i, 'K1Pool', false], [/solo/i, 'Solo (outro)', true]
 ];
 export function poolOf(tag) {
-  for (const [re, name, solo] of POOLS) if (re.test(tag || '')) return { pool: name, solo };
+  // pools comuns com modo solo marcam na assinatura (ex.: /Mining-Dutch/-SOLO): conta como solo
+  for (const [re, name, solo] of POOLS) if (re.test(tag || '')) return { pool: name, solo: solo || /solo/i.test(tag) };
   if (!tag) return { pool: 'desconhecido', solo: false };
   // assinatura desconhecida: o nome entre barras (/nome/) ou as primeiras palavras com letras
   const m = /\/([^/]{3,30})\//.exec(tag);
