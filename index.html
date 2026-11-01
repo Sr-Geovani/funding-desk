@@ -630,6 +630,12 @@ details.card>summary{color:var(--fg);font-size:15px}
       <div class="row" style="margin-top:10px"><button class="pri" id="api_paste">Colar link de conexão</button><button id="api_save">Salvar e testar</button><button id="api_clear">Esquecer token</button></div>
       <p class="note" id="api_msg" style="margin:8px 0 0">Normalmente o link de conexão preenche isto sozinho. O token fica só neste aparelho; as chaves da NiceHash e do Telegram ficam cifradas no backend. Com o backend conectado, ele também serve de proxy em tempo real.</p>
     </div>
+    <div class="card" id="rt_card">
+      <h2>Acesso só leitura (suporte)</h2>
+      <p class="note" style="margin:4px 0 8px">Gera um código que deixa só <b>ver</b> o status e os blocos do servidor, para quem está te ajudando conferir os números. Não muda configuração, não cria ordens e não mostra endereço nem chaves. Para cancelar, troque o token do painel.</p>
+      <div class="row"><button id="rt_get">Gerar código de leitura</button><button id="rt_copy" hidden>Copiar</button></div>
+      <p class="note mono" id="rt_val" style="margin:8px 0 0;word-break:break-all"></p>
+    </div>
     <div class="card" id="acct">
       <h2>Conectar contas</h2>
       <p class="note" id="ac_state" style="margin:4px 0 8px">Conecte o backend primeiro.</p>

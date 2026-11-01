@@ -63,6 +63,21 @@ function authOk(req, env) {
   return safeEqual(h.replace(/^Bearer\s+/i, ''), t);
 }
 
+// Token só de leitura (para suporte): derivado do PANEL_TOKEN (HMAC), não precisa de segredo novo. Só abre GET /api/status
+// e /api/blocks, sem endereço, chaves ou Telegram; não muda nada nem opera. Para revogar, troque o PANEL_TOKEN.
+async function readToken(env) {
+  const t = env.PANEL_TOKEN;
+  if (!t || t.length < 24) return null;
+  const k = await crypto.subtle.importKey('raw', new TextEncoder().encode(t), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const sig = new Uint8Array(await crypto.subtle.sign('HMAC', k, new TextEncoder().encode('funding-desk/leitura/v1')));
+  return 'leitura-' + Array.from(sig.slice(0, 20), (b) => b.toString(16).padStart(2, '0')).join('');
+}
+async function readOk(req, env, url) {
+  if (req.method !== 'GET' || !['/api/status', '/api/blocks'].includes(url.pathname)) return false;
+  const rt = await readToken(env), h = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
+  return !!rt && safeEqual(h, rt);
+}
+
 /* ---------- armazenamento (KV) ---------- */
 async function kvGet(env, key, def) {
   if (!env.FD_KV) throw new Error('KV FD_KV não configurado no Worker');
@@ -588,6 +603,7 @@ async function api(req, env, url, fetchFn) {
   const nh = nhClient(env, fetchFn), limits = limitsFromEnv(env);
   const need = () => { if (!hasKeys(env)) throw Object.assign(new Error('NiceHash não conectada: cadastre as chaves em Ajustes → Conectar contas'), { status: 412 }); };
 
+  if (p === '/readtoken' && m === 'GET') return json({ token: await readToken(env) });
   if (p === '/status' && m === 'GET') {
     const [cfg, state] = await Promise.all([getConfig(env), kvGet(env, 'state', {})]);
     return json({ version: VERSION, algo: nh.algorithm, nhEnv: env.NH_BASE ? 'personalizado' : (env.NH_ENV === 'prod' ? 'produção' : 'teste'), keys: hasKeys(env),
@@ -779,8 +795,15 @@ export default {
       }
       if (url.pathname.startsWith('/api/')) {
         if (!allowedOrigin(env, req.headers.get('Origin')) && req.headers.get('Origin')) return json({ error: 'origem não permitida' }, 403, h);
-        if (!authOk(req, env)) return json({ error: 'token inválido ou PANEL_TOKEN não configurado (mínimo 24 caracteres)' }, 401, h);
-        const r = await api(req, await withCreds(env), url, fetchFn);
+        const full = authOk(req, env), ro = !full && await readOk(req, env, url);
+        if (!full && !ro) return json({ error: 'token inválido ou PANEL_TOKEN não configurado (mínimo 24 caracteres)' }, 401, h);
+        let r = await api(req, await withCreds(env), url, fetchFn);
+        if (ro && url.pathname === '/api/status') { // leitura: sem endereço, chaves e Telegram
+          const j = await r.json();
+          if (j.config) j.config = Object.assign({}, j.config, { payoutAddress: j.config.payoutAddress ? '(oculto)' : '' });
+          j.creds = null; j.readOnly = true;
+          r = json(j);
+        }
         for (const [k, v] of Object.entries(h)) r.headers.set(k, v);
         return r;
       }

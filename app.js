@@ -1044,7 +1044,8 @@ function renderEntry(){
         '<div class="kv" style="margin-top:4px"><div><small>Média</small><span class="'+(M.avg>=0?'good':'bad')+'">'+pct(M.avg,1)+'</span></div>'+
         (M.h24!==null&&M.h24!==undefined?'<div><small>Média 24 h</small><span class="'+(M.h24>=0?'good':'bad')+'">'+pct(M.h24,1)+'</span></div>':'')+
         '<div><small>Tempo ≥ 0</small><span>'+pctp(M.pctPos,0)+'</span></div><div><small>Tempo ≥ '+nf(mn,0)+'%</small><span>'+pctp(M.pctMin,1)+'</span></div></div>'+
-        (M.rankNow!==null?'<div class="note" style="margin-top:4px">Agora está melhor que <b>'+pctp(M.rankNow,0)+'</b> das leituras do período ('+(M.rankNow>=80?'bom para o padrão do mercado':M.rankNow<=20?'ruim para o padrão do mercado':'momento comum')+').</div>':'')+'</div>'})(E.market):'')+
+        (M.rankNow!==null?'<div class="note" style="margin-top:4px">Agora está melhor que <b>'+pctp(M.rankNow,0)+'</b> das leituras do período ('+(M.rankNow>=80?'bom para o padrão do mercado':M.rankNow<=20?'ruim para o padrão do mercado':'momento comum')+').</div>':'')+
+        (isFinite(M.top10)?'<div class="note" style="margin-top:4px"><b>Onde a chance é maior:</b> os 10% melhores momentos tiveram margem ≥ <b>'+pct(M.top10,1)+'</b> (25% melhores ≥ '+pct(M.top25,1)+')'+(M.bestHours&&M.bestHours.length?'; horários com melhor margem média: '+M.bestHours.map(function(x){return ('0'+x.h).slice(-2)+'h ('+pct(x.avg,1)+')'}).join(', ')+' (Brasília)':'')+'.</div>':'')+'</div>'})(E.market):'')+
     '<div class="stack" style="gap:4px">'+E.steps.map(function(s){var c=S[s.status]||S.na;
       return '<details class="trow"><summary><span class="chip '+c[0]+'">'+c[1]+'</span> <b>'+s.n+'. '+esc(s.title)+'</b><div class="note" style="margin:2px 0 0 28px">'+esc(s.value)+'</div></summary><p class="note" style="margin:4px 0 0">'+esc(s.why)+'</p></details>'}).join('')+'</div>'+
     (E.lottery?'<p class="note" style="margin:8px 0 0">'+esc(E.lottery)+'</p>':'')+
@@ -1169,6 +1170,12 @@ function renderHeat(){
   for(var hl=0;hl<24;hl++){h+='<tr><td class="mono">'+('0'+hl).slice(-2)+'</td>';for(var dl=0;dl<7;dl++){var v=cell(dl,hl);h+='<td class="mono" style="text-align:center;background:'+col(v)+'">'+(v===null?'':nf(v,1))+'</td>'}h+='</tr>'}
   el.innerHTML=h+'</table></div>';
 }
+// Código só de leitura para suporte (o servidor deriva do token do painel; só abre status e blocos).
+document.addEventListener('click',function(e){
+  if(e.target.id==='rt_get'){var b=e.target;if(!settings.apiUrl){$('rt_val').textContent='Conecte o backend primeiro.';return}
+    b.disabled=true;apiCall('GET','/readtoken').then(function(r){b.disabled=false;$('rt_val').textContent=r.token||'Servidor sem token configurado.';$('rt_copy').hidden=!r.token},function(er){b.disabled=false;$('rt_val').textContent='Falhou: '+er.message+' (o servidor pode estar numa versão antiga; tente em 2 min)'})}
+  if(e.target.id==='rt_copy'){var t=$('rt_val').textContent;if(navigator.clipboard)navigator.clipboard.writeText(t).then(function(){e.target.textContent='Copiado'},function(){});}
+});
 /* ---------- registro dos blocos da rede (servidor) ---------- */
 var blk={list:[],sum:null,at:0,err:null};
 function loadBlocksLog(force){

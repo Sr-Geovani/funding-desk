@@ -209,7 +209,11 @@ export function analysis(snap, ai) {
       const lab = W.label || (snap.mm.d7 ? '7 dias' : '24 h');
       out.push(`Mercado (${lab}): margem média ${f(W.avg, 1)}% (mediana ${f(W.median, 1)}%, de ${f(W.min, 1)}% a ${f(W.max, 1)}%). Margem ≥ 0 em ${f(W.pctPos, 0)}% do tempo; ≥ seu mínimo de ${snap.minEdge}% em ${f(W.pctMin, 1)}% (~${f(W.hoursMin, 1)} h). ` +
         (W.rankNow !== null ? `A margem de agora (${f(e, 1)}%) está melhor que ${f(W.rankNow, 0)}% das leituras: ${W.rankNow >= 80 ? 'momento bom para o padrão do mercado' : W.rankNow <= 20 ? 'momento ruim para o padrão do mercado' : 'momento comum'}.` : ''));
-      if (W.pctMin < 2 && W.n >= 48) out.push(`Seu mínimo de ${snap.minEdge}% quase não aconteceu (${f(W.pctMin, 1)}% do tempo): o robô vai comprar pouco. É o mercado, não defeito: abaixo de 0 se perde em média. Para comprar mais vezes sem perder, o caminho é custo menor (Braiins sem taxa: empate ~2 pontos mais baixo), não baixar o mínimo.`);
+      // onde a chance é maior (não "não entre"): a faixa dos melhores 10% do tempo, os horários e o DARR desses momentos
+      const M = snap.mm, hrs = (M.bestHours || []).map((x) => `${String(x.h).padStart(2, '0')}h (${f(x.avg, 1)}%)`).join(', ');
+      out.push(`Onde a chance é maior: a média do mercado é ${W.avg >= 0 ? 'positiva' : 'negativa'} (${f(W.avg, 1)}%); os 10% melhores momentos tiveram margem ≥ ${f(W.top10, 1)}% (e os 25% melhores ≥ ${f(W.top25, 1)}%)` +
+        (hrs ? `, mais frequentes às ${hrs} (Brasília)` : '') + (M.darrTop && M.darrAll ? `, com DARR médio ${f(M.darrTop, 3)} contra ${f(M.darrAll, 3)} no geral` : '') +
+        `. Seu mínimo de ${snap.minEdge}% aconteceu em ${f(W.pctMin, 1)}% do tempo (~${f(W.hoursMin, 1)} h). Agora: ${f(e, 1)}%, ${W.rankNow !== null && W.rankNow >= 90 ? 'dentro da faixa dos melhores momentos' : W.rankNow !== null && W.rankNow >= 75 ? 'perto da faixa boa' : 'fora da faixa boa'}.`);
     }
   }
   if (snap.mom && snap.mom.vsEmaPct >= 2) out.push(`BCH subiu ${f(snap.mom.vsEmaPct, 1)}% acima da média de 2 dias contra o BTC: a dificuldade ainda não reagiu, o que costuma melhorar a margem nas próximas horas.`);

@@ -168,6 +168,15 @@ test('integração: autenticação e origem', async () => {
     assert.equal(ok.body.keys, true);
     assert.equal(ok.headers.get('access-control-allow-origin'), 'https://sr-geovani.github.io');
     assert.equal((await worker.fetch(new Request('https://api.example/api/status', { headers: { Authorization: 'Bearer curto' } }), Object.assign({}, t.env, { PANEL_TOKEN: 'curto' }), {})).status, 401, 'token curto não vale');
+    // código só de leitura: vê status e blocos (sem endereço e chaves); não muda nada
+    await t.call('PUT', '/api/config', { payoutAddress: 'bitcoincash:q' + 'a'.repeat(41) });
+    const rt = (await t.call('GET', '/api/readtoken')).body.token;
+    assert.match(rt, /^leitura-[0-9a-f]{40}$/);
+    const st = await t.call('GET', '/api/status', null, rt);
+    assert.equal(st.status, 200); assert.equal(st.body.readOnly, true); assert.equal(st.body.creds, null); assert.equal(st.body.config.payoutAddress, '(oculto)');
+    assert.equal((await t.call('GET', '/api/blocks', null, rt)).status, 200);
+    assert.equal((await t.call('PUT', '/api/config', { targetPh: 5 }, rt)).status, 401, 'leitura não altera configuração');
+    assert.equal((await t.call('GET', '/api/readtoken', null, rt)).status, 401);
   } finally { t.server.close(); }
 });
 
@@ -1213,5 +1222,6 @@ test('margem do mercado: média, tempo acima do mínimo e posição de agora; IA
   const a = analysis(sn, brainStep(null, sn).ai);
   assert.ok(a.lines.some((l) => /Mercado \(24 h\): margem média/.test(l) && /melhor que/.test(l)));
   assert.equal(marginStats(H.map((x) => [x[0], 1]), { now, minEdge: 3, edgeNow: 1 }).h24.rankNow, 50, 'empate fica no meio');
-  assert.ok(a.lines.some((l) => /quase não aconteceu/.test(l)), 'mínimo raro: explica e não sugere baixar o mínimo');
+  assert.ok(a.lines.some((l) => /Onde a chance é maior: a média do mercado é negativa/.test(l) && /10% melhores momentos tiveram margem ≥/.test(l)));
+  assert.ok(M.h24.top10 >= M.h24.median && M.bestHours.length >= 1);
 });

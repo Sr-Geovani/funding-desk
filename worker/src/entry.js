@@ -80,12 +80,12 @@ export function entryChecklist({ mkt, darr, mom, ret, win, nhWeek, hashMkts, pow
   if (ok(nh) && nh >= minEdge && trendBad === 0) { verdict = 'entrar'; title = 'Entrada favorável'; text = 'Margem real acima do mínimo e nenhum sinal de que a janela vai fechar já. Tamanho pelo passo 8; stop-loss pelo passo 9.'; }
   else if (ok(nh) && nh >= minEdge) { verdict = 'cautela'; title = 'Margem boa, mas a janela pode fechar'; text = trendBad + ' sinal(is) de piora (passos 4–6): entrar menor e acompanhar.'; }
   else if ((ok(nh) && nh >= 0) || (ok(br) && br >= minEdge)) { verdict = 'esperar'; title = 'Quase'; text = ok(br) && br >= minEdge ? 'Pela Braiins (sem taxa) a margem já passaria do mínimo; na NiceHash ainda não.' : 'Margem positiva mas abaixo do mínimo: esperar subir.'; }
-  else { verdict = 'nao'; title = 'Não entrar agora'; text = 'Margem real negativa: em média, cada dólar gasto volta menos de um dólar.' + (trendBad ? ' E ' + trendBad + ' sinal(is) indicam piora.' : ''); }
+  else { const Wm = mm && (mm.d7 || mm.h24); verdict = 'nao'; title = 'Fora da faixa boa'; text = 'Margem real negativa agora: em média, cada dólar gasto volta menos de um dólar.' + (Wm && isFinite(Wm.top10) ? ' Os melhores momentos do período (10% do tempo) tiveram margem ≥ ' + n(Wm.top10, 1) + '%.' : '') + (trendBad ? ' ' + trendBad + ' sinal(is) indicam piora.' : ''); }
   const lottery = !ok(nh) ? '' : nh < 0
     ? 'Loteria consciente (aceitando perder o orçamento): hoje cada tentativa custa, em média, ' + n(-nh, 1) + '% do que se gasta; os melhores momentos para isso são os de margem menos negativa.'
     : 'Margem positiva: repetindo tentativas, o resultado tende à margem (' + pctTxt(nh) + ' do gasto); a sorte muda o caminho, não a média.';
   // o mercado no período (margem média), para comparar o momento com o normal e não só com o mínimo
-  const W = mm && (mm.d7 || mm.h24), market = W ? { label: W.label || (mm.d7 ? '7 dias' : '24 h'), avg: W.avg, median: W.median, pctPos: W.pctPos, pctMin: W.pctMin, hoursMin: W.hoursMin, rankNow: ok(nh) && W.rankNow !== null ? W.rankNow : null,
+  const W = mm && (mm.d7 || mm.h24), market = W ? { label: W.label || (mm.d7 ? '7 dias' : '24 h'), avg: W.avg, median: W.median, pctPos: W.pctPos, pctMin: W.pctMin, hoursMin: W.hoursMin, rankNow: ok(nh) && W.rankNow !== null ? W.rankNow : null, top10: W.top10, top25: W.top25, bestHours: mm.bestHours || null,
     h24: mm.h24 && mm.d7 && mm.d7.n > mm.h24.n ? mm.h24.avg : null } : null;
   return { market, at: now, verdict, title, text, lottery, steps, okCount: steps.filter((s) => s.status === 'ok').length, scored: steps.filter((s) => s.status !== 'na' && s.status !== 'info').length };
 }

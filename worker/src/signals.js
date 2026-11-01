@@ -81,7 +81,20 @@ export function marginStats(edgeHist, { now, fixAt, minEdge = 3, edgeNow = null 
     return { n, hours: n / 4, avg: v.reduce((a, b) => a + b, 0) / n, median: s[Math.floor(n / 2)], min: s[0], max: s[n - 1],
       pctPos: v.filter((x) => x >= 0).length / n * 100, pctMin: v.filter((x) => x >= minEdge).length / n * 100,
       hoursMin: v.filter((x) => x >= minEdge).length / 4, rankNow: isFinite(edgeNow) && edgeNow !== null ? (v.filter((x) => x < edgeNow - 0.05).length + v.filter((x) => Math.abs(x - edgeNow) <= 0.05).length / 2) / n * 100 : null,
-      label: n / 4 >= 144 ? '7 dias' : n / 4 >= 48 ? Math.round(n / 96) + ' dias' : Math.max(1, Math.round(n / 4)) + ' h' };
+      label: n / 4 >= 144 ? '7 dias' : n / 4 >= 48 ? Math.round(n / 96) + ' dias' : Math.max(1, Math.round(n / 4)) + ' h',
+      top10: s[Math.min(n - 1, Math.floor(n * 0.9))], top25: s[Math.min(n - 1, Math.floor(n * 0.75))] };
   };
-  return { at: now, minEdge, now: isFinite(edgeNow) ? edgeNow : null, h24: win(24), d7: win(24 * 7) };
+  // onde a chance é maior: horas (Brasília, UTC−3) com melhor margem média e o DARR nos 10% melhores momentos
+  const raw = (edgeHist || []).filter((x) => x && isFinite(x[1]) && x[0] >= now - 7 * 864e5);
+  const fixE = (x) => (fixAt && x[0] < fixAt ? ((1 + x[1] / 100) / F - 1) * 100 : x[1]);
+  let bestHours = null, darrTop = null, darrAll = null;
+  if (raw.length >= 48) {
+    const byH = Array.from({ length: 24 }, () => [0, 0]);
+    for (const x of raw) { const h = (new Date(x[0]).getUTCHours() + 21) % 24; byH[h][0]++; byH[h][1] += fixE(x); }
+    bestHours = byH.map((b, h) => ({ h, n: b[0], avg: b[0] ? b[1] / b[0] : null })).filter((b) => b.n >= 2).sort((a, b) => b.avg - a.avg).slice(0, 3);
+    const es = raw.map(fixE).sort((a, b) => a - b), cut = es[Math.floor(es.length * 0.9)];
+    const dv = (arr) => { const v = arr.map((x) => x[3]).filter((d) => isFinite(d) && d > 0); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
+    darrTop = dv(raw.filter((x) => fixE(x) >= cut)); darrAll = dv(raw);
+  }
+  return { at: now, minEdge, now: isFinite(edgeNow) ? edgeNow : null, h24: win(24), d7: win(24 * 7), bestHours, darrTop, darrAll };
 }
