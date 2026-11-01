@@ -15,7 +15,7 @@ import { algoPaperStep } from './paperalgo.js';
 import { braiinsOf, mrrOf, stratumCheck } from './hashmarkets.js';
 import { macroOf, marketPanorama } from './panorama.js';
 import { entryChecklist } from './entry.js';
-import { replayBoard, replayDay, ledgerSummary } from './replay.js';
+import { bestScenarios } from './replay.js';
 import { bitfinexOf, deribitBasisOf, ethenaOf, hlpOf, zpoolOf, brlOf, cdiOf, lighterTable, lighterRows, lighterOi, lighterPairs, streakStep, frontsPaperStep, asicOf, gpuOf, premiumsOf, spotSpreadOf, polymarketOf, llamaOf, LLAMA_POOLS, LT_FEES } from './fronts.js';
 import { FUND_MODEL } from './fundmodel.js';
 import { updateHistory, pickCoins, scorePairs, stablePairs, pairStatsOf } from './fundai.js';
@@ -194,26 +194,6 @@ export async function tick(env, opts = {}) {
       blockBuf = []; blockFlush = now;
     }
   }
-  // Livro diário do replay (worker/src/replay.js): uma vez por dia (após 01h UTC, para o último bloco entrar) grava o
-  // resultado de cada estratégia nos dias completos do registro que ainda não estão no livro. Junta estatística além dos
-  // ~4 dias que o registro de blocos guarda.
-  let replayDayAt = state.replayDayAt || null;
-  const todayU = new Date(now).toISOString().slice(0, 10);
-  if (mkt.ok && replayDayAt !== todayU && new Date(now).getUTCHours() >= 1) {
-    try {
-      const list = (await kvGet(env, 'blocks', [])).concat(blockBuf), book0 = await kvGet(env, 'replayDays', {});
-      let changed = false;
-      const first = list.length ? Math.min(...list.map((b) => b.t || Infinity)) : Infinity;
-      for (let d = Date.parse(todayU) - 864e5; d >= first; d -= 864e5) {
-        const k = new Date(d).toISOString().slice(0, 10);
-        if (book0[k]) continue;
-        const rd = replayDay(list, { dayStart: d, fixAt: paperArchive && paperArchive.at, cfg, btcUsd: mkt.btcUsd, blockUsd: mkt.blockNetUsd });
-        if (rd) { book0[k] = rd; changed = true; }
-      }
-      if (changed) { const ks = Object.keys(book0).sort(); for (const k of ks.slice(0, Math.max(0, ks.length - 120))) delete book0[k]; await kvPut(env, 'replayDays', book0); }
-    } catch (e) { errors.push('replay: ' + (e.message || e)); }
-    replayDayAt = todayU;
-  }
   // Sinais além da sorte (docs/pesquisa-mineracao.md): dados do BTC e BCH/BTC a cada 15 min; DARR, gravador e medidor a cada ciclo.
   let msig = state.msig || {}, recentBlocks = state.recentBlocks, nhWeek = state.nhWeek;
   if (now - (msig.at || 0) >= 15 * 60e3) {
@@ -250,6 +230,14 @@ export async function tick(env, opts = {}) {
   if (cfg.mode === 'observe') paperAlways = paperStep(paperAlways, { cfg: Object.assign({}, cfg, { sessionBudgetUsd: 0, dailyBudgetUsd: 0, onBlock: 'continue' }),
     mkt: mkt.ok ? Object.assign({}, mkt, { green: true }) : mkt, now, units, limits, blocks: newBlocks }).paper;
   else if (paperAlways) paperAlways.lastTs = now;
+  // Os 5 cenários que teriam dado mais lucro na janela dos cenários acompanhados (worker/src/replay.js), a cada 15 min.
+  let bestScen = state.bestScen || null;
+  if (mkt.ok && now - ((bestScen && bestScen.at) || 0) >= 15 * 60e3) {
+    try {
+      const list = (await kvGet(env, 'blocks', [])).concat(blockBuf);
+      bestScen = bestScenarios(list, { now, since: (paperAlways && paperAlways.since) || (paper && paper.since) || null, fixAt: paperArchive && paperArchive.at, cfg, btcUsd: mkt.btcUsd, blockUsd: mkt.blockNetUsd }) || bestScen;
+    } catch (e) { errors.push('melhores cenários: ' + (e.message || e)); }
+  }
   const real = realStep(state.real, { orders, managedIds: cfg.managed, blockEvent, now,
     btcUsd: mkt.btcUsd || (prices.ok ? prices.v.btcUsd : 0), bchUsd: mkt.bchUsd || (prices.ok ? prices.v.bchUsd : 0) });
 
@@ -494,7 +482,7 @@ export async function tick(env, opts = {}) {
     power: plan && plan.mining ? plan.mining.power : null, cfg, now });
 
   const next = Object.assign({}, dec.state, alertState, {
-    lastTick: now, verified: Object.fromEntries(Object.entries(verified).filter(([, x]) => now - x.at <= 6 * 3600e3)), ai: br.ai, aiAnalysis, plan, acct, algoMap, mempool, stable24, pairStats, msig, darr, recentBlocks, nhWeek, paper, paperBurst, paperPlan, paperAlways, hashMkts, fronts, frontsPaper, ltStreak, fundPaperLT, market2, aiPanorama, entryCheck, replayDayAt, paperArchive, paperPriceV: 2, blockBuf, blockFlush, lastBlockT, real, fundPaper, alertScore, algoPaper, algoTs, aiScores, fundPaperAI, fhistHour, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig,
+    lastTick: now, verified: Object.fromEntries(Object.entries(verified).filter(([, x]) => now - x.at <= 6 * 3600e3)), ai: br.ai, aiAnalysis, plan, acct, algoMap, mempool, stable24, pairStats, msig, darr, recentBlocks, nhWeek, paper, paperBurst, paperPlan, paperAlways, hashMkts, fronts, frontsPaper, ltStreak, fundPaperLT, market2, aiPanorama, entryCheck, bestScen, paperArchive, paperPriceV: 2, blockBuf, blockFlush, lastBlockT, real, fundPaper, alertScore, algoPaper, algoTs, aiScores, fundPaperAI, fhistHour, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig,
     market: mkt.ok ? { breakEvenEH: mkt.breakEvenEH, capEH: mkt.capEH, fillEH: mkt.fillEH, medianEH: mkt.medianEH, bidEH: mkt.bidEH,
       edgeAtBidPct: mkt.edgeAtBidPct, green: mkt.green, D: mkt.D, bookTotalPH: book ? book.totalPH : 0, bchUsd: mkt.bchUsd, btcUsd: mkt.btcUsd, costPerBlockUsd: mkt.costPerBlockUsd,
       hashpriceNet: mkt.hashpriceNet, blockNetUsd: mkt.blockNetUsd, phDaysPerBlock: mkt.phDaysPerBlock, market: mkt.market } : { ok: false, reason: mkt.reason },
@@ -604,7 +592,7 @@ async function api(req, env, url, fetchFn) {
       telegram: !!(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID), creds: credStatus(env), limits, config: cfg,
       state: { lastTick: state.lastTick, lastHeight: state.lastHeight, market: state.market, myBlocks: state.myBlocks || [], dailyUsd: state.dailyUsd || 0,
         errors: state.errors || [], edgeHist: state.edgeHist || [], alerts: (state.alerts || []).slice(-30).reverse(),
-        paper: state.paper || null, paperBurst: state.paperBurst || null, paperPlan: state.paperPlan || null, paperAlways: state.paperAlways || null, paperArchive: state.paperArchive || null, entryCheck: state.entryCheck || null, hashMkts: state.hashMkts || null, fronts: state.fronts || null, frontsPaper: state.frontsPaper || null, market2: state.market2 || null, aiPanorama: state.aiPanorama || null,
+        paper: state.paper || null, paperBurst: state.paperBurst || null, paperPlan: state.paperPlan || null, paperAlways: state.paperAlways || null, paperArchive: state.paperArchive || null, entryCheck: state.entryCheck || null, bestScen: state.bestScen || null, hashMkts: state.hashMkts || null, fronts: state.fronts || null, frontsPaper: state.frontsPaper || null, market2: state.market2 || null, aiPanorama: state.aiPanorama || null,
         fundPaperLT: state.fundPaperLT ? { summary: fundPaperSummary(state.fundPaperLT, LT_FEES), open: state.fundPaperLT.open, closed: state.fundPaperLT.closed.slice(-50).reverse() } : null, opLog: (state.opLog || []).slice(-20).reverse(), real: state.real ? Object.assign({}, state.real, { paid: undefined }) : null,
         fundPaper: state.fundPaper ? { summary: fundPaperSummary(state.fundPaper, FD.DEFAULT_FEES), open: state.fundPaper.open, closed: state.fundPaper.closed.slice(-100).reverse() } : null,
         algoPaper: state.algoPaper || null,
@@ -664,10 +652,7 @@ async function api(req, env, url, fetchFn) {
     const list = (await kvGet(env, 'blocks', [])).concat(st.blockBuf || []).map((b) => Object.assign(b, poolOf(b.tag))); // nomes sempre com a regra atual
     const mk = st.market || {};
     return json({ blocks: list.slice(-300).reverse(), summary: blockSummary(list),
-      luck: luckBoard(list, { now: Date.now(), priceEH: mk.bidEH, btcUsd: mk.btcUsd, blockUsd: mk.blockNetUsd, rentFeePct: 3 }),
-      replay: replayBoard(list, { now: Date.now(), since: (st.paperAlways && st.paperAlways.since) || (st.paper && st.paper.since) || null, fixAt: st.paperArchive && st.paperArchive.at,
-        cfg: await getConfig(env), btcUsd: mk.btcUsd, blockUsd: mk.blockNetUsd }),
-      ledger: ledgerSummary(await kvGet(env, 'replayDays', {})) });
+      luck: luckBoard(list, { now: Date.now(), priceEH: mk.bidEH, btcUsd: mk.btcUsd, blockUsd: mk.blockNetUsd, rentFeePct: 3 }) });
   }
   if (p === '/pool/check' && m === 'POST') {
     // Compatibilidade do pool com a Braiins Hashpower (extranonce2_size ≥ 7). Só abre o Stratum e lê a resposta.

@@ -1163,7 +1163,7 @@ test('integração: par conferido pelo painel destrava a entrada do robô de fun
 });
 
 test('replay: mesmas regras refeitas com os blocos registrados (mesmo sorteio, sem olhar o futuro)', async () => {
-  const { runStrategy, replayBoard, replayDay, ledgerSummary } = await import('../worker/src/replay.js');
+  const { runStrategy, bestScenarios } = await import('../worker/src/replay.js');
   const { needPH } = await import('../worker/src/blocks.js');
   const raw = JSON.parse(readFileSync(new URL('./fixtures/bch-blocks-registry.real.json', import.meta.url)));
   // preço real e margem por bloco: margem −0,5% na primeira metade, +4% na segunda
@@ -1183,16 +1183,12 @@ test('replay: mesmas regras refeitas com os blocos registrados (mesmo sorteio, s
   // stop-loss: corta o gasto por tentativa e espera; nunca gasta mais que sem stop
   const st = runStrategy(L, { ph: 100, filter: null, stopUsd: 300, coolH: 6 }, o);
   assert.ok(st.costUsd < always.costUsd && st.stops >= 1);
-  const now = list[list.length - 1].t + 60e3;
-  const B = replayBoard(list, { now, since: list[100].t, fixAt: null, cfg: Object.assign({}, DEFAULT_CONFIG, { targetPh: 100 }), btcUsd: 110000, blockUsd: 900 });
-  assert.deepEqual(B.windows.map((w) => w.id), ['atual', '24h', 'tudo']);
-  assert.deepEqual(B.windows[0].rows.map((r) => r.id), ['always', 'alwaysStop', 'edge0', 'rules']);
-  assert.ok(B.windows[2].bestAvg[0].evProfitUsd >= B.windows[2].bestAvg[4].evProfitUsd && B.windows[2].gridN > 10);
-  // antes da correção do preço (31/10) o registro gravou lance barato demais: replay corrige +5,8%
-  const fixed = replayBoard(list.map((r) => Object.assign({}, r, { nhBid: 0.402 })), { now, since: null, fixAt: now, cfg: Object.assign({}, DEFAULT_CONFIG, { targetPh: 100 }), btcUsd: 110000, blockUsd: 900 });
-  assert.ok(fixed.estimated > 0 && Math.abs(fixed.windows.find((w) => w.id === 'tudo').rows[0].costUsd / B.windows.find((w) => w.id === 'tudo').rows[0].costUsd - 0.402 * 1.058 / 0.4254) < 0.002);
-  // livro diário
-  const d0 = Date.UTC(new Date(list[0].t).getUTCFullYear(), new Date(list[0].t).getUTCMonth(), new Date(list[0].t).getUTCDate() + 1);
-  const rd = replayDay(list, { dayStart: d0, fixAt: null, cfg: Object.assign({}, DEFAULT_CONFIG, { targetPh: 100 }), btcUsd: 110000, blockUsd: 900 });
-  if (rd) { const S = ledgerSummary({ '2026-10-30': rd }); assert.ok(S.rows.length > 10 && S.rows.some((r) => r.key === 'rules') && S.days === 1); } else assert.fail('dia completo no registro');
+  const now = list[list.length - 1].t + 60e3, cfg = Object.assign({}, DEFAULT_CONFIG, { targetPh: 100 });
+  const B = bestScenarios(list, { now, since: list[100].t, fixAt: null, cfg, btcUsd: 110000, blockUsd: 900 });
+  assert.ok(B.top.length >= 1 && B.top.length <= 5 && B.tested > 20 && B.from === list[100].t);
+  for (let i = 1; i < B.top.length; i++) assert.ok(B.top[i - 1].wonUsd - B.top[i - 1].spendUsd >= B.top[i].wonUsd - B.top[i].spendUsd);
+  // antes da correção do preço (31/10) o registro gravou lance barato demais: o custo é corrigido em +5,8%
+  const old = list.map((r) => Object.assign({}, r, { nhBid: 0.402 }));
+  const B2 = bestScenarios(old, { now, since: null, fixAt: now, cfg, btcUsd: 110000, blockUsd: 900 }), x = B2.top[0];
+  assert.ok(Math.abs(x.spendUsd / (x.ph * x.hours) / (0.402 * 1.058 * 110000 * 1.03 / 24000) - 1) < 0.01);
 });

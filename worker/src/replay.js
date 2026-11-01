@@ -5,7 +5,6 @@
 // ranking separa "com a sorte" (o que aconteceu) de "sem sorte" (a média, que é o que tende a se repetir).
 const TWO32 = 4294967296;
 const MAX_GAP_S = 4 * 3600; // intervalo maior que isso: registro com buraco, não conta
-export const RP_PH = [10, 30, 50, 100, 200];
 export const RP_FILTERS = [null, -1, 0, 'min']; // null = sempre ligado; número = só com margem ≥ x%; 'min' = margem mínima da config
 const u32 = (hash) => parseInt(String(hash).slice(-8), 16) / TWO32;
 
@@ -52,65 +51,23 @@ export function runStrategy(L, s, { from, to, btcUsd, blockUsd, rentFeePct = 3, 
   return out;
 }
 
-const key = (s) => s.ph + '|' + (s.filter === null || s.filter === undefined ? 'n' : s.filter) + '|' + (s.stopUsd || 0);
-export function strategies(cfg) {
-  const T = cfg.targetPh || 10, stop = cfg.sessionBudgetUsd > 0 ? cfg.sessionBudgetUsd : 300, cool = cfg.stopCooldownH === undefined ? 6 : cfg.stopCooldownH;
-  const fixed = [
-    { id: 'always', label: 'Sempre ligado', ph: T, filter: null, stopUsd: 0, coolH: 0 },
-    { id: 'alwaysStop', label: 'Ligado + stop-loss + espera', ph: T, filter: null, stopUsd: stop, coolH: cool },
-    { id: 'edge0', label: 'Só com margem ≥ 0', ph: T, filter: 0, stopUsd: stop, coolH: cool },
-    { id: 'rules', label: 'Todas as regras (sua config)', ph: T, filter: 'min', stopUsd: stop, coolH: cool, dailyUsd: cfg.dailyBudgetUsd || 0 }
-  ];
-  const grid = [];
-  for (const ph of RP_PH) for (const filter of RP_FILTERS) for (const stopUsd of [0, stop]) grid.push({ ph, filter, stopUsd, coolH: stopUsd ? cool : 0 });
-  return { fixed, grid };
-}
-
-// Janelas: a atual (desde que as simulações ao vivo começaram), 24 h e tudo que o registro tem.
-export function replayBoard(list, { now, since, fixAt, cfg, btcUsd, blockUsd }) {
+// Os 5 cenários que teriam dado mais lucro (com a sorte que saiu) na janela dos cenários acompanhados: qualquer potência,
+// regra de entrada e stop-loss. Retrovisor: mostra o que teria sido melhor, não o que vai ser.
+export const BEST_PH = [10, 30, 50, 100, 200, 300, 500];
+export function bestScenarios(list, { now, since, fixAt, cfg, btcUsd, blockUsd }) {
   const L = prep(list, fixAt);
   if (L.length < 3 || !(btcUsd > 0)) return null;
-  const { fixed, grid } = strategies(cfg), base = { btcUsd, blockUsd, rentFeePct: cfg.rentFeePct || 3, poolFeePct: cfg.poolFeePct || 2, minEdgePct: cfg.minEdgePct || 3 };
-  const wins = [];
-  if (since && since > L[0].t) wins.push({ id: 'atual', label: 'Janela atual', from: since });
-  wins.push({ id: '24h', label: '24 h', from: now - 24 * 3600e3 }, { id: 'tudo', label: 'Tudo (' + Math.round((now - L[0].t) / 3600e3) + ' h)', from: L[0].t });
-  const priced = L.filter((r) => r.price > 0);
-  return {
-    at: now, from: L[0].t, blocks: L.length, priced: priced.length, estimated: L.filter((r) => r.est).length, cfg: { ph: cfg.targetPh, stopUsd: fixed[1].stopUsd, coolH: fixed[1].coolH, minEdgePct: base.minEdgePct },
-    windows: wins.map((w) => {
-      const o = Object.assign({}, base, { from: w.from, to: now });
-      const rows = fixed.map((s) => Object.assign(runStrategy(L, s, o), { id: s.id, label: s.label }));
-      const g = grid.map((s) => Object.assign(runStrategy(L, s, o), { key: key(s) })).filter((r) => r.costUsd > 0);
-      const sel = L.filter((r) => r.t > w.from);
-      const pick = (f) => g.slice().sort((x, y) => f(y) - f(x) || y.costUsd - x.costUsd).filter((r, i, a) => a.findIndex((z) => z.ph === r.ph && Math.abs(z.costUsd - r.costUsd) < 0.01 && z.blocks === r.blocks) === i).slice(0, 5).map((r) => ({ key: r.key, ph: r.ph, filter: r.filter, stopUsd: r.stopUsd, coolH: r.coolH, hours: r.hours, costUsd: r.costUsd, wonUsd: r.wonUsd, blocks: r.blocks, profitUsd: r.profitUsd, pct: r.pct, evProfitUsd: r.evProfitUsd, evPct: r.evPct, chance: r.chance }));
-      return { id: w.id, label: w.label, from: w.from, blocks: sel.length, rows: rows.map((r) => Object.assign(r, { wins: r.wins.slice(-5) })),
-        bestLuck: pick((r) => r.profitUsd), bestAvg: pick((r) => r.evPct), anyAvgUp: g.some((r) => r.evProfitUsd > 0), gridN: g.length };
-    })
-  };
-}
-
-// Livro diário: no fim de cada dia (UTC) grava o resultado de cada estratégia da grade naquele dia. O registro de blocos
-// guarda ~4 dias; o livro guarda 120 dias, para juntar estatística de qual regra funciona (stop-loss reinicia por dia).
-export function replayDay(list, { dayStart, fixAt, cfg, btcUsd, blockUsd }) {
-  const L = prep(list, fixAt), { fixed, grid } = strategies(cfg);
-  const o = { from: dayStart, to: dayStart + 864e5, btcUsd, blockUsd, rentFeePct: cfg.rentFeePct || 3, poolFeePct: cfg.poolFeePct || 2, minEdgePct: cfg.minEdgePct || 3 };
-  const blocks = L.filter((r) => r.t > o.from && r.t <= o.to).length;
-  if (blocks < 100) return null; // dia incompleto no registro
-  const r = {};
-  for (const s of grid.concat(fixed.slice(3))) {
-    const x = runStrategy(L, s, o);
-    r[s.id || key(s)] = [+x.costUsd.toFixed(2), +x.wonUsd.toFixed(2), +x.evUsd.toFixed(2), +x.hours.toFixed(2), x.blocks];
+  const from = since && since > L[0].t ? since : L[0].t, cool = cfg.stopCooldownH === undefined ? 6 : cfg.stopCooldownH;
+  const stops = [0, cfg.sessionBudgetUsd > 0 ? cfg.sessionBudgetUsd : 300, 600].filter((x, i, a) => a.indexOf(x) === i);
+  const o = { from, to: now, btcUsd, blockUsd, rentFeePct: cfg.rentFeePct || 3, poolFeePct: cfg.poolFeePct || 2, minEdgePct: cfg.minEdgePct || 3 };
+  const all = [];
+  for (const ph of BEST_PH) for (const filter of RP_FILTERS) for (const stopUsd of stops) {
+    const r = runStrategy(L, { ph, filter, stopUsd, coolH: stopUsd ? cool : 0 }, o);
+    if (r.costUsd > 0) all.push(r);
   }
-  return { blocks, r };
-}
-export function ledgerSummary(days) {
-  const ks = Object.keys(days || {}).sort();
-  if (!ks.length) return null;
-  const acc = {};
-  for (const d of ks) for (const [k, v] of Object.entries(days[d].r || {})) {
-    const a = acc[k] || (acc[k] = { key: k, days: 0, costUsd: 0, wonUsd: 0, evUsd: 0, hours: 0, blocks: 0, upDays: 0 });
-    a.days++; a.costUsd += v[0]; a.wonUsd += v[1]; a.evUsd += v[2]; a.hours += v[3]; a.blocks += v[4]; if (v[1] - v[0] > 0) a.upDays++;
-  }
-  const rows = Object.values(acc).filter((a) => a.costUsd > 0).map((a) => Object.assign(a, { profitUsd: a.wonUsd - a.costUsd, pct: (a.wonUsd / a.costUsd - 1) * 100, evPct: (a.evUsd / a.costUsd - 1) * 100 }));
-  return { days: ks.length, from: ks[0], to: ks[ks.length - 1], rows: rows.sort((a, b) => b.evPct - a.evPct) };
+  const top = all.sort((a, b) => b.profitUsd - a.profitUsd || a.costUsd - b.costUsd)
+    .filter((r, i, a) => a.findIndex((z) => z.ph === r.ph && z.blocks === r.blocks && Math.abs(z.costUsd - r.costUsd) < 0.5) === i).slice(0, 5)
+    .map((r) => ({ ph: r.ph, filter: r.filter === 'min' ? o.minEdgePct : r.filter, stopUsd: r.stopUsd, coolH: r.coolH, hours: +r.hours.toFixed(2), spendUsd: +r.costUsd.toFixed(2),
+      wonUsd: +r.wonUsd.toFixed(2), evUsd: +r.evUsd.toFixed(2), blocks: r.blocks, draws: r.draws }));
+  return { at: now, from, blocks: L.filter((r) => r.t > from).length, tested: all.length, top };
 }
