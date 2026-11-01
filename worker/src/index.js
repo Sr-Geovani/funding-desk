@@ -308,6 +308,35 @@ export async function tick(env, opts = {}) {
     }
   }
 
+  // Teste do robô (modo Ativo com limites mínimos): registra cada ação real, confere o que foi exercitado (criar,
+  // ajustar, stop-loss, espera) e, no fim, encerra as ordens do teste e devolve a configuração original.
+  let robotTest = state.robotTest || null;
+  if (robotTest && !robotTest.done) {
+    const ev = (robotTest.events || []).slice(), chk = Object.assign({}, robotTest.checks), ids = (robotTest.ids || []).slice();
+    for (const r of results) {
+      if (r.executed) { ev.push({ t: now, type: r.type, reason: r.reason, priceEH: r.priceEH, limitPH: r.limitPH }); if (r.type === 'create' && r.id) ids.push(r.id); }
+      if (r.error) ev.push({ t: now, type: 'erro', reason: r.error });
+    }
+    if (results.some((r) => r.executed && r.type === 'create')) chk.create = chk.create || now;
+    if (results.some((r) => r.executed && r.type === 'update')) chk.update = chk.update || now;
+    if (results.some((r) => r.executed && r.type === 'cancel' && /stop-loss/.test(r.reason || ''))) chk.stop = chk.stop || now;
+    if ((dec.notes || []).some((x) => /stop-loss: sem ordem nova/.test(x))) chk.cooling = chk.cooling || now;
+    if (chk.stop && dec.state.stopUntil && now >= dec.state.stopUntil) chk.cooldownEnd = chk.cooldownEnd || now;
+    if ((dec.notes || []).some((x) => /limite diário/.test(x))) chk.daily = chk.daily || now;
+    robotTest = Object.assign({}, robotTest, { events: ev.slice(-60), checks: chk, ids });
+    if (now >= robotTest.until || (chk.stop && chk.cooldownEnd)) {
+      for (const id of ids) { const o = orders.find((x) => x.id === id); if (o && o.alive) { const r = await settle(nh.cancelOrder(id)); if (!r.ok) errors.push('teste do robô: ' + r.e); } }
+      const cur = await getConfig(env);
+      await kvPut(env, 'config', Object.assign({}, cur, robotTest.backup, { managed: (cur.managed || []).filter((id) => !ids.includes(id)) }));
+      const btc = mkt.ok ? mkt.btcUsd : 0, paidBtc = ids.reduce((a, id) => a + ((execLog && execLog.orders && execLog.orders[id] && execLog.orders[id].paidBtc) || 0), 0);
+      dec.state.stopUntil = null; dec.state.sess = null; // a espera do teste não vale depois dele
+      robotTest = Object.assign({}, robotTest, { done: now, spentUsd: paidBtc * btc, orders: ids.length });
+      const ok = (k) => (chk[k] ? 'sim' : 'não');
+      log.push({ t: now, kind: 'acao', text: `Teste do robô encerrado: criou ordem ${ok('create')}, ajustou ${ok('update')}, stop-loss ${ok('stop')}, espera ${ok('cooling')}; gasto ~US$${(paidBtc * btc).toFixed(2).replace('.', ',')}; configuração original devolvida` });
+      await notify(env, `Funding Desk: teste do robô encerrado. Criou ordem: ${ok('create')}; ajustou preço/potência: ${ok('update')}; stop-loss: ${ok('stop')}; espera depois do stop: ${ok('cooling')}. Gasto ~US$${(paidBtc * btc).toFixed(2).replace('.', ',')}. Configuração original devolvida (modo ${robotTest.backup.mode}). Detalhes em Mineração → Operar.`, fetchFn);
+    }
+  }
+
   // Log sem repetir a mesma decisão a cada ciclo.
   const sig = JSON.stringify(results.map((r) => [r.type, r.id, r.priceEH, r.limitPH, r.executed]));
   if (results.length && (sig !== state.lastSig || cfg.mode === 'active')) {
@@ -534,7 +563,7 @@ export async function tick(env, opts = {}) {
     fund: { passing: ((funding && funding.best) || []).length, sim: fundPaper ? fundPaperSummary(fundPaper, FD.DEFAULT_FEES) : null } });
 
   const next = Object.assign({}, dec.state, alertState, {
-    lastTick: now, verified: Object.fromEntries(Object.entries(verified).filter(([, x]) => now - x.at <= 6 * 3600e3)), ai: br.ai, aiAnalysis, plan, acct, algoMap, mempool, stable24, pairStats, msig, darr, recentBlocks, nhWeek, paper, paperBurst, paperPlan, paperAlways, hashMkts, fronts, frontsPaper, ltStreak, fundPaperLT, market2, aiPanorama, entryCheck, calib, aiReport: aiRep, mktMargin, asertF, execLog, bestScen, paperArchive, paperPriceV: 2, blockBuf, blockFlush, lastBlockT, real, fundPaper, alertScore, algoPaper, algoTs, aiScores, fundPaperAI, fhistHour, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig,
+    lastTick: now, verified: Object.fromEntries(Object.entries(verified).filter(([, x]) => now - x.at <= 6 * 3600e3)), ai: br.ai, aiAnalysis, plan, acct, algoMap, mempool, stable24, pairStats, msig, darr, recentBlocks, nhWeek, paper, paperBurst, paperPlan, paperAlways, hashMkts, fronts, frontsPaper, ltStreak, fundPaperLT, market2, aiPanorama, entryCheck, calib, robotTest, aiReport: aiRep, mktMargin, asertF, execLog, bestScen, paperArchive, paperPriceV: 2, blockBuf, blockFlush, lastBlockT, real, fundPaper, alertScore, algoPaper, algoTs, aiScores, fundPaperAI, fhistHour, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig,
     market: mkt.ok ? { breakEvenEH: mkt.breakEvenEH, capEH: mkt.capEH, fillEH: mkt.fillEH, medianEH: mkt.medianEH, bidEH: mkt.bidEH,
       edgeAtBidPct: mkt.edgeAtBidPct, green: mkt.green, D: mkt.D, bookTotalPH: book ? book.totalPH : 0, bchUsd: mkt.bchUsd, btcUsd: mkt.btcUsd, costPerBlockUsd: mkt.costPerBlockUsd,
       hashpriceNet: mkt.hashpriceNet, blockNetUsd: mkt.blockNetUsd, phDaysPerBlock: mkt.phDaysPerBlock, market: mkt.market } : { ok: false, reason: mkt.reason },
@@ -645,7 +674,7 @@ async function api(req, env, url, fetchFn) {
       telegram: !!(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID), creds: credStatus(env), limits, config: cfg,
       state: { lastTick: state.lastTick, lastHeight: state.lastHeight, market: state.market, myBlocks: state.myBlocks || [], dailyUsd: state.dailyUsd || 0,
         errors: state.errors || [], edgeHist: state.edgeHist || [], alerts: (state.alerts || []).slice(-30).reverse(),
-        paper: state.paper || null, paperBurst: state.paperBurst || null, paperPlan: state.paperPlan || null, paperAlways: state.paperAlways || null, paperArchive: state.paperArchive || null, entryCheck: state.entryCheck || null, calib: state.calib || null, calibPrev: state.calibPrev || null, aiReport: state.aiReport || null, mktMargin: state.mktMargin || null, asertF: state.asertF || null, exec: execSummary(state.execLog), bestScen: state.bestScen || null, hashMkts: state.hashMkts || null, fronts: state.fronts || null, frontsPaper: state.frontsPaper || null, market2: state.market2 || null, aiPanorama: state.aiPanorama || null,
+        paper: state.paper || null, paperBurst: state.paperBurst || null, paperPlan: state.paperPlan || null, paperAlways: state.paperAlways || null, paperArchive: state.paperArchive || null, entryCheck: state.entryCheck || null, calib: state.calib || null, calibPrev: state.calibPrev || null, robotTest: state.robotTest || null, aiReport: state.aiReport || null, mktMargin: state.mktMargin || null, asertF: state.asertF || null, exec: execSummary(state.execLog), bestScen: state.bestScen || null, hashMkts: state.hashMkts || null, fronts: state.fronts || null, frontsPaper: state.frontsPaper || null, market2: state.market2 || null, aiPanorama: state.aiPanorama || null,
         fundPaperLT: state.fundPaperLT ? { summary: fundPaperSummary(state.fundPaperLT, LT_FEES), open: state.fundPaperLT.open, closed: state.fundPaperLT.closed.slice(-50).reverse() } : null, opLog: (state.opLog || []).slice(-20).reverse(), real: state.real ? Object.assign({}, state.real, { paid: undefined }) : null,
         fundPaper: state.fundPaper ? { summary: fundPaperSummary(state.fundPaper, FD.DEFAULT_FEES), open: state.fundPaper.open, closed: state.fundPaper.closed.slice(-100).reverse() } : null,
         algoPaper: state.algoPaper || null,
@@ -781,6 +810,30 @@ async function api(req, env, url, fetchFn) {
     await appendLog(env, [{ t: now, kind: 'acao', text: `Teste de calibração iniciado: ${ph} PH/s a ${priceEH.toFixed(4).replace('.', ',')} BTC/EH/dia por ${hours} h, ordem de ${amount} BTC (o que sobrar volta para a carteira ao encerrar)` }]);
     return json(st.calib);
   }
+  if (p === '/robottest/start' && m === 'POST') {
+    need();
+    const st = await kvGet(env, 'state', {}), cfg = await getConfig(env);
+    if (st.robotTest && !st.robotTest.done) return json({ error: 'já existe um teste do robô em andamento' }, 400);
+    if (st.calib && !st.calib.done) return json({ error: 'espere o teste de calibração terminar' }, 400);
+    const poolId = body.poolId || cfg.poolId; if (!poolId) return json({ error: 'escolha o pool (Mineração → Robô → Pool para ordens novas)' }, 400);
+    const u = await nh.units(), now = Date.now(), hours = Math.max(0.5, Math.min(+body.hours || 2, 4));
+    const keys = ['mode', 'minEdgePct', 'targetPh', 'sessionBudgetUsd', 'stopCooldownH', 'dailyBudgetUsd', 'orderAmountBtc', 'autoCreate', 'onBlock', 'poolId'];
+    const backup = Object.fromEntries(keys.map((k) => [k, cfg[k]]));
+    const test = { mode: 'active', minEdgePct: -5, targetPh: 10, sessionBudgetUsd: 15, stopCooldownH: 0.5, dailyBudgetUsd: 30, orderAmountBtc: u.minOrderBtc, autoCreate: true, onBlock: 'cancel', poolId };
+    await kvPut(env, 'config', Object.assign({}, cfg, test));
+    st.robotTest = { start: now, until: now + hours * 3600e3, backup, test, events: [], checks: {}, ids: [] };
+    st.stopUntil = null; st.sess = null;
+    await kvPut(env, 'state', st);
+    await appendLog(env, [{ t: now, kind: 'config', text: `Teste do robô iniciado por ${hours} h: modo Ativo, 10 PH/s, margem mínima −5% (temporária), stop-loss US$15, espera 30 min, limite diário US$30; a configuração original volta no fim` }]);
+    return json(st.robotTest);
+  }
+  if (p === '/robottest/stop' && m === 'POST') {
+    const st = await kvGet(env, 'state', {});
+    if (!st.robotTest || st.robotTest.done) return json({ error: 'nenhum teste do robô em andamento' }, 400);
+    st.robotTest.until = Date.now(); await kvPut(env, 'state', st);
+    return json({ ok: true });
+  }
+  if (p === '/robottest/clear' && m === 'POST') { const st = await kvGet(env, 'state', {}); if (st.robotTest && st.robotTest.done) { st.robotTestPrev = st.robotTest; st.robotTest = null; await kvPut(env, 'state', st); } return json({ ok: true }); }
   if (p === '/calib/stop' && m === 'POST') {
     need();
     const st = await kvGet(env, 'state', {});

@@ -1322,3 +1322,26 @@ test('integração: teste de calibração abre ordem pequena fora do robô, mede
     assert.ok(st.calib.result.delivered > 0.9, 'a NiceHash falsa entrega 100%');
   } finally { t.server.close(); }
 });
+
+test('integração: teste do robô em Ativo com limites mínimos e devolução da configuração', async () => {
+  const t = await setup();
+  try {
+    await t.call('PUT', '/api/config', { mode: 'observe', targetPh: 100, minEdgePct: 3, sessionBudgetUsd: 300, poolId: 'pool-1' });
+    const r = await t.call('POST', '/api/robottest/start', { hours: 1 });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    let cfg = (await t.call('GET', '/api/status')).body.config;
+    assert.equal(cfg.mode, 'active'); assert.equal(cfg.targetPh, 10); assert.equal(cfg.sessionBudgetUsd, 15); assert.equal(cfg.minEdgePct, -5);
+    const now = Date.now();
+    await tick(t.env, { now: now + 3 * 60e3 });
+    const ids = Object.keys(t.state.orders);
+    assert.equal(ids.length, 1, 'o robô criou a ordem sozinho');
+    let st = (await t.call('GET', '/api/status')).body.state;
+    assert.ok(st.robotTest.checks.create && st.robotTest.ids.includes(ids[0]));
+    await tick(t.env, { now: now + 61 * 60e3 });
+    st = (await t.call('GET', '/api/status')).body.state; cfg = (await t.call('GET', '/api/status')).body.config;
+    assert.ok(st.robotTest.done, 'encerrado no prazo');
+    assert.equal(t.state.orders[ids[0]].alive, false, 'ordem do teste encerrada');
+    assert.equal(cfg.mode, 'observe'); assert.equal(cfg.targetPh, 100); assert.equal(cfg.sessionBudgetUsd, 300); assert.equal(cfg.minEdgePct, 3);
+    assert.ok(!(cfg.managed || []).includes(ids[0]));
+  } finally { t.server.close(); }
+});
