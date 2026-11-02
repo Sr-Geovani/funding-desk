@@ -2374,11 +2374,9 @@ tickClock();setInterval(tickClock,20000);
 // às vezes fica "flutuando". Reancora pela área visível real (visualViewport) e força o recálculo do layout.
 (function(){
   var nav=document.querySelector('nav'),vv=window.visualViewport;if(!nav)return;
-  function fix(){var gap=vv?(vv.height+vv.offsetTop)-window.innerHeight:0;nav.style.transform=Math.abs(gap)>1&&Math.abs(gap)<160?'translateY('+gap+'px)':''}
-  function kick(){fix();requestAnimationFrame(function(){window.scrollTo(window.scrollX,window.scrollY);fix()});setTimeout(fix,350);setTimeout(fix,1200)}
-  if(vv){vv.addEventListener('resize',fix);vv.addEventListener('scroll',fix)}
-  ['pageshow','focus','orientationchange','resize'].forEach(function(ev){window.addEventListener(ev,kick)});
-  document.addEventListener('visibilitychange',function(){if(document.visibilityState==='visible'){kick();freshen()}});
+  // a posição da barra agora é feita por um único mecanismo (mais abaixo); aqui fica só a atualização dos dados ao voltar
+  nav.style.transform='';
+  document.addEventListener('visibilitychange',function(){if(document.visibilityState==='visible')freshen()});
   window.addEventListener('pageshow',function(){freshen()});window.addEventListener('focus',function(){freshen()});
 })();
 load();loadMining();if(settings.apiUrl)loadOps();
@@ -2396,14 +2394,18 @@ if('serviceWorker' in navigator&&/^https?:/.test(location.protocol))navigator.se
   // muda quando o iOS informa uma altura errada ao voltar do segundo plano. No navegador, usa a área visível.
   var app=window.navigator.standalone===true||(window.matchMedia&&matchMedia('(display-mode: standalone)').matches);
   function screenH(){var land=window.matchMedia&&matchMedia('(orientation: landscape)').matches;return land?Math.min(screen.width,screen.height):Math.max(screen.width,screen.height)}
-  function fix(){if(document.body.classList.contains('kbd'))return;
-    var h=app?Math.max(screenH(),vv.offsetTop+vv.height):vv.offsetTop+vv.height,y=Math.round(h-nav.offsetHeight);
+  var lastY=null,navH=0,raf=0;
+  function fix(){raf=0;if(document.body.classList.contains('kbd'))return;
+    if(!navH)navH=nav.offsetHeight;
+    var h=app?Math.max(screenH(),vv.offsetTop+vv.height):vv.offsetTop+vv.height,y=Math.round(h-navH);
+    if(y===lastY)return;lastY=y;
     if(y>0){nav.style.top=y+'px';nav.style.bottom='auto'}else{nav.style.top='';nav.style.bottom=''}}
-  function burst(){[0,60,250,600,1200,2500].forEach(function(t){setTimeout(fix,t)})}
+  function sched(){if(!raf)raf=requestAnimationFrame(fix)}
+  function burst(){navH=0;lastY=null;[0,60,250,600,1200,2500].forEach(function(t){setTimeout(sched,t)})}
   function isField(el){return el&&(/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))&&!/^(checkbox|radio|button|submit)$/i.test(el.type||'')}
   document.addEventListener('focusin',function(e){if(isField(e.target))document.body.classList.add('kbd')});
   document.addEventListener('focusout',function(){setTimeout(function(){if(!isField(document.activeElement)){document.body.classList.remove('kbd');window.scrollTo(window.scrollX,window.scrollY);burst()}},150)});
-  vv.addEventListener('resize',fix);vv.addEventListener('scroll',fix);window.addEventListener('resize',fix);window.addEventListener('scroll',fix,{passive:true});
+  vv.addEventListener('resize',function(){navH=0;sched()});vv.addEventListener('scroll',sched,{passive:true});window.addEventListener('resize',function(){navH=0;sched()});
   window.addEventListener('pageshow',burst);window.addEventListener('focus',burst);window.addEventListener('orientationchange',burst);
   document.addEventListener('visibilitychange',function(){if(!document.hidden)burst()});
   burst();})();
