@@ -406,7 +406,7 @@ export async function tick(env, opts = {}) {
     for (const e of fa.events) log.push({ t: now, kind: 'simulado', text: e });
   }
   if (cfg.alerts !== false) {
-    const ra = runAlerts({ state, funding, edges: mkt.ok ? { BCH: mkt.edgeAtBidPct } : {}, now, minEdgePct: cfg.minEdgePct });
+    const ra = runAlerts({ state, funding, edges: mkt.ok ? { BCH: mkt.edgeAtBidPct } : {}, now, minEdgePct: cfg.minEdgeRel ? cfg.minEdgeBase : cfg.minEdgePct }); // alerta de "compensa" usa a meta fixa
     newAlerts = ra.alerts; alertState = ra.state;
     for (const a of newAlerts) log.push({ t: now, kind: 'alerta', text: a.title + ': ' + a.text });
     // Saída e risco vão na hora; entradas e oportunidades viram um resumo a cada 30 min (menos ruído no celular).
@@ -432,7 +432,8 @@ export async function tick(env, opts = {}) {
     if (res[0].ok) {
       const books = {};
       algos.forEach((a, i) => { if (res[i + 1].ok) books[a] = res[i + 1].v; });
-      const map = FDR.miningMap(res[0].v, books, { btcUsd: prices.v.btcUsd, minEdgePct: cfg.minEdgePct, rentFeePct: cfg.rentFeePct, poolFeePct: cfg.poolFeePct });
+      const map = FDR.miningMap(res[0].v, books, { btcUsd: prices.v.btcUsd, minEdgePct: cfg.minEdgeRel ? cfg.minEdgeBase : cfg.minEdgePct, // outras moedas seguem a meta fixa (a regra relativa é só do robô de BCH)
+      rentFeePct: cfg.rentFeePct, poolFeePct: cfg.poolFeePct });
       algoMap = map.map((m) => ({ algo: m.algo, label: m.label, coins: m.coins, edgePct: m.edgePct, level: m.level, capBtcPerUnit: m.capBtcPerUnit, unit: m.unit, rentBtcPerH: m.rentBtcPerH }));
       algoRan = true;
       const ap = algoPaperStep(algoPaper, { map, now });
