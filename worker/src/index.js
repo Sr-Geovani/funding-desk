@@ -174,7 +174,7 @@ export async function tick(env, opts = {}) {
   const weekLossUsd = (() => { const d = (state.real && state.real.days) || {}, from = new Date(now - 6 * 864e5).toISOString().slice(0, 10);
     return Object.entries(d).filter(([k]) => k >= from).reduce((a, [, x]) => a + (x.spendUsd || 0) - (x.revenueUsd || 0), 0); })();
   const dec = decide({ cfg, mkt, orders, state, now, units, limits, blockEvent, weekLossUsd });
-  if (dec.state.weekStop && !state.weekStop) await notify(env, `Funding Desk: limite de perda semanal atingido (perda real de US$${weekLossUsd.toFixed(2).replace('.', ',')} em 7 dias; limite US$${cfg.weeklyLossUsd}). Robô encerrou as ordens e não cria novas até a perda da semana baixar.`, fetchFn);
+  if (dec.state.weekStop && !state.weekStop) await notify(env, `limite de perda semanal atingido (perda real de US$${weekLossUsd.toFixed(2).replace('.', ',')} em 7 dias; limite US$${cfg.weeklyLossUsd}). Robô encerrou as ordens e não cria novas até a perda da semana baixar.`, fetchFn);
 
   // Simulação (só no modo Observar) e resultado real (ordens gerenciadas + blocos).
   // Preço v2 (31/10): o lance simulado passou a sair do preço que de fato recebe hash (ordens com máquinas). Até aqui as
@@ -280,8 +280,8 @@ export async function tick(env, opts = {}) {
       calib = Object.assign({}, calib, { done: now, result: { hours, paidUsd, simUsd, diffPct: simUsd > 0 ? (paidUsd / simUsd - 1) * 100 : null, delivered, toHashMin,
         effEH, effVsPricePct: effEH ? (effEH / calib.priceEH - 1) * 100 : null, outbidPct: calib.ticks ? calib.outbid / calib.ticks * 100 : null } });
       const R = calib.result;
-      log.push({ t: now, kind: 'acao', text: `Teste de calibração encerrado: ${R.hours.toFixed(1)} h, pago US$${R.paidUsd.toFixed(2)} contra US$${R.simUsd.toFixed(2)} da simulação; entrega média ${delivered !== null ? (delivered * 100).toFixed(0) + '%' : 'sem dado'}; hash chegou em ${toHashMin !== null ? toHashMin + ' min' : 'sem dado'}` });
-      await notify(env, `Funding Desk: teste de calibração encerrado. ${R.hours.toFixed(1)} h; pago US$${R.paidUsd.toFixed(2)} (simulação: US$${R.simUsd.toFixed(2)}); entrega média ${delivered !== null ? (delivered * 100).toFixed(0) + '%' : 'sem dado'}; hash chegou em ${toHashMin !== null ? toHashMin + ' min' : 'sem dado'}. Detalhes em Mineração → Operar.`, fetchFn);
+      log.push({ t: now, kind: 'acao', text: `Teste de calibração encerrado: ${R.hours.toFixed(1).replace('.', ',')} h, gasto real US$${R.paidUsd.toFixed(2).replace('.', ',')} contra US$${R.simUsd.toFixed(2).replace('.', ',')} simulados; entrega média ${delivered !== null ? (delivered * 100).toFixed(0) + '%' : 'sem dado'}; hash chegou em ${toHashMin !== null ? toHashMin + ' min' : 'sem dado'}` });
+      await notify(env, `teste de calibração encerrado. Duração ${R.hours.toFixed(1).replace('.', ',')} h; gasto real US$${R.paidUsd.toFixed(2).replace('.', ',')}; gasto simulado US$${R.simUsd.toFixed(2).replace('.', ',')} (diferença US$${(R.paidUsd - R.simUsd).toFixed(2).replace('.', ',')}); entrega média ${delivered !== null ? (delivered * 100).toFixed(0) + '%' : 'sem dado'}; hash chegou em ${toHashMin !== null ? toHashMin + ' min' : 'sem dado'}. Detalhes em Mineração → Operar.`, fetchFn);
     }
   }
   const real = realStep(state.real, { orders, managedIds: (cfg.managed || []).concat(calib ? [calib.id] : []), blockEvent, now,
@@ -333,7 +333,7 @@ export async function tick(env, opts = {}) {
       robotTest = Object.assign({}, robotTest, { done: now, spentUsd: paidBtc * btc, orders: ids.length });
       const ok = (k) => (chk[k] ? 'sim' : 'não');
       log.push({ t: now, kind: 'acao', text: `Teste do robô encerrado: criou ordem ${ok('create')}, ajustou ${ok('update')}, stop-loss ${ok('stop')}, espera ${ok('cooling')}; gasto ~US$${(paidBtc * btc).toFixed(2).replace('.', ',')}; configuração original devolvida` });
-      await notify(env, `Funding Desk: teste do robô encerrado. Criou ordem: ${ok('create')}; ajustou preço/potência: ${ok('update')}; stop-loss: ${ok('stop')}; espera depois do stop: ${ok('cooling')}. Gasto ~US$${(paidBtc * btc).toFixed(2).replace('.', ',')}. Configuração original devolvida (modo ${robotTest.backup.mode}). Detalhes em Mineração → Operar.`, fetchFn);
+      await notify(env, `teste do robô encerrado. Criou ordem: ${ok('create')}; ajustou preço/potência: ${ok('update')}; stop-loss: ${ok('stop')}; espera depois do stop: ${ok('cooling')}. Gasto ~US$${(paidBtc * btc).toFixed(2).replace('.', ',')}. Configuração original devolvida (modo ${robotTest.backup.mode}). Detalhes em Mineração → Operar.`, fetchFn);
     }
   }
 
@@ -343,9 +343,17 @@ export async function tick(env, opts = {}) {
     for (const r of results) log.push({ t: now, kind: r.executed ? 'acao' : (r.error ? 'erro' : 'simulado'), text: `${r.type}${r.id ? ' ' + r.id : ''}: ${r.reason}${r.priceEH ? ` · preço ${r.priceEH}` : ''}${r.limitPH !== undefined ? ` · ${r.limitPH} PH/s` : ''}${r.error ? ' · ' + r.error : ''}` });
   }
   const errSig = errors.join('|');
-  if (errors.length && errSig !== state.lastErrSig) {
-    log.push({ t: now, kind: 'erro', text: errors.join('; ') });
-    await notify(env, 'erro: ' + errors[0], fetchFn);
+  if (errors.length && errSig !== state.lastErrSig) log.push({ t: now, kind: 'erro', text: errors.join('; ') });
+  // Telegram só para erro que afeta a operação (rede BCH, cotações, livro e ordens da NiceHash, testes), que se repetiu
+  // no ciclo seguinte, e no máximo uma vez a cada 6 h por fonte. Fontes auxiliares (mempool.space, frentes) ficam só no painel.
+  const errNotified = Object.assign({}, state.errNotified);
+  const CRIT = /^(rede BCH|cotações|livro NiceHash|unidades NiceHash|ordens|calibração|teste do robô|create|update|cancel)/;
+  const prevErr = String(state.lastErrSig || '').split('|');
+  for (const e of errors) {
+    const key = e.split(':')[0];
+    if (!CRIT.test(e) || !prevErr.some((x) => x.split(':')[0] === key) || now - (errNotified[key] || 0) < 6 * 3600e3) continue;
+    errNotified[key] = now;
+    await notify(env, 'problema que afeta a operação, há pelo menos 3 min: ' + e + '. O painel mostra o andamento; se continuar, o robô não compra no escuro.', fetchFn);
   }
 
   // Alertas (entrada/saída/risco) com aviso no Telegram; não dependem do modo do robô.
@@ -563,7 +571,7 @@ export async function tick(env, opts = {}) {
     fund: { passing: ((funding && funding.best) || []).length, sim: fundPaper ? fundPaperSummary(fundPaper, FD.DEFAULT_FEES) : null } });
 
   const next = Object.assign({}, dec.state, alertState, {
-    lastTick: now, verified: Object.fromEntries(Object.entries(verified).filter(([, x]) => now - x.at <= 6 * 3600e3)), ai: br.ai, aiAnalysis, plan, acct, algoMap, mempool, stable24, pairStats, msig, darr, recentBlocks, nhWeek, paper, paperBurst, paperPlan, paperAlways, hashMkts, fronts, frontsPaper, ltStreak, fundPaperLT, market2, aiPanorama, entryCheck, calib, robotTest, aiReport: aiRep, mktMargin, asertF, execLog, bestScen, paperArchive, paperPriceV: 2, blockBuf, blockFlush, lastBlockT, real, fundPaper, alertScore, algoPaper, algoTs, aiScores, fundPaperAI, fhistHour, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig,
+    lastTick: now, verified: Object.fromEntries(Object.entries(verified).filter(([, x]) => now - x.at <= 6 * 3600e3)), ai: br.ai, aiAnalysis, plan, acct, algoMap, mempool, stable24, pairStats, msig, darr, recentBlocks, nhWeek, paper, paperBurst, paperPlan, paperAlways, hashMkts, fronts, frontsPaper, ltStreak, fundPaperLT, market2, aiPanorama, entryCheck, calib, robotTest, aiReport: aiRep, mktMargin, asertF, execLog, bestScen, paperArchive, paperPriceV: 2, blockBuf, blockFlush, lastBlockT, real, fundPaper, alertScore, algoPaper, algoTs, aiScores, fundPaperAI, fhistHour, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig, errNotified,
     market: mkt.ok ? { breakEvenEH: mkt.breakEvenEH, capEH: mkt.capEH, fillEH: mkt.fillEH, medianEH: mkt.medianEH, bidEH: mkt.bidEH,
       edgeAtBidPct: mkt.edgeAtBidPct, green: mkt.green, D: mkt.D, bookTotalPH: book ? book.totalPH : 0, bchUsd: mkt.bchUsd, btcUsd: mkt.btcUsd, costPerBlockUsd: mkt.costPerBlockUsd,
       hashpriceNet: mkt.hashpriceNet, blockNetUsd: mkt.blockNetUsd, phDaysPerBlock: mkt.phDaysPerBlock, market: mkt.market } : { ok: false, reason: mkt.reason },

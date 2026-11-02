@@ -1357,8 +1357,8 @@ function renderExec(){
       '<button id="cal_stop">Encerrar agora</button><p class="note" id="cal_msg" style="margin:6px 0 0">O resultado aparece aqui e no Telegram quando encerrar.</p>';
   }else{
     var R=C.result||{},mktOut=R.outbidPct!==null&&R.outbidPct!==undefined&&R.outbidPct>=10,ok1=R.delivered!==null&&(R.delivered>=0.9||mktOut),cmp=R.effVsPricePct!==undefined&&R.effVsPricePct!==null?R.effVsPricePct:R.diffPct,ok2=cmp!==null&&cmp!==undefined&&Math.abs(cmp)<=10,ok3=R.toHashMin!==null&&R.toHashMin<=10;
-    h+='<div class="box" style="margin:0 0 8px"><b>Resultado ('+dt2(C.start)+', '+nf(R.hours||0,1)+' h)</b>'+
-      '<div class="kv" style="margin-top:4px"><div><small>Pago de verdade</small><span>'+usd(R.paidUsd||0)+'</span></div><div><small>Simulação</small><span>'+usd(R.simUsd||0)+'</span></div><div><small>Custo por hash × preço</small><span class="'+(ok2?'good':'bad')+'">'+(cmp!==null&&cmp!==undefined?pct(cmp,1):'—')+'</span></div>'+
+    h+='<div class="box" style="margin:0 0 8px"><b>Resultado: '+dt2(C.start)+' a '+dt2(C.start+(R.hours||0)*3600e3)+'</b>'+
+      '<div class="kv" style="margin-top:4px"><div><small>Duração</small><span>'+FDI.dur((R.hours||0)*3600e3)+'</span></div><div><small>Gasto real</small><span>'+usd(R.paidUsd||0)+'</span></div><div><small>Gasto simulado</small><span>'+usd(R.simUsd||0)+'</span></div><div><small>Diferença</small><span class="'+(Math.abs((R.paidUsd||0)-(R.simUsd||0))<=0.1*(R.simUsd||1)?'good':'bad')+'">'+signUsd((R.paidUsd||0)-(R.simUsd||0))+(R.simUsd?' ('+pct(((R.paidUsd||0)/R.simUsd-1)*100,1)+')':'')+'</span></div><div><small>Custo por hash × preço</small><span class="'+(ok2?'good':'bad')+'">'+(cmp!==null&&cmp!==undefined?pct(cmp,1):'—')+'</span></div>'+
       '<div><small>Entrega média</small><span class="'+(ok1?'good':'bad')+'">'+(R.delivered!==null?pctp(R.delivered*100,0):'—')+'</span></div>'+(R.outbidPct!==null&&R.outbidPct!==undefined?'<div><small>Mercado acima do preço</small><span>'+pctp(R.outbidPct,0)+' do tempo</span></div>':'')+'<div><small>Hash chegou em</small><span class="'+(ok3?'good':'warn')+'">'+(R.toHashMin!==null?nf(R.toHashMin,0)+' min':'—')+'</span></div></div>'+
       '<p class="note" style="margin:6px 0 0">'+(ok1&&ok2&&ok3?'<b class="good">Calibrado:</b> a execução real bate com a simulação (custo por hash recebido até 10% do preço, hash em até 10 min'+(mktOut&&R.delivered<0.9?'; a entrega caiu porque o mercado passou do preço da ordem em '+pctp(R.outbidPct,0)+' do tempo, o que é comportamento do mercado, não falha':', entrega de 90% ou mais')+'). Os resultados simulados valem como prévia do real.':'<b class="warn">Diferenças a corrigir:</b> '+[!ok1?'a entrega ficou abaixo de 90% sem o mercado ter passado do preço (a NiceHash entregou menos que o pedido)':'',!ok2?'o custo por hash recebido diferiu mais de 10% do preço da ordem':'',!ok3?'o hash demorou mais de 10 min para chegar':''].filter(Boolean).join('; ')+'. Me mande este resultado para ajustar a simulação antes de escalar.')+'</p></div>'+
       '<button id="cal_again">Fazer outro teste</button>';
@@ -2369,4 +2369,16 @@ renderAcct();
 if(linkConnect){tab('set');opsMsg('api_msg',linkConnect.ok?'Backend conectado pelo link. Agora conecte NiceHash e Telegram logo abaixo.':linkConnect.error,!linkConnect.ok);
   if(linkConnect.ok)setTimeout(function(){$('ac_nh').open=true;$('acct').scrollIntoView({block:'start'})},80)}
 if('serviceWorker' in navigator&&/^https?:/.test(location.protocol))navigator.serviceWorker.register('sw.js').catch(function(){});
+
+// Barra inferior sempre colada no fim da parte visível da tela. No iOS, depois de o teclado abrir e fechar, a área de
+// layout pode ficar "presa" menor que a tela e os elementos fixos sobem para o meio; aqui eles acompanham a área
+// visível (visualViewport). Com o teclado aberto, a barra some para não cobrir o campo.
+(function(){var vv=window.visualViewport,de=document.documentElement;if(!vv)return;
+  function fix(){var lh=de.clientHeight,t=vv.offsetTop>0?vv.offsetTop:0,b=vv.offsetTop+vv.height-lh;
+    de.style.setProperty('--vvt',t+'px');de.style.setProperty('--vvb',(Math.abs(b)<1||document.body.classList.contains('kbd')?0:b)+'px')}
+  function isField(el){return el&&(/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))&&!/^(checkbox|radio|button|submit)$/i.test(el.type||'')}
+  document.addEventListener('focusin',function(e){if(isField(e.target)){document.body.classList.add('kbd');fix()}});
+  document.addEventListener('focusout',function(){setTimeout(function(){if(!isField(document.activeElement))document.body.classList.remove('kbd');window.scrollTo(window.scrollX,window.scrollY);fix()},150)});
+  vv.addEventListener('resize',fix);vv.addEventListener('scroll',fix);window.addEventListener('pageshow',fix);window.addEventListener('orientationchange',function(){setTimeout(fix,300)});
+  document.addEventListener('visibilitychange',function(){if(!document.hidden)setTimeout(fix,100)});fix();})();
 })();
