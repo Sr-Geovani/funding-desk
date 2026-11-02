@@ -1387,7 +1387,7 @@ function renderOps(){
   }
   $('o_conn').innerHTML=st?'<div class="row" style="justify-content:space-between"><h2 style="margin:0">Backend</h2><span class="chip ok">conectado</span></div>'+
     '<div class="kv" style="margin-top:10px"><div><small>NiceHash</small><span class="'+(st.nhEnv==='produção'?'warn':'')+'">'+esc(st.nhEnv)+'</span></div><div><small>Chaves</small><span class="'+(st.keys?'good':'bad')+'">'+(st.keys?'ok':'faltando <button class="sm" data-go="set" data-focus="#acct">Conectar</button>')+'</span></div><div><small>Telegram</small><span>'+(st.telegram?'ok':'—')+'</span></div>'+
-    '<div><small>Teto por ordem</small><span>'+st.limits.maxOrderBtc+' BTC</span></div><div><small>Teto de potência</small><span>'+st.limits.maxLimitPh+' PH/s</span></div><div><small>Versão</small><span>'+esc(st.version)+'</span></div></div>'
+    '<div><small>Teto por ordem</small><span>'+String(st.limits.maxOrderBtc).replace('.',',')+' BTC</span></div><div><small>Teto de potência</small><span>'+st.limits.maxLimitPh+' PH/s</span></div><div><small>Versão</small><span>'+esc(st.version)+'</span></div></div>'
     :'<div class="row" style="justify-content:space-between"><h2 style="margin:0">Backend</h2><span class="chip bad">sem conexão</span></div><p class="note">'+esc(ops.err.status||'carregando…')+'</p>';
   if(!st){$('o_status').innerHTML='';return}
   var cfg=st.config,s=st.state||{},m=s.market||{};
@@ -2379,12 +2379,19 @@ if('serviceWorker' in navigator&&/^https?:/.test(location.protocol))navigator.se
 // (visualViewport: offsetTop + altura − altura da barra), sem depender da altura do documento. Com o teclado aberto,
 // ela some para não cobrir o campo. Sem visualViewport, fica o CSS (bottom: 0).
 (function(){var vv=window.visualViewport,nav=document.querySelector('nav');if(!vv||!nav)return;
-  function fix(){if(document.body.classList.contains('kbd'))return;var y=Math.round(vv.offsetTop+vv.height-nav.offsetHeight);
-    if(y>0&&y<vv.offsetTop+vv.height){nav.style.top=y+'px';nav.style.bottom='auto'}else{nav.style.top='';nav.style.bottom=''}}
+  // Instalado na tela inicial (modo app) e sem teclado, a área visível é a tela inteira: usa a altura da tela, que não
+  // muda quando o iOS informa uma altura errada ao voltar do segundo plano. No navegador, usa a área visível.
+  var app=window.navigator.standalone===true||(window.matchMedia&&matchMedia('(display-mode: standalone)').matches);
+  function screenH(){var land=window.matchMedia&&matchMedia('(orientation: landscape)').matches;return land?Math.min(screen.width,screen.height):Math.max(screen.width,screen.height)}
+  function fix(){if(document.body.classList.contains('kbd'))return;
+    var h=app?Math.max(screenH(),vv.offsetTop+vv.height):vv.offsetTop+vv.height,y=Math.round(h-nav.offsetHeight);
+    if(y>0){nav.style.top=y+'px';nav.style.bottom='auto'}else{nav.style.top='';nav.style.bottom=''}}
+  function burst(){[0,60,250,600,1200,2500].forEach(function(t){setTimeout(fix,t)})}
   function isField(el){return el&&(/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))&&!/^(checkbox|radio|button|submit)$/i.test(el.type||'')}
   document.addEventListener('focusin',function(e){if(isField(e.target))document.body.classList.add('kbd')});
-  document.addEventListener('focusout',function(){setTimeout(function(){if(!isField(document.activeElement)){document.body.classList.remove('kbd');window.scrollTo(window.scrollX,window.scrollY);fix()}},150)});
-  vv.addEventListener('resize',fix);vv.addEventListener('scroll',fix);window.addEventListener('scroll',fix,{passive:true});window.addEventListener('pageshow',fix);
-  window.addEventListener('orientationchange',function(){setTimeout(fix,300)});document.addEventListener('visibilitychange',function(){if(!document.hidden)setTimeout(fix,100)});
-  setTimeout(fix,0);fix();})();
+  document.addEventListener('focusout',function(){setTimeout(function(){if(!isField(document.activeElement)){document.body.classList.remove('kbd');window.scrollTo(window.scrollX,window.scrollY);burst()}},150)});
+  vv.addEventListener('resize',fix);vv.addEventListener('scroll',fix);window.addEventListener('resize',fix);window.addEventListener('scroll',fix,{passive:true});
+  window.addEventListener('pageshow',burst);window.addEventListener('focus',burst);window.addEventListener('orientationchange',burst);
+  document.addEventListener('visibilitychange',function(){if(!document.hidden)burst()});
+  burst();})();
 })();
