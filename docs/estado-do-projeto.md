@@ -169,6 +169,7 @@ sempre identificado; nada de prometer previsão de sorte (Poisson é sem memóri
 - Contexto para minerar (02/11, topo da cartilha): média das últimas 24 h, onde está a sua meta, o que ajustar para operar agora e o custo esperado por tentativa, a regra relativa e os blocos das 24 h por potência (`state.luck24`).
 - Regra de entrada relativa opcional (`minEdgeMode: 'relativo'`, `relPct`, `relFloorPct`; `relativeMinEdge` em signals.js): margem mínima = percentil das margens das últimas 24 h, com piso; a configuração salva não muda (`saveCfg`). O teste do robô força a regra fixa.
 - Prontidão separada por frente: mineração (faixa, IA, sua regra, calibração, limites) e funding (resultado simulado, limites).
+- Plano para o saldo (02/11, `balancePlan` em brain.js, `/api/balanceplan/apply|undo`, cartão em Mineração → Operar): uma ordem com o saldo (menos a taxa de 0,00001 BTC por ordem nova), regra relativa nos 25% melhores momentos das 24 h com piso −2%, potência para gastar nas janelas de uma madrugada (~8 h), potência mínima fora delas, stop-loss igual ao valor da ordem; mostra chance de bloco, ganho se achar, perda se não achar e perda média; guarda a configuração para desfazer.
 - Ciclo do servidor: 3 min. Mínimo do Cloudflare é 1 min, mas o KV grátis aceita 1.000 gravações/dia e propaga em até
   60 s; abaixo de 3 min exige plano pago + Durable Objects. Atraso de 3 min custa < US$1 com 10 PH/s.
 

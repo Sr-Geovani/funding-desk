@@ -382,3 +382,25 @@ export function actionPlan(ctx) {
   }
   return out;
 }
+
+// Plano para o saldo: o que fazer com o saldo que está na NiceHash numa janela de horas (ex.: a madrugada), do jeito
+// mais eficiente para o cenário. A chance de achar bloco depende só de quanto se gasta (não da potência nem do tempo):
+// 1 − e^(−gasto ÷ custo por bloco). O que dá para otimizar é QUANDO se gasta (nos melhores momentos do dia, com a
+// regra relativa) e o custo das pausas. Taxas da NiceHash: 3% sobre o gasto e 0,00001 BTC por ordem nova.
+export const NH_ORDER_FEE_BTC = 0.00001;
+export function balancePlan({ balanceBtc, mkt, mm, cfg, units, limits, hours = 8, relPct = 75, floor = -2 }) {
+  if (!(mkt && mkt.ok) || !isFinite(balanceBtc)) return null;
+  const minOrder = (units && units.minOrderBtc) || 0.001, usable = balanceBtc - NH_ORDER_FEE_BTC;
+  if (usable < minOrder) return { ok: false, balanceBtc, need: minOrder + NH_ORDER_FEE_BTC, why: `O saldo (${f(balanceBtc, 6)} BTC) é menor que o mínimo de uma ordem na NiceHash (${f(minOrder, 3)} BTC mais ${f(NH_ORDER_FEE_BTC, 5)} de taxa).` };
+  const amount = Math.floor(Math.min(usable, limits.maxOrderBtc) * 1e6) / 1e6, budget = amount * mkt.btcUsd;
+  const H = mm && (mm.h24 || mm.d7), thr = H && isFinite(H.top25) ? Math.round(Math.max(floor, H.top25) * 10) / 10 : floor;
+  const buyFrac = (100 - relPct) / 100, buyH = Math.max(0.5, hours * buyFrac);
+  const perPhH = mkt.bidEH / 1000 * mkt.btcUsd * (1 + (cfg.rentFeePct || 3) / 100) / 24;  // US$ por PH/s por hora
+  const minPh = Math.max(cfg.minPh || 0, (units && units.minLimitPH) || 1), pauseUsd = minPh * perPhH * Math.max(0, hours - buyH);
+  const ph = Math.max(minPh, Math.min(limits.maxLimitPh, Math.floor(Math.max(0, budget - pauseUsd) / (buyH * perPhH) / 5) * 5 || minPh));
+  const chance = 1 - Math.exp(-budget / mkt.costPerBlockUsd), expMargin = Math.min(thr, 0);
+  return { ok: true, at: Date.now(), hours, amountBtc: amount, budgetUsd: budget, feeUsd: NH_ORDER_FEE_BTC * mkt.btcUsd, threshold: thr, relPct, floor, ph, buyH, pauseUsd,
+    chance, blockUsd: mkt.blockNetUsd, expLossUsd: budget * -expMargin / 100 + NH_ORDER_FEE_BTC * mkt.btcUsd, perPhH,
+    config: { mode: 'active', minEdgeMode: 'relativo', relPct, relFloorPct: floor, targetPh: ph, minPh: 0, sessionBudgetUsd: Math.ceil(budget), dailyBudgetUsd: Math.ceil(budget) + 5,
+      orderAmountBtc: amount, autoCreate: true, onBlock: 'cancel' } };
+}

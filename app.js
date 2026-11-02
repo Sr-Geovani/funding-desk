@@ -690,7 +690,7 @@ function loadOps(){
     if(r[2].ok)ops.bal=r[2].v;else ops.err.bal=r[2].e.message;
     if(r[3].ok)ops.pools=r[3].v.list||[];else ops.err.pools=r[3].e.message;
     if(r[4].ok)ops.log=r[4].v.log||[];
-    renderOps();renderHome();renderMine();renderAcct();renderRadar();renderRobo();renderWindow();renderHeat();renderAI();renderNext();renderAct();renderHashMkts();renderFronts();renderEntry();renderExec();renderRTest();renderReady();
+    renderOps();renderHome();renderMine();renderAcct();renderRadar();renderRobo();renderWindow();renderHeat();renderAI();renderNext();renderAct();renderHashMkts();renderFronts();renderEntry();renderBPlan();renderExec();renderRTest();renderReady();
   });
 }
 // Dados do servidor em qualquer aba: 30 s em Operar, 60 s nas outras. Ao voltar do segundo plano (iPhone deixa o app
@@ -1321,6 +1321,29 @@ function renderReady(){
   el.innerHTML='<div class="eyebrow">Fase de observação</div><div class="lead">Prontidão para o dinheiro real</div><p class="note" style="margin:4px 0 4px">Cada frente liga sozinha quando todos os critérios dela estiverem cumpridos. Até lá, o painel observa, simula e aprende. A decisão final é sua.</p>'+
     sec('Mineração (BCH solo)',mine)+sec('Funding (arbitragem de taxa)',fund);
 }
+// Plano para o saldo: a sugestão do robô para gastar o saldo da NiceHash numa janela (ex.: a madrugada) do jeito mais
+// eficiente para o cenário, com o custo e a chance de bloco escritos, e botões para aplicar e desfazer.
+function renderBPlan(){
+  var el=$('o_bplan');if(!el)return;var st=ops.status,S=st&&st.state;if(!S||!S.balPlan){el.innerHTML='';el.hidden=true;return}
+  el.hidden=false;var P=S.balPlan,on=S.planOn,h='<div class="row between"><div class="eyebrow">Sugestão do robô</div><span class="chip'+(on?' ok':'')+'">'+(on?'plano ativo':'pronto para aplicar')+'</span></div><div class="lead">Plano para o seu saldo</div>';
+  if(!P.ok){el.innerHTML=h+'<p class="note">'+esc(P.why)+' Deposite pelo menos '+String(P.need.toFixed(5)).replace('.',',')+' BTC para ter uma ordem.</p>';return}
+  h+='<p class="note" style="margin:4px 0 8px">Para gastar '+btcTxt(P.amountBtc)+' nas próximas ~'+P.hours+' horas do jeito mais eficiente para o mercado de agora: o robô compra só nos 25% melhores momentos do dia (margem mínima de hoje '+pct(P.threshold,1)+', nunca abaixo de '+pct(P.floor,0)+') e, fora deles, fica na potência mínima.</p>'+
+    '<div class="kv"><div><small>Potência nas janelas</small><span>'+nf(P.ph,0)+' PH/s</span></div><div><small>Tempo comprando</small><span>~'+nf(P.buyH,1)+' h</span></div><div><small>Chance de 1 bloco ou mais</small><span>'+pctp(P.chance*100,1)+'</span></div>'+
+    '<div><small>Se achar</small><span class="good">~'+usd(P.blockUsd-P.budgetUsd,0)+'</span></div><div><small>Se não achar</small><span class="bad">−'+usd(P.budgetUsd,0)+'</span></div><div><small>Perda média esperada</small><span>~'+usd(P.expLossUsd,2)+'</span></div></div>'+
+    '<details style="margin-top:6px"><summary>Por que assim</summary><ul class="note" style="margin:6px 0 0;padding-left:18px">'+
+    '<li>A chance de achar bloco depende só de quanto se gasta, não da potência nem do tempo: com '+usd(P.budgetUsd,0)+' ela é '+pctp(P.chance*100,1)+' de qualquer jeito.</li>'+
+    '<li>O que dá para melhorar é <b>quando</b> se gasta: nos melhores momentos do dia a margem é menos negativa, então a perda média cai (cerca de '+usd(P.expLossUsd,2)+' em vez de ~'+usd(P.budgetUsd*0.03,2)+' gastando a qualquer hora).</li>'+
+    '<li>Fora das janelas, a ordem fica na potência mínima (1 PH/s, ~'+usd(P.perPhH,2)+' por hora) em vez de ser cancelada: cancelar e criar de novo custa '+usd(P.feeUsd,2)+' de taxa da NiceHash por ordem nova.</li>'+
+    '<li>Stop-loss igual ao valor da ordem: o máximo que dá para perder é o que está nela. Ao achar bloco, a ordem é encerrada.</li></ul></details>'+
+    (on?'<button id="bp_undo" style="margin-top:8px">Desfazer e voltar à configuração anterior</button>':'<button class="pri" id="bp_go" style="margin-top:8px">Aplicar este plano</button>')+'<p class="note" id="bp_msg" style="margin:6px 0 0"></p>';
+  el.innerHTML=h;
+}
+document.addEventListener('click',function(e){
+  var id=e.target.id;if(id!=='bp_go'&&id!=='bp_undo')return;
+  if(id==='bp_go'&&!confirm('Aplicar o plano? O robô vai para Ativo com a regra relativa e pode gastar todo o valor da ordem.'))return;
+  var b=e.target;b.disabled=true;
+  apiCall('POST',id==='bp_go'?'/balanceplan/apply':'/balanceplan/undo',{}).then(function(){$('bp_msg').textContent='Feito. Atualizando…';loadOps()},function(er){b.disabled=false;$('bp_msg').textContent='Não deu: '+er.message});
+});
 // Teste do robô: modo Ativo com limites mínimos, para ver na NiceHash real o robô criar, ajustar, parar no stop-loss e esperar.
 function renderRTest(){
   var el=$('o_rtest');if(!el)return;var st=ops.status,S=st&&st.state,cfg=(st&&st.config)||{};if(!S){el.innerHTML='';return}

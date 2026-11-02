@@ -1396,3 +1396,14 @@ test('regra relativa: margem mínima pelos melhores momentos das últimas 24 h, 
   assert.equal(errors.length, 0); assert.equal(config.minEdgeMode, 'relativo');
   assert.ok(sanitizeConfig({ minEdgeMode: 'qualquer' }, DEFAULT_CONFIG, { maxLimitPh: 100, maxDailyUsd: 1000, maxOrderBtc: 0.01 }).errors.length === 1);
 });
+
+test('plano para o saldo: uma ordem com o saldo, regra relativa, chance de bloco e perda média', async () => {
+  const { balancePlan } = await import('../worker/src/brain.js');
+  const mkt = { ok: true, bidEH: 0.4264, btcUsd: 78425, costPerBlockUsd: 904, blockNetUsd: 871 };
+  const P = balancePlan({ balanceBtc: 0.001067, mkt, mm: { h24: { top25: -1.01 } }, cfg: DEFAULT_CONFIG, units: { minOrderBtc: 0.001, minLimitPH: 1 }, limits: { maxOrderBtc: 0.01, maxLimitPh: 100 } });
+  assert.ok(P.ok && P.amountBtc <= 0.001057 && P.amountBtc >= 0.001);
+  assert.equal(P.threshold, -1); assert.equal(P.config.minEdgeMode, 'relativo'); assert.ok(P.ph >= 5 && P.ph <= 100);
+  assert.ok(Math.abs(P.chance - (1 - Math.exp(-P.budgetUsd / 904))) < 1e-9 && P.expLossUsd > 0 && P.expLossUsd < 2);
+  const low = balancePlan({ balanceBtc: 0.0005, mkt, mm: null, cfg: DEFAULT_CONFIG, units: { minOrderBtc: 0.001 }, limits: { maxOrderBtc: 0.01, maxLimitPh: 100 } });
+  assert.equal(low.ok, false); assert.match(low.why, /mínimo de uma ordem/);
+});

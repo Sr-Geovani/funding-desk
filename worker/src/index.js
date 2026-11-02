@@ -22,7 +22,7 @@ import { FUND_MODEL } from './fundmodel.js';
 import { updateHistory, pickCoins, scorePairs, stablePairs, pairStatsOf } from './fundai.js';
 import { blockRecord, blockSummary, poolOf, luckBoard, needPH } from './blocks.js';
 import { darrOf, retargetOf, momentumOf, windowMeter, weekAdd, marginStats, asertForecast, relativeMinEdge } from './signals.js';
-import { brainStep, analysis, levelOf, TYPES, actionPlan, bandThreshold, plain } from './brain.js';
+import { brainStep, analysis, levelOf, TYPES, actionPlan, bandThreshold, plain, balancePlan } from './brain.js';
 import FDI from '../../insights.js';
 import { withCreds, reloadCreds, saveCreds, credStatus, parseNiceHash, TG_TOKEN_RE, chatFromUpdates } from './creds.js';
 
@@ -580,6 +580,7 @@ export async function tick(env, opts = {}) {
   const mempool = mpR.ok ? Object.assign({ at: now }, mpR.v) : state.mempool || null;
   // Cartilha de entrada: a sequência de fatores (margem real, sem taxa, DARR, preço × dificuldade, hash, reajuste do BTC,
   // horário, tamanho, tentativa) avaliada agora, com veredito. docs/cartilha-mineracao.md.
+  const balPlan = acct && isFinite(acct.balanceBtc) ? balancePlan({ balanceBtc: acct.balanceBtc, mkt, mm: marginStats(state.edgeHist, { now, fixAt: paperArchive && paperArchive.at, minEdge: cfg.minEdgePct, edgeNow: null }), cfg: state.planBackup ? Object.assign({}, cfg, state.planBackup) : cfg, units, limits }) : (state.balPlan || null);
   const entryCheck = entryChecklist({ mkt, darr: darr ? darr.v : null, mom: msig.mom, ret: snap.ret, win: snap.win, nhWeek, hashMkts,
     power: plan && plan.mining ? plan.mining.power : null, cfg, now, mm: mktMargin, band: bandThreshold(br.ai.band), bins: br.ai.band && br.ai.band.bins });
   const aiRep = aiReport({ now, mkt, cfg, asert: asertF, mm: mktMargin, ai: br.ai, mom: msig.mom, ret: snap.ret, win: snap.win, darr: darr ? darr.v : null,
@@ -587,7 +588,7 @@ export async function tick(env, opts = {}) {
     fund: { passing: ((funding && funding.best) || []).length, sim: fundPaper ? fundPaperSummary(fundPaper, FD.DEFAULT_FEES) : null } });
 
   const next = Object.assign({}, dec.state, alertState, {
-    lastTick: now, verified: Object.fromEntries(Object.entries(verified).filter(([, x]) => now - x.at <= 6 * 3600e3)), ai: br.ai, aiAnalysis, plan, acct, algoMap, mempool, stable24, pairStats, msig, darr, recentBlocks, nhWeek, paper, paperBurst, paperPlan, paperAlways, hashMkts, fronts, frontsPaper, ltStreak, fundPaperLT, market2, aiPanorama, entryCheck, calib, robotTest, luck24, minEdgeNow: { value: cfg.minEdgePct, relative: !!cfg.minEdgeRel, base: cfg.minEdgeRel ? cfg.minEdgeBase : cfg.minEdgePct }, aiReport: aiRep, mktMargin, asertF, execLog, bestScen, paperArchive, paperPriceV: 2, blockBuf, blockFlush, lastBlockT, real, fundPaper, alertScore, algoPaper, algoTs, aiScores, fundPaperAI, fhistHour, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig, errNotified,
+    lastTick: now, verified: Object.fromEntries(Object.entries(verified).filter(([, x]) => now - x.at <= 6 * 3600e3)), ai: br.ai, aiAnalysis, plan, acct, algoMap, mempool, stable24, pairStats, msig, darr, recentBlocks, nhWeek, paper, paperBurst, paperPlan, paperAlways, hashMkts, fronts, frontsPaper, ltStreak, fundPaperLT, market2, aiPanorama, entryCheck, calib, robotTest, luck24, balPlan, minEdgeNow: { value: cfg.minEdgePct, relative: !!cfg.minEdgeRel, base: cfg.minEdgeRel ? cfg.minEdgeBase : cfg.minEdgePct }, aiReport: aiRep, mktMargin, asertF, execLog, bestScen, paperArchive, paperPriceV: 2, blockBuf, blockFlush, lastBlockT, real, fundPaper, alertScore, algoPaper, algoTs, aiScores, fundPaperAI, fhistHour, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig, errNotified,
     market: mkt.ok ? { breakEvenEH: mkt.breakEvenEH, capEH: mkt.capEH, fillEH: mkt.fillEH, medianEH: mkt.medianEH, bidEH: mkt.bidEH,
       edgeAtBidPct: mkt.edgeAtBidPct, green: mkt.green, D: mkt.D, bookTotalPH: book ? book.totalPH : 0, bchUsd: mkt.bchUsd, btcUsd: mkt.btcUsd, costPerBlockUsd: mkt.costPerBlockUsd,
       hashpriceNet: mkt.hashpriceNet, blockNetUsd: mkt.blockNetUsd, phDaysPerBlock: mkt.phDaysPerBlock, market: mkt.market } : { ok: false, reason: mkt.reason },
@@ -698,7 +699,7 @@ async function api(req, env, url, fetchFn) {
       telegram: !!(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID), creds: credStatus(env), limits, config: cfg,
       state: { lastTick: state.lastTick, lastHeight: state.lastHeight, market: state.market, myBlocks: state.myBlocks || [], dailyUsd: state.dailyUsd || 0,
         errors: state.errors || [], edgeHist: state.edgeHist || [], alerts: (state.alerts || []).slice(-30).reverse(),
-        paper: state.paper || null, paperBurst: state.paperBurst || null, paperPlan: state.paperPlan || null, paperAlways: state.paperAlways || null, paperArchive: state.paperArchive || null, entryCheck: state.entryCheck || null, calib: state.calib || null, minEdgeNow: state.minEdgeNow || null, luck24: state.luck24 || null, calibPrev: state.calibPrev || null, robotTest: state.robotTest || null, aiReport: state.aiReport || null, mktMargin: state.mktMargin || null, asertF: state.asertF || null, exec: execSummary(state.execLog), bestScen: state.bestScen || null, hashMkts: state.hashMkts || null, fronts: state.fronts || null, frontsPaper: state.frontsPaper || null, market2: state.market2 || null, aiPanorama: state.aiPanorama || null,
+        paper: state.paper || null, paperBurst: state.paperBurst || null, paperPlan: state.paperPlan || null, paperAlways: state.paperAlways || null, paperArchive: state.paperArchive || null, entryCheck: state.entryCheck || null, calib: state.calib || null, minEdgeNow: state.minEdgeNow || null, luck24: state.luck24 || null, balPlan: state.balPlan || null, planOn: !!state.planBackup, calibPrev: state.calibPrev || null, robotTest: state.robotTest || null, aiReport: state.aiReport || null, mktMargin: state.mktMargin || null, asertF: state.asertF || null, exec: execSummary(state.execLog), bestScen: state.bestScen || null, hashMkts: state.hashMkts || null, fronts: state.fronts || null, frontsPaper: state.frontsPaper || null, market2: state.market2 || null, aiPanorama: state.aiPanorama || null,
         fundPaperLT: state.fundPaperLT ? { summary: fundPaperSummary(state.fundPaperLT, LT_FEES), open: state.fundPaperLT.open, closed: state.fundPaperLT.closed.slice(-50).reverse() } : null, opLog: (state.opLog || []).slice(-20).reverse(), real: state.real ? Object.assign({}, state.real, { paid: undefined }) : null,
         fundPaper: state.fundPaper ? { summary: fundPaperSummary(state.fundPaper, FD.DEFAULT_FEES), open: state.fundPaper.open, closed: state.fundPaper.closed.slice(-100).reverse() } : null,
         algoPaper: state.algoPaper || null,
@@ -850,6 +851,26 @@ async function api(req, env, url, fetchFn) {
     await kvPut(env, 'state', st);
     await appendLog(env, [{ t: now, kind: 'config', text: `Teste do robô iniciado por ${hours} h: modo Ativo, 10 PH/s, margem mínima −5% (temporária), stop-loss US$8, espera 15 min, limite diário US$20; a configuração original volta no fim` }]);
     return json(st.robotTest);
+  }
+  if (p === '/balanceplan/apply' && m === 'POST') {
+    // aplica o plano para o saldo, guardando a configuração atual para desfazer depois
+    const st = await kvGet(env, 'state', {}), cfg = await getConfig(env), P = st.balPlan;
+    if (!P || !P.ok) return json({ error: (P && P.why) || 'plano ainda não calculado (aguarde um ciclo)' }, 400);
+    if (!cfg.poolId) return json({ error: 'escolha o pool (Mineração → Robô → Pool para ordens novas)' }, 400);
+    if (!hasKeys(env)) return json({ error: 'NiceHash não conectada' }, 412);
+    if (!st.planBackup) st.planBackup = Object.fromEntries(Object.keys(P.config).map((k) => [k, cfg[k]]));
+    await kvPut(env, 'config', Object.assign({}, cfg, P.config));
+    st.planAt = Date.now(); await kvPut(env, 'state', st);
+    await appendLog(env, [{ t: Date.now(), kind: 'config', text: `Plano para o saldo aplicado: ${P.ph} PH/s nos 25% melhores momentos das últimas 24 h (margem mínima de hoje ${String(P.threshold).replace('.', ',')}%, piso ${P.floor}%), ordem de ${String(P.amountBtc).replace('.', ',')} BTC, stop-loss US$${Math.ceil(P.budgetUsd)}` }]);
+    return json({ ok: true });
+  }
+  if (p === '/balanceplan/undo' && m === 'POST') {
+    const st = await kvGet(env, 'state', {}), cfg = await getConfig(env);
+    if (!st.planBackup) return json({ error: 'nenhum plano aplicado' }, 400);
+    await kvPut(env, 'config', Object.assign({}, cfg, st.planBackup));
+    st.planBackup = null; await kvPut(env, 'state', st);
+    await appendLog(env, [{ t: Date.now(), kind: 'config', text: 'Plano para o saldo desfeito: configuração anterior devolvida' }]);
+    return json({ ok: true });
   }
   if (p === '/robottest/fast' && m === 'POST') {
     // Concluir mais rápido: stop-loss logo acima do gasto da tentativa atual e espera de 10 min, para exercitar os dois
