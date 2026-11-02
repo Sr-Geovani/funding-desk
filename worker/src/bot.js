@@ -137,7 +137,7 @@ function utcDay(ms) { return new Date(ms).toISOString().slice(0, 10); }
 // blockEvent: { height, bch } quando a recompensa de um bloco caiu no endereço desde o último ciclo.
 export function decide({ cfg, mkt, orders, state = {}, now, units, limits = limitsFromEnv(), blockEvent = null, weekLossUsd = 0 }) {
   const st = JSON.parse(JSON.stringify(state || {}));
-  st.lastDecrease = st.lastDecrease || {}; st.dayStart = st.dayStart || {};
+  st.lastDecrease = st.lastDecrease || {}; st.lastPriceChange = st.lastPriceChange || {}; st.dayStart = st.dayStart || {};
   const actions = [], notes = [];
   const today = utcDay(now);
   if (st.day !== today) { st.day = today; st.dayStart = {}; }
@@ -214,12 +214,15 @@ export function decide({ cfg, mkt, orders, state = {}, now, units, limits = limi
       : `acima do teto (${mkt.capEH.toFixed(4).replace('.', ',')}): pausa. Por quê: lance ${mkt.bidEH.toFixed(4).replace('.', ',')} > teto (${rule}); comprar acima disso dá prejuízo médio`;
     if (dailyHit && mkt.green) reason = 'limite diário: pausa';
     if (want < o.priceEH - 1e-9) {
-      const last = st.lastDecrease[o.id] || 0;
-      if (now - last >= DOWN_STEP_MS) { price = Math.max(want, r4(o.priceEH - units.priceDownStepEH)); st.lastDecrease[o.id] = now; }
+      // A NiceHash só aceita baixar o preço 10 min depois de QUALQUER mudança de preço (subida inclusive) e da criação da
+      // ordem (erro 5061 visto no teste real de 01/11). 30 s de folga para o relógio dos dois lados.
+      const last = Math.max(st.lastDecrease[o.id] || 0, st.lastPriceChange[o.id] || 0, o.createdTs || 0);
+      if (now - last >= DOWN_STEP_MS + 30e3) { price = Math.max(want, r4(o.priceEH - units.priceDownStepEH)); st.lastDecrease[o.id] = now; }
       else price = o.priceEH;
       if (price > mkt.capEH + 1e-9) { limit = minPh; reason += '; baixando o preço aos poucos (regra da NiceHash)'; }
     }
     if (Math.abs(price - o.priceEH) >= 0.00005 || Math.abs(limit - o.limitPH) >= 0.001) {
+      if (Math.abs(price - o.priceEH) >= 0.00005) st.lastPriceChange[o.id] = now;
       actions.push({ type: 'update', id: o.id, priceEH: r4(price), limitPH: limit, reason });
     }
   }

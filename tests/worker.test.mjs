@@ -90,6 +90,21 @@ test('robô: sinal verde sobe para a potência alvo no lance', () => {
   assert.deepEqual([d.actions[0].type, d.actions[0].priceEH, d.actions[0].limitPH], ['update', 0.40, 20]);
 });
 
+test('robô: não baixa o preço antes de 10 min de qualquer mudança (subida inclusive), regra 5061 da NiceHash', () => {
+  // subiu o preço agora
+  const up = decide({ cfg: cfgOf(), mkt: mk({ bidEH: 0.4265 }), orders: [order({ priceEH: 0.4262, limitPH: 20, createdTs: NOW - 3600e3 })], now: NOW, units, limits: lim });
+  assert.equal(up.actions[0].priceEH, 0.4265);
+  // 5 min depois o mercado caiu: não pode baixar ainda
+  const d1 = decide({ cfg: cfgOf(), mkt: mk({ bidEH: 0.4230, capEH: 0.44 }), orders: [order({ priceEH: 0.4265, limitPH: 20, createdTs: NOW - 3600e3 })], now: NOW + 5 * 60e3, units, limits: lim, state: up.state });
+  assert.ok(!d1.actions.some((a) => a.type === 'update' && a.priceEH < 0.4265), JSON.stringify(d1.actions));
+  // 11 min depois: baixa um degrau
+  const d2 = decide({ cfg: cfgOf(), mkt: mk({ bidEH: 0.4230, capEH: 0.44 }), orders: [order({ priceEH: 0.4265, limitPH: 20, createdTs: NOW - 3600e3 })], now: NOW + 11 * 60e3, units, limits: lim, state: d1.state });
+  assert.ok(d2.actions.some((a) => a.type === 'update' && a.priceEH < 0.4265));
+  // ordem recém-criada também espera 10 min
+  const d3 = decide({ cfg: cfgOf(), mkt: mk({ bidEH: 0.4230, capEH: 0.44 }), orders: [order({ priceEH: 0.4265, limitPH: 20, createdTs: NOW - 2 * 60e3 })], now: NOW, units, limits: lim });
+  assert.ok(!d3.actions.some((a) => a.type === 'update' && a.priceEH < 0.4265));
+});
+
 test('robô: limite de perda semanal encerra tudo e não cria ordem nova', () => {
   const d = decide({ cfg: cfgOf({ weeklyLossUsd: 1000, autoCreate: true, poolId: 'p' }), mkt: mk(), orders: [order({ limitPH: 20 })], now: NOW, units, limits: lim, weekLossUsd: 1200 });
   assert.equal(d.actions.length, 1); assert.equal(d.actions[0].type, 'cancel'); assert.match(d.actions[0].reason, /limite de perda semanal/); assert.equal(d.state.weekStop, true);
@@ -108,7 +123,7 @@ test('robô: acima do teto pausa e baixa o preço só um degrau a cada 10 min', 
   // 5 min depois: não pode baixar de novo; mantém pausado
   const d2 = decide({ cfg: cfgOf(), mkt: m, orders: [order({ priceEH: 0.45, limitPH: 0.1 })], state: d1.state, now: NOW + 5 * 60e3, units, limits: lim });
   assert.equal(d2.actions.length, 0);
-  const d3 = decide({ cfg: cfgOf(), mkt: m, orders: [order({ priceEH: 0.45, limitPH: 0.1 })], state: d1.state, now: NOW + DOWN_STEP_MS, units, limits: lim });
+  const d3 = decide({ cfg: cfgOf(), mkt: m, orders: [order({ priceEH: 0.45, limitPH: 0.1 })], state: d1.state, now: NOW + DOWN_STEP_MS + 30e3, units, limits: lim });
   assert.equal(d3.actions[0].priceEH, 0.44);
 });
 
