@@ -289,6 +289,9 @@ export async function tick(env, opts = {}) {
 
   // Execução: só no modo ativo. No modo observar, registra o que faria.
   const results = [];
+  // Teste do robô: quando a espera depois do stop-loss termina, o teste acaba neste ciclo; não cria ordem nova.
+  { const RT = state.robotTest, su = dec.state.stopUntil || state.stopUntil;
+    if (RT && !RT.done && RT.checks && RT.checks.stop && su && now >= su) dec.actions = dec.actions.filter((a) => a.type !== 'create'); }
   for (const a of dec.actions) {
     if (cfg.mode !== 'active' || !hasKeys(env)) { results.push(Object.assign({ executed: false }, a)); continue; }
     try {
@@ -325,7 +328,8 @@ export async function tick(env, opts = {}) {
     if ((dec.notes || []).some((x) => /limite diário/.test(x))) chk.daily = chk.daily || now;
     robotTest = Object.assign({}, robotTest, { events: ev.slice(-60), checks: chk, ids });
     if (now >= robotTest.until || (chk.stop && chk.cooldownEnd)) {
-      for (const id of ids) { const o = orders.find((x) => x.id === id); if (o && o.alive) { const r = await settle(nh.cancelOrder(id)); if (!r.ok) errors.push('teste do robô: ' + r.e); } }
+      // encerra todas as ordens do teste, inclusive as criadas neste mesmo ciclo (não estão na lista lida no início)
+      for (const id of ids) { const o = orders.find((x) => x.id === id); if (o && !o.alive) continue; const r = await settle(nh.cancelOrder(id)); if (!r.ok && !/not found|cancel|closed|status/i.test(r.e)) errors.push('teste do robô: ' + r.e); }
       const cur = await getConfig(env);
       await kvPut(env, 'config', Object.assign({}, cur, robotTest.backup, { managed: (cur.managed || []).filter((id) => !ids.includes(id)) }));
       const btc = mkt.ok ? mkt.btcUsd : 0, paidBtc = ids.reduce((a, id) => a + ((execLog && execLog.orders && execLog.orders[id] && execLog.orders[id].paidBtc) || 0), 0);

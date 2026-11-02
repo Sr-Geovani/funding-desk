@@ -1361,3 +1361,25 @@ test('integração: teste do robô em Ativo com limites mínimos e devolução d
     assert.ok(!(cfg.managed || []).includes(ids[0]));
   } finally { t.server.close(); }
 });
+
+test('integração: teste do robô não deixa ordem para trás no ciclo em que termina', async () => {
+  const t = await setup();
+  try {
+    await t.call('PUT', '/api/config', { mode: 'observe', targetPh: 100, minEdgePct: 3, poolId: 'pool-1' });
+    await t.call('POST', '/api/robottest/start', { hours: 2 });
+    const now = Date.now();
+    await tick(t.env, { now: now + 3 * 60e3 });
+    await t.call('POST', '/api/robottest/fast', {});           // stop-loss em US$1
+    const id1 = Object.keys(t.state.orders)[0];
+    await tick(t.env, { now: now + 5 * 60e3 });               // a tentativa passa a contar esta ordem
+    t.state.orders[id1].paid = 0.0001;                        // gasto acima do stop-loss
+    await tick(t.env, { now: now + 6 * 60e3 });               // stop-loss: encerra e espera 10 min
+    { const dbg = (await t.call('GET', '/api/status')).body; assert.equal(t.state.orders[id1].alive, false, JSON.stringify({ cfg: dbg.config.sessionBudgetUsd, ck: dbg.state.robotTest.checks, ev: dbg.state.robotTest.events, d: dbg.state.dailyUsd })); }
+    await tick(t.env, { now: now + 9 * 60e3 });               // em espera
+    await tick(t.env, { now: now + 17 * 60e3 });              // a espera acabou: teste termina sem criar ordem nova
+    const st = (await t.call('GET', '/api/status')).body;
+    assert.ok(st.state.robotTest.done, JSON.stringify(st.state.robotTest.checks));
+    assert.equal(Object.values(t.state.orders).filter((o) => o.alive).length, 0, 'nenhuma ordem viva depois do teste');
+    assert.equal(st.config.mode, 'observe');
+  } finally { t.server.close(); }
+});

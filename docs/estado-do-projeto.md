@@ -165,6 +165,7 @@ sempre identificado; nada de prometer previsão de sorte (Poisson é sem memóri
 - Barra inferior presa à área visível (`visualViewport`, variáveis `--vvb`/`--vvt`): corrige o defeito do iOS em que, depois do teclado, os elementos fixos sobem para o meio; some enquanto um campo está em edição.
 - Telegram de erro só para falhas que afetam a operação, repetidas no ciclo seguinte e no máximo 1 vez a cada 6 h por fonte (`errNotified`); mempool.space e frentes ficam só no painel.
 - Teste do robô (01/11, 22:00): criou a ordem e ajustou o preço na NiceHash real; revelou o erro 5061 (a NiceHash só deixa baixar o preço 10 min depois de qualquer mudança de preço ou da criação). Corrigido em `decide` (`lastPriceChange`). Painel: valores em BTC e dólar lado a lado e tempo decorrido nas ordens e nos testes.
+- Teste do robô aprovado na NiceHash real (01/11, 22:00–23:00): criou ordem, ajustou preço, stop-loss (US$10,25 de US$10) e espera; gasto ~US$10,22. Defeito encontrado: no ciclo em que a espera acabou, o robô criou uma ordem nova que o encerramento não cancelou. Corrigido: o ciclo final não cria ordem e o encerramento cancela todas as ordens do teste.
 - Ciclo do servidor: 3 min. Mínimo do Cloudflare é 1 min, mas o KV grátis aceita 1.000 gravações/dia e propaga em até
   60 s; abaixo de 3 min exige plano pago + Durable Objects. Atraso de 3 min custa < US$1 com 10 PH/s.
 
