@@ -1040,7 +1040,8 @@ function renderEntry(){
   var V={entrar:['ok','✓ Entrar'],cautela:['warn','! Cautela'],esperar:['warn','… Esperar'],nao:['bad','✕ Não entrar']}[E.verdict]||['','—'];
   el.className='card sig '+({entrar:'favoravel',cautela:'neutro',esperar:'neutro',nao:'desfavoravel'}[E.verdict]||'');
   var S={ok:['ok','✓'],warn:['warn','!'],bad:['bad','✕'],na:['','—'],info:['','i']};
-  el.innerHTML='<div class="row between"><div class="eyebrow">Cartilha de entrada · '+E.okCount+' de '+E.scored+' a favor</div><span class="chip '+V[0]+'">'+V[1]+'</span></div>'+
+  var RT=ops.status.state.robotTest,rtOn=RT&&!RT.done;
+  el.innerHTML=(rtOn?'<div class="box" style="margin:0 0 8px"><b class="warn">Teste do robô em andamento</b>A margem mínima está temporariamente em −5% para o teste; por isso o veredito pode dizer "Entrar" com margem negativa. Ele volta à sua regra quando o teste terminar.</div>':'')+'<div class="row between"><div class="eyebrow">Cartilha de entrada · '+E.okCount+' de '+E.scored+' a favor</div><span class="chip '+V[0]+'">'+V[1]+'</span></div>'+
     '<div class="lead">'+esc(E.title)+'</div><p class="why" style="margin:0 0 8px">'+esc(E.text)+'</p>'+
     (E.market?(function(M){var mn=+((ops.status||{}).config||{}).minEdgePct;mn=isFinite(mn)?mn:3;
       return '<div class="box" style="margin:0 0 8px"><b>Margem do mercado ('+M.label+')</b>'+
@@ -2370,15 +2371,17 @@ if(linkConnect){tab('set');opsMsg('api_msg',linkConnect.ok?'Backend conectado pe
   if(linkConnect.ok)setTimeout(function(){$('ac_nh').open=true;$('acct').scrollIntoView({block:'start'})},80)}
 if('serviceWorker' in navigator&&/^https?:/.test(location.protocol))navigator.serviceWorker.register('sw.js').catch(function(){});
 
-// Barra inferior sempre colada no fim da parte visível da tela. No iOS, depois de o teclado abrir e fechar, a área de
-// layout pode ficar "presa" menor que a tela e os elementos fixos sobem para o meio; aqui eles acompanham a área
-// visível (visualViewport). Com o teclado aberto, a barra some para não cobrir o campo.
-(function(){var vv=window.visualViewport,de=document.documentElement;if(!vv)return;
-  function fix(){var lh=de.clientHeight,t=vv.offsetTop>0?vv.offsetTop:0,b=vv.offsetTop+vv.height-lh;
-    de.style.setProperty('--vvt',t+'px');de.style.setProperty('--vvb',(Math.abs(b)<1||document.body.classList.contains('kbd')?0:b)+'px')}
+// Barra inferior sempre colada no fim da parte visível da tela. No iOS, depois de o teclado abrir e fechar, os
+// elementos fixos podem ficar fora do lugar. A barra é posicionada pelo topo, a partir da área visível
+// (visualViewport: offsetTop + altura − altura da barra), sem depender da altura do documento. Com o teclado aberto,
+// ela some para não cobrir o campo. Sem visualViewport, fica o CSS (bottom: 0).
+(function(){var vv=window.visualViewport,nav=document.querySelector('nav');if(!vv||!nav)return;
+  function fix(){if(document.body.classList.contains('kbd'))return;var y=Math.round(vv.offsetTop+vv.height-nav.offsetHeight);
+    if(y>0&&y<vv.offsetTop+vv.height){nav.style.top=y+'px';nav.style.bottom='auto'}else{nav.style.top='';nav.style.bottom=''}}
   function isField(el){return el&&(/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))&&!/^(checkbox|radio|button|submit)$/i.test(el.type||'')}
-  document.addEventListener('focusin',function(e){if(isField(e.target)){document.body.classList.add('kbd');fix()}});
-  document.addEventListener('focusout',function(){setTimeout(function(){if(!isField(document.activeElement))document.body.classList.remove('kbd');window.scrollTo(window.scrollX,window.scrollY);fix()},150)});
-  vv.addEventListener('resize',fix);vv.addEventListener('scroll',fix);window.addEventListener('pageshow',fix);window.addEventListener('orientationchange',function(){setTimeout(fix,300)});
-  document.addEventListener('visibilitychange',function(){if(!document.hidden)setTimeout(fix,100)});fix();})();
+  document.addEventListener('focusin',function(e){if(isField(e.target))document.body.classList.add('kbd')});
+  document.addEventListener('focusout',function(){setTimeout(function(){if(!isField(document.activeElement)){document.body.classList.remove('kbd');window.scrollTo(window.scrollX,window.scrollY);fix()}},150)});
+  vv.addEventListener('resize',fix);vv.addEventListener('scroll',fix);window.addEventListener('scroll',fix,{passive:true});window.addEventListener('pageshow',fix);
+  window.addEventListener('orientationchange',function(){setTimeout(fix,300)});document.addEventListener('visibilitychange',function(){if(!document.hidden)setTimeout(fix,100)});
+  setTimeout(fix,0);fix();})();
 })();
