@@ -86,7 +86,8 @@ export function createClient({ base, key, secret, org, algorithm = DEFAULT_ALGO,
       speedPH: parseFloat(o.acceptedCurrentSpeed || 0) * u.limitToPH,
       amountBtc: parseFloat(o.amount || 0), paidBtc: parseFloat(o.payedAmount || 0), availableBtc: parseFloat(o.availableAmount || 0),
       poolId: o.pool && o.pool.id, poolName: o.pool && o.pool.name,
-      createdTs: o.creationTs ? Date.parse(o.creationTs) : null
+      // data de criação: a NiceHash usa nomes diferentes conforme a versão (texto ISO ou número em ms)
+      createdTs: (() => { for (const k of ['creationTs', 'createdTs', 'startTs', 'creationTime', 'created']) { const v = o[k]; if (v === undefined || v === null || v === '') continue; const t = typeof v === 'number' || /^\d+$/.test(String(v)) ? +v : Date.parse(v); if (isFinite(t) && t > 1e12) return t; } return null; })()
     };
   }
   const fmt8 = (x) => (Math.round(x * 1e8) / 1e8).toFixed(8);
