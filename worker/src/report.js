@@ -60,7 +60,11 @@ export function aiReport({ now, mkt, cfg, asert, mm, ai, mom, ret, win, darr, po
 
   // 6) o que fazer e ajustes sugeridos
   const act = [], adj = [];
-  if (mkt.green) act.push(power && power.idealPh > 0 ? `Com o robô em Ativo, comprar até ${power.idealPh} PH/s (potência com maior lucro esperado no livro de agora) e parar no bloco.` : 'Com o robô em Ativo, ele compra a sua potência alvo e para no bloco.');
+  const relTxt = cfg.minEdgeRel ? ` (regra relativa: os 25% melhores momentos das últimas 24 h; sua meta fixa salva é ${f(cfg.minEdgeBase, 1)}%)` : '';
+  if (cfg.mode === 'active') act.push(mkt.green
+    ? `Robô em Ativo e comprando: a margem de agora (${sg(e)}) está dentro da regra de ${minE}%${relTxt}. Ele para no bloco, no stop-loss ou quando a margem sair da regra.`
+    : `Robô em Ativo e esperando: compra sozinho quando a margem chegar a ${minE}%${relTxt}. Agora está em ${sg(e)}, a ${f(minE - e)} pontos. Sem ordem aberta, nada é gasto.`);
+  else if (mkt.green) act.push(power && power.idealPh > 0 ? `Com o robô em Ativo, comprar até ${power.idealPh} PH/s (potência com maior lucro esperado no livro de agora) e parar no bloco.` : 'Com o robô em Ativo, ele compra a sua potência alvo e para no bloco.');
   else act.push('Manter o robô em Observar ou pausado: com margem negativa, cada tentativa perde em média o que a margem indica.');
   if (T && T.from !== minE) adj.push(T.from > minE ? `Margem mínima: aumente de ${minE}% para ${T.from}%. Abaixo disso, o mercado devolveu prejuízo na maior parte das vezes.` : `Margem mínima: se quiser operar mais vezes, pode baixar de ${minE}% para ${T.from}%, onde o lucro esperado ainda foi positivo no pior caso.`);
   if (!T && W && W.pctMin < 5) adj.push(`Margem mínima: mantenha ${minE}%. Ela aconteceu em só ${f(W.pctMin, 1)}% do tempo, mas sem uma faixa comprovada, baixar o mínimo só aumenta as compras com prejuízo.`);
