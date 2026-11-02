@@ -1383,3 +1383,16 @@ test('integração: teste do robô não deixa ordem para trás no ciclo em que t
     assert.equal(st.config.mode, 'observe');
   } finally { t.server.close(); }
 });
+
+test('regra relativa: margem mínima pelos melhores momentos das últimas 24 h, com piso; configuração salva fica intacta', async () => {
+  const { relativeMinEdge } = await import('../worker/src/signals.js');
+  const now = Date.UTC(2026, 10, 2, 12), H = [];
+  for (let i = 0; i < 96; i++) H.push([now - (96 - i) * 15 * 60e3, -4 + i * 0.05, 0.42]); // de −4% a +0,75%
+  const r75 = relativeMinEdge(H, { now, pct: 75, floor: -2 });
+  assert.ok(r75 > -0.5 && r75 < -0.2, String(r75));
+  assert.equal(relativeMinEdge(H.map((x) => [x[0], -5]), { now, pct: 75, floor: -2 }), -2, 'piso');
+  assert.equal(relativeMinEdge(H.slice(0, 10), { now, pct: 75 }), null, 'pouco histórico');
+  const { config, errors } = sanitizeConfig({ minEdgeMode: 'relativo', relPct: 75, relFloorPct: -2 }, DEFAULT_CONFIG, { maxLimitPh: 100, maxDailyUsd: 1000, maxOrderBtc: 0.01 });
+  assert.equal(errors.length, 0); assert.equal(config.minEdgeMode, 'relativo');
+  assert.ok(sanitizeConfig({ minEdgeMode: 'qualquer' }, DEFAULT_CONFIG, { maxLimitPh: 100, maxDailyUsd: 1000, maxOrderBtc: 0.01 }).errors.length === 1);
+});

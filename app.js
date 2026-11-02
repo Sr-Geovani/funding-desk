@@ -704,7 +704,7 @@ function freshen(){
   if(settings.apiUrl&&!$('tab-mine').hidden&&!$('mine-net').hidden&&now-blk.at>120000)loadBlocksLog();
 }
 var MODE_TXT={off:'Desligado',observe:'Observando',active:'Ativo'},MODE_CHIP={off:'',observe:'warn',active:'ok'};
-var BOT_FIELDS=['mode','onBlock','payoutAddress','minEdgePct','bidPremiumPct','targetPh','minPh','sessionBudgetUsd','stopCooldownH','dailyBudgetUsd','weeklyLossUsd','poolFeePct','rentFeePct','poolId','orderAmountBtc'];
+var BOT_FIELDS=['mode','onBlock','payoutAddress','minEdgePct','minEdgeMode','relPct','relFloorPct','bidPremiumPct','targetPh','minPh','sessionBudgetUsd','stopCooldownH','dailyBudgetUsd','weeklyLossUsd','poolFeePct','rentFeePct','poolId','orderAmountBtc'];
 // Margem em linguagem simples: retorno médio (não é chance) e a chance de achar bloco com a potência alvo em 24 h.
 function robotExplain(m,cfg){
   var ph=+cfg.targetPh||0,pd=m.phDaysPerBlock||(m.D?m.D*4294967296/1e15/86400:0),blk=m.blockNetUsd||(m.bchUsd?3.125*m.bchUsd*(1-(cfg.poolFeePct||2)/100):0);
@@ -1035,6 +1035,24 @@ function powerHTML(P){
     (P.curve.some(function(r){return r.overCap})?' * acima do teto de segurança do servidor ('+P.capPh+' PH/s).':'')+'</p></div>';
 }
 // Cartilha de entrada: os 9 fatores em sequência, avaliados pelo servidor a cada ciclo (worker/src/entry.js).
+// Contexto para minerar (últimas 24 h): a média do mercado, onde está a sua meta, o que ajustar para operar agora e quanto
+// custa, a regra relativa opcional e com quanta potência os blocos saíram. É o parâmetro claro para decidir entradas.
+function ctx24HTML(E){
+  var S=ops.status.state,cfg=ops.status.config||{},M=S.mktMargin||{},H=M.h24||M.d7,L=S.luck24,mk=S.market||{},R=S.minEdgeNow||{},B=E.market&&E.market.band;
+  if(!H)return '';
+  var base=R.base!==undefined?R.base:cfg.minEdgePct,now=mk.edgeAtBidPct,diff=base-H.avg,stop=cfg.sessionBudgetUsd||300;
+  var lossTry=function(m){return m<0?usd(-m/100*stop,0):'US$0'};
+  var h='<div class="box" style="margin:0 0 8px"><b>Contexto para minerar (últimas '+esc(H.label||'24 h')+')</b>'+
+    '<div class="kv" style="margin-top:4px"><div><small>Margem média</small><span class="'+(H.avg>=0?'good':'bad')+'">'+pct(H.avg,1)+'</span></div><div><small>Agora</small><span class="'+(now>=0?'good':'bad')+'">'+(isFinite(now)?pct(now,1):'—')+'</span></div><div><small>Sua meta</small><span>'+pct(base,1)+'</span></div></div>'+
+    '<ul class="note" style="margin:6px 0 0;padding-left:18px">'+
+    '<li>Sua meta de '+pct(base,1)+' está <b>'+nf(Math.abs(diff),1)+' pontos '+(diff>=0?'acima':'abaixo')+'</b> da média do período e foi atingida em <b>'+pctp(H.pctMin||0,1)+'</b> do tempo (cerca de '+nf(H.hoursMin||0,1)+' h).</li>'+
+    (isFinite(now)&&now<base?'<li><b>Para operar agora</b>, a margem mínima teria de ir para '+pct(Math.floor(now*2)/2,1)+'. Custo esperado: cada US$100 de aluguel volta, em média, US$'+nf(100+now,2)+'; numa tentativa de US$'+nf(stop,0)+' sem bloco, a perda média seria de '+lossTry(now)+' (com bloco, ganha o bloco menos o gasto).</li>':(isFinite(now)?'<li>A margem de agora já passa da sua meta: o robô compraria.</li>':''))+
+    (isFinite(H.top25)?'<li><b>Regra relativa (opcional, em Operar → Robô):</b> entrar só nos 25% melhores momentos do dia daria hoje uma margem mínima de '+pct(Math.max(cfg.relFloorPct===undefined?-2:cfg.relFloorPct,H.top25),1)+'. É mais vezes que a sua meta, mas '+(H.top25<0?'ainda com perda média de cerca de '+nf(-H.top25,1)+'% por dólar: serve para jogar na loteria de forma controlada, não para lucro médio.':'com lucro médio positivo nesses momentos.')+(R.relative?' <b class="warn">Ativa agora: margem mínima de '+pct(R.value,1)+'.</b>':'')+'</li>':'')+
+    (B?'<li><b>Faixa aprendida pela IA:</b> a partir de '+nf(B.from,0)+'%, as 2 horas seguintes ficaram positivas em '+pctp(B.hit*100,0)+' das vezes.</li>':'<li><b>Faixa aprendida pela IA:</b> ainda nenhuma faixa com lucro esperado positivo nas 2 horas seguintes.</li>')+
+    (L?'<li><b>Blocos nas últimas 24 h:</b> '+L.blocks+'. O mais fácil sairia com '+nf(L.minNeedPH,0)+' PH/s; metade saiu com até '+nf(L.medNeedPH||0,0)+' PH/s. '+(function(){var r=L.rows.filter(function(x){return x.ph===(+cfg.targetPh)})[0]||L.rows.filter(function(x){return x.ph>=(+cfg.targetPh)})[0];return r?'Com '+nf(r.ph,0)+' PH/s ligado o tempo todo, teriam sido <b>'+r.won+'</b> bloco(s) (esperado '+nf(r.expected,1)+'), resultado com a sorte '+signUsd(r.profitUsd)+'.':''})()+'</li>':'')+
+    '</ul></div>';
+  return h;
+}
 function renderEntry(){
   var el=$('m_entry'),E=ops.status&&ops.status.state&&ops.status.state.entryCheck;
   if(!el)return;if(!E){el.hidden=true;return}
@@ -1045,15 +1063,7 @@ function renderEntry(){
   var RT=ops.status.state.robotTest,rtOn=RT&&!RT.done;
   el.innerHTML=(rtOn?'<div class="box" style="margin:0 0 8px"><b class="warn">Teste do robô em andamento</b>A margem mínima está temporariamente em −5% para o teste; por isso o veredito pode dizer "Entrar" com margem negativa. Ele volta à sua regra quando o teste terminar.</div>':'')+'<div class="row between"><div class="eyebrow">Cartilha de entrada · '+E.okCount+' de '+E.scored+' a favor</div><span class="chip '+V[0]+'">'+V[1]+'</span></div>'+
     '<div class="lead">'+esc(E.title)+'</div><p class="why" style="margin:0 0 8px">'+esc(E.text)+'</p>'+
-    (E.market?(function(M){var mn=+((ops.status||{}).config||{}).minEdgePct;mn=isFinite(mn)?mn:3;
-      return '<div class="box" style="margin:0 0 8px"><b>Margem do mercado ('+M.label+')</b>'+
-        '<div class="kv" style="margin-top:4px"><div><small>Média</small><span class="'+(M.avg>=0?'good':'bad')+'">'+pct(M.avg,1)+'</span></div>'+
-        (M.h24!==null&&M.h24!==undefined?'<div><small>Média 24 h</small><span class="'+(M.h24>=0?'good':'bad')+'">'+pct(M.h24,1)+'</span></div>':'')+
-        '<div><small>Tempo positiva</small><span>'+pctp(M.pctPos,0)+'</span></div><div><small>Tempo acima de '+nf(mn,0)+'%</small><span>'+pctp(M.pctMin,1)+'</span></div></div>'+
-        (M.rankNow!==null?'<div class="note" style="margin-top:4px">Agora está melhor que <b>'+pctp(M.rankNow,0)+'</b> das leituras do período ('+(M.rankNow>=80?'bom para o padrão do mercado':M.rankNow<=20?'ruim para o padrão do mercado':'momento comum')+').</div>':'')+
-        (M.band?'<div class="note" style="margin-top:4px"><b>Faixa aprendida pela IA:</b> a partir de <b>'+nf(M.band.from,0)+'%</b> de margem, as 2 horas seguintes ficaram positivas em '+pctp(M.band.hit*100,0)+' das vezes (margem de erro: '+pctp(M.band.hitLo*100,0)+' a '+pctp(M.band.hitHi*100,0)+'; '+nf(M.band.n,0)+' leituras). Lucro esperado: US$'+nf(M.band.ev,2)+' a cada US$100 (pior caso US$'+nf(M.band.evLo,2)+').</div>':'<div class="note" style="margin-top:4px"><b>Faixa aprendida pela IA:</b> ainda nenhuma faixa com lucro esperado positivo com segurança.</div>')+(isFinite(M.top10)?'<div class="note" style="margin-top:4px"><b>Onde a chance é maior:</b> os 10% melhores momentos tiveram margem maior que <b>'+pct(M.top10,1)+'</b> (25% melhores: maior que '+pct(M.top25,1)+')'+(M.bestHours&&M.bestHours.length?'; horários com melhor margem média: '+M.bestHours.map(function(x){return ('0'+x.h).slice(-2)+'h ('+pct(x.avg,1)+')'}).join(', ')+' (Brasília)':'')+'.</div>':'')+
-        (M.bins&&M.bins.length?'<details style="margin-top:6px"><summary class="note">O que veio nas 2 horas seguintes, por faixa de margem (lastro da IA)</summary><table style="font-size:12px;width:100%;margin-top:4px"><tr class="note"><th style="text-align:left">Margem</th><th>Leituras</th><th>Positivas depois</th><th style="text-align:right">Média depois</th></tr>'+
-          M.bins.map(function(b){return '<tr><td>de '+nf(b[0],0)+'% a '+nf(b[0]+1,0)+'%</td><td style="text-align:center">'+nf(b[1],0)+'</td><td style="text-align:center">'+nf(b[2],0)+'%</td><td style="text-align:right" class="'+(b[3]>=0?'good':'bad')+'">'+pct(b[3],2)+'</td></tr>'}).join('')+'</table><p class="note" style="margin:4px 0 0">A IA marca uma faixa como boa quando, a partir dela, mais de 60% das leituras tiveram média positiva nas 2 horas seguintes. Leituras antigas pesam menos (meia-vida de ~1 semana).</p></details>':'')+'</div>'})(E.market):'')+
+    ctx24HTML(E)+
     '<div class="stack" style="gap:4px">'+E.steps.map(function(s){var c=S[s.status]||S.na;
       return '<details class="trow"><summary><span class="chip '+c[0]+'">'+c[1]+'</span> <b>'+s.n+'. '+esc(s.title)+'</b><div class="note" style="margin:2px 0 0 28px">'+esc(s.value)+'</div>'+(s.action?'<div class="note" style="margin:2px 0 0 28px"><b>Leitura:</b> '+esc(s.action)+'</div>':'')+'</summary><p class="note" style="margin:4px 0 0"><b>Por que importa:</b> '+esc(s.why)+'</p></details>'}).join('')+'</div>'+
     (E.lottery?'<p class="note" style="margin:8px 0 0">'+esc(E.lottery)+'</p>':'')+
@@ -1304,10 +1314,12 @@ function renderReady(){
       return [good,'Teste de calibração aprovado','10 PH/s por 2 horas (Mineração → Operar): entrega de 90% ou mais e custo real até 10% diferente da simulação.',R?('Feito: entrega '+(R.delivered!==null?pctp(R.delivered*100,0):'—')+', custo por hash '+(cm!==null&&cm!==undefined?pct(cm,1):'—')+' contra o preço'+(good?'.':': precisa de ajuste.')):C&&!C.done?'Em andamento.':'Ainda não (botão em Mineração → Operar).']})(),
     [cfg.sessionBudgetUsd>0&&cfg.dailyBudgetUsd>0&&cfg.weeklyLossUsd>0,'Limites de perda configurados','Stop-loss por tentativa, limite diário e perda máxima em 7 dias.','Stop-loss US$'+nf(cfg.sessionBudgetUsd||0,0)+', diário US$'+nf(cfg.dailyBudgetUsd||0,0)+', semanal US$'+nf(cfg.weeklyLossUsd||0,0)+'.']
   ];
-  var done=items.filter(function(i){return i[0]}).length;
-  el.innerHTML='<div class="row between"><div class="eyebrow">Fase de observação</div><span class="chip '+(done===items.length?'ok':'')+'">'+done+' de '+items.length+'</span></div>'+
-    '<div class="lead">Prontidão para o dinheiro real</div><p class="note" style="margin:4px 0 8px">'+(done===items.length?'Todos os critérios cumpridos: dá para ligar com o capital mínimo e escalar aos poucos. A decisão é sua.':'Ligar o dinheiro real só quando todos estiverem cumpridos. Até lá, o painel observa, simula e aprende sozinho.')+'</p>'+
-    '<div class="stack" style="gap:4px">'+items.map(function(i){return '<details class="trow"><summary><span class="chip '+(i[0]?'ok':'')+'">'+(i[0]?'✓':'…')+'</span> <b>'+esc(i[1])+'</b><div class="note" style="margin:2px 0 0 28px">'+esc(i[3])+'</div></summary><p class="note" style="margin:4px 0 0">'+esc(i[2])+'</p></details>'}).join('')+'</div>';
+  // separa por frente: mineração (itens 1, 2, 3, 5, 6) e funding (itens 4 e 6)
+  var row=function(i){return '<details class="trow"><summary><span class="chip '+(i[0]?'ok':'')+'">'+(i[0]?'✓':'…')+'</span> <b>'+esc(i[1])+'</b><div class="note" style="margin:2px 0 0 28px">'+esc(i[3])+'</div></summary><p class="note" style="margin:4px 0 0">'+esc(i[2])+'</p></details>'};
+  var mine=[items[0],items[1],items[2],items[4],items[5]],fund=[items[3],items[5]];
+  var sec=function(t,list){var d=list.filter(function(i){return i[0]}).length;return '<div class="row between" style="margin:8px 0 4px"><b>'+t+'</b><span class="chip '+(d===list.length?'ok':'')+'">'+d+' de '+list.length+'</span></div><div class="stack" style="gap:4px">'+list.map(row).join('')+'</div>'};
+  el.innerHTML='<div class="eyebrow">Fase de observação</div><div class="lead">Prontidão para o dinheiro real</div><p class="note" style="margin:4px 0 4px">Cada frente liga sozinha quando todos os critérios dela estiverem cumpridos. Até lá, o painel observa, simula e aprende. A decisão final é sua.</p>'+
+    sec('Mineração (BCH solo)',mine)+sec('Funding (arbitragem de taxa)',fund);
 }
 // Teste do robô: modo Ativo com limites mínimos, para ver na NiceHash real o robô criar, ajustar, parar no stop-loss e esperar.
 function renderRTest(){
@@ -1436,7 +1448,7 @@ function renderOps(){
 function opsMsg(id,t,bad){$(id).textContent=t;$(id).className='note'+(bad?' bad':'')}
 function botForm(){
   var o={autoCreate:$('b_autoCreate').checked};
-  BOT_FIELDS.forEach(function(k){var v=$('b_'+k).value;o[k]=['mode','onBlock','payoutAddress','poolId'].indexOf(k)>=0?v:parseFloat(v)});
+  BOT_FIELDS.forEach(function(k){var v=$('b_'+k).value;o[k]=['mode','onBlock','payoutAddress','poolId','minEdgeMode'].indexOf(k)>=0?v:parseFloat(v)});
   return o;
 }
 var PRESETS={

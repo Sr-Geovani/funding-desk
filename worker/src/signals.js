@@ -117,3 +117,14 @@ export function asertForecast({ recentBlocks, now, edgeNow }) {
     // se o ritmo voltar ao normal (6 por hora) a dificuldade para de mudar; se o hash que entrou sair, cai
     calm: at(6, 6), sinceLast: ts.length ? Math.round((now - ts[ts.length - 1]) / 60e3) : null };
 }
+
+// Regra relativa (opcional): margem mínima = o percentil `pct` das margens das últimas 24 h (entra só nos melhores
+// momentos do dia), nunca abaixo do piso. Não muda a matemática: se esses momentos têm margem negativa, cada tentativa
+// perde em média; o painel mostra esse custo ao lado.
+export function relativeMinEdge(edgeHist, { now, fixAt, pct = 75, floor = -2 }) {
+  const F = 1.058, v = (edgeHist || []).filter((x) => x && isFinite(x[1]) && x[0] >= now - 24 * 3600e3)
+    .map((x) => (fixAt && x[0] < fixAt ? ((1 + x[1] / 100) / F - 1) * 100 : x[1])).sort((a, b) => a - b);
+  if (v.length < 24) return null;
+  const p = v[Math.min(v.length - 1, Math.floor(v.length * pct / 100))];
+  return Math.round(Math.max(floor, p) * 10) / 10;
+}

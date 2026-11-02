@@ -16,7 +16,10 @@ export const DEFAULT_CONFIG = {
   sessionBudgetUsd: 300,    // stop-loss: gasto máximo por tentativa (até achar bloco), somando todas as ordens (0 = desligado)
   stopCooldownH: 6,         // depois do stop-loss, horas sem criar ordem nova (a janela que comeu o orçamento passa)
   dailyBudgetUsd: 500,      // gasto máximo por dia (UTC); ao atingir, reduz para a potência de pausa
-  weeklyLossUsd: 1000,      // perda máxima em 7 dias (gasto − recebido, resultado real); ao atingir, encerra tudo e avisa (0 = desligado)
+  weeklyLossUsd: 1000,
+  minEdgeMode: 'fixo',      // 'fixo' (margem mínima da config) | 'relativo' (os X% melhores momentos das últimas 24 h, com piso)
+  relPct: 75,               // regra relativa: entra quando a margem está entre os (100 − relPct)% melhores das últimas 24 h
+  relFloorPct: -2,          // regra relativa: nunca entra com margem abaixo deste piso      // perda máxima em 7 dias (gasto − recebido, resultado real); ao atingir, encerra tudo e avisa (0 = desligado)
   autoCreate: false,        // criar ordem quando o sinal ficar verde e não houver ordem gerenciada
   orderAmountBtc: 0.002,
   managed: [],              // ids das ordens que o robô pode alterar ou cancelar
@@ -55,6 +58,8 @@ export function sanitizeConfig(input = {}, prev = DEFAULT_CONFIG, limits = limit
     if (a === '' || ADDR.test(a)) c.payoutAddress = a; else errors.push('endereço BCH inválido (use o formato cashaddr)');
   }
   if (input.poolId !== undefined) c.poolId = String(input.poolId).slice(0, 64);
+  if (input.minEdgeMode !== undefined) { if (['fixo', 'relativo'].includes(input.minEdgeMode)) c.minEdgeMode = input.minEdgeMode; else errors.push('minEdgeMode inválido'); }
+  num('relPct', 50, 95); num('relFloorPct', -10, 20);
   num('poolFeePct', 0, 20); num('rentFeePct', 0, 20); num('minEdgePct', -50, 100); num('bidPremiumPct', 0, 50);
   num('targetPh', 0, limits.maxLimitPh); num('minPh', 0, limits.maxLimitPh);
   num('sessionBudgetUsd', 0, limits.maxDailyUsd); num('dailyBudgetUsd', 0, limits.maxDailyUsd); num('stopCooldownH', 0, 72); num('weeklyLossUsd', 0, limits.maxDailyUsd * 7);
