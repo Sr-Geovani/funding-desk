@@ -1,6 +1,6 @@
 // Service worker mínimo: guarda só os arquivos do app (rede primeiro, cache como reserva offline).
 // Nunca guarda respostas das exchanges: dado de funding velho é pior que nenhum.
-var CACHE = 'fd-shell-v66';
+var CACHE = 'fd-shell-v67';
 var SHELL = ['./', 'index.html', 'core.js', 'mining.js', 'copilot.js', 'radar.js', 'insights.js', 'app.js', 'manifest.json', 'icons/icon.svg', 'icons/icon-192.png', 'icons/apple-touch-icon.png'];
 self.addEventListener('install', function (e) {
   e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(SHELL); }).then(function () { return self.skipWaiting(); }));

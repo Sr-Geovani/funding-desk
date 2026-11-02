@@ -1043,7 +1043,7 @@ function ctx24HTML(E){
   var fixed=R.base!==undefined?R.base:cfg.minEdgePct,base=R.relative?R.value:fixed,now=mk.edgeAtBidPct,diff=base-H.avg,stop=cfg.sessionBudgetUsd||300;
   var lossTry=function(m){return m<0?usd(-m/100*stop,0):'US$0'};
   var h='<div class="box" style="margin:0 0 8px"><b>Contexto para minerar (últimas '+esc(H.label||'24 h')+')</b>'+
-    '<div class="kv" style="margin-top:4px"><div><small>Margem média</small><span class="'+(H.avg>=0?'good':'bad')+'">'+pct(H.avg,1)+'</span></div><div><small>Agora</small><span class="'+(now>=0?'good':'bad')+'">'+(isFinite(now)?pct(now,1):'—')+'</span></div><div><small>Sua meta</small><span>'+pct(base,1)+'</span></div></div>'+
+    '<div class="kv" style="margin-top:4px"><div><small>Margem média</small><span class="'+(H.avg>=0?'good':'bad')+'">'+pct(H.avg,1)+'</span></div><div><small>Agora ('+nf(+cfg.targetPh||0,0)+' PH/s)</small><span class="'+(now>=0?'good':'bad')+'">'+(isFinite(now)?pct(now,1):'—')+'</span></div><div><small>'+(R.relative?'Regra ativa (relativa)':'Sua meta (fixa)')+'</small><span>'+pct(base,1)+'</span></div></div>'+
     '<ul class="note" style="margin:6px 0 0;padding-left:18px">'+
     (R.relative?'<li>Regra relativa ativa: margem mínima de hoje '+pct(base,1)+' (sua meta fixa salva é '+pct(fixed,1)+' e volta quando a regra for desligada).</li>':'')+'<li>'+(R.relative?'A regra ativa de ':'Sua meta de ')+pct(base,1)+' está <b>'+nf(Math.abs(diff),1)+' pontos '+(diff>=0?'acima':'abaixo')+'</b> da média do período e foi atingida em <b>'+pctp(H.pctMin||0,1)+'</b> do tempo (cerca de '+nf(H.hoursMin||0,1)+' h).</li>'+
     (isFinite(now)&&now<base?'<li><b>Para operar agora</b>, a margem mínima teria de ir para '+pct(Math.floor(now*2)/2,1)+'. Custo esperado: cada US$100 de aluguel volta, em média, US$'+nf(100+now,2)+'; numa tentativa de US$'+nf(stop,0)+' sem bloco, a perda média seria de '+lossTry(now)+' (com bloco, ganha o bloco menos o gasto).</li>':(isFinite(now)?'<li>A margem de agora já passa da sua meta: o robô compraria.</li>':''))+
@@ -1333,7 +1333,7 @@ function relCalcUI(){
   box.value=(used>=0?'+':'')+String(used.toFixed(1)).replace('.',',')+'%';
   note.innerHTML=(mode==='relativo'?'':'<b>Só vale se a regra de entrada for "Relativa".</b> ')+'Os '+share+'% melhores momentos das últimas 24 h chegaram a '+pct(p,1)+'; o piso é '+pct(fl,1)+'. Vale o maior dos dois'+(p<fl?' (hoje, o piso)':'')+'. Mais fatia (ex.: 50% do dia) baixa a regra e o robô entra mais vezes, com perda média maior por dólar; menos fatia sobe a regra.';
 }
-document.addEventListener('change',function(e){if(['b_relPct','b_minEdgeMode','b_relFloorPct'].indexOf(e.target.id)>=0)relCalcUI()});
+document.addEventListener('change',function(e){if(['b_relPct','b_minEdgeMode','b_relFloorPct'].indexOf(e.target.id)>=0){relCalcUI();var f=$('b_minEdgePct'),n=$('b_minNote'),rel=($('b_minEdgeMode')||{}).value==='relativo';if(f)f.style.opacity=rel?'.5':'';if(n)n.textContent=rel?'Guardada: não vale com a regra relativa ligada; volta a valer se escolher "Fixa".':''}});
 document.addEventListener('input',function(e){if(e.target.id==='b_relFloorPct')relCalcUI()});
 // Plano para o saldo: a sugestão do robô para gastar o saldo da NiceHash numa janela (ex.: a madrugada) do jeito mais
 // eficiente para o cenário, com o custo e a chance de bloco escritos, e botões para aplicar e desfazer.
@@ -1473,6 +1473,9 @@ function renderOps(){
   $('b_poolId').innerHTML=popts;$('n_pool').innerHTML=popts;
   if(!ops.dirty)BOT_FIELDS.forEach(function(k){var el=$('b_'+k);if(el)el.value=cfg[k]===undefined?'':cfg[k]});
   relCalcUI();
+  (function(){var f=$('b_minEdgePct');if(!f)return;var rel=(($('b_minEdgeMode')||{}).value||cfg.minEdgeMode)==='relativo',lab=f.parentNode;
+    f.style.opacity=rel?'.5':'';var n=$('b_minNote');if(!n){n=document.createElement('small');n.id='b_minNote';n.className='note';n.style.display='block';lab.appendChild(n)}
+    n.textContent=rel?'Guardada: não vale com a regra relativa ligada; volta a valer se escolher "Fixa".':''})();
   $('b_autoCreate').checked=!!cfg.autoCreate;
   if(cfg.poolId)$('n_pool').value=cfg.poolId;
   if(m.bidEH&&!$('n_price').value)$('n_price').value=m.bidEH.toFixed(4);
