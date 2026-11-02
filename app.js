@@ -825,6 +825,8 @@ function renderPaper(st){
 function utcHM(ms){var d=new Date(ms);return ('0'+d.getUTCHours()).slice(-2)+':'+('0'+d.getUTCMinutes()).slice(-2)}
 // Data e hora local, com a hora UTC (a do servidor) entre parênteses.
 function dt2(ms){return new Date(ms).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})+' ('+utcHM(ms)+' UTC)'}
+function btcTxt(b,d){d=d||6;var px=ops&&ops.status&&ops.status.state&&ops.status.state.market&&ops.status.state.market.btcUsd;return (+b||0).toFixed(d).replace('.',',')+' BTC'+(px?' ('+usd((+b||0)*px)+')':'')}
+function usdBtc(u){var px=ops&&ops.status&&ops.status.state&&ops.status.state.market&&ops.status.state.market.btcUsd;return usd(u||0)+(px?' <span class="note">('+((u||0)/px).toFixed(6).replace('.',',')+' BTC)</span>':'')}
 function signUsd(x){if(Math.abs(x)<0.005)return 'US$0,00';return (x>=0?'+':'')+usd(x)}
 var roboAll={f:false,m:false};
 function renderRobo(){
@@ -1320,12 +1322,13 @@ function renderRTest(){
       '<p class="note" style="margin:0 0 6px">Gasto esperado: US$15 a US$30. Com a margem de agora, a perda esperada é de cerca de US$1; o resto depende da sorte (chance pequena de bloco). Precisa de pelo menos 0,001 BTC livre na NiceHash'+(pool?'':' e do pool escolhido <b class="bad">(falta)</b>')+'.</p>'+
       '<button class="pri" id="rt_go"'+(calibBusy||!pool?' disabled':'')+'>Iniciar teste do robô</button>'+(calibBusy?'<p class="note" style="margin:6px 0 0">Disponível quando o teste de calibração terminar.</p>':'')+'<p class="note" id="rt_msg" style="margin:6px 0 0"></p>';
   }else if(!T.done){
-    h+='<div class="box" style="margin:0 0 6px"><b>Em andamento</b>Começou '+dt2(T.start)+' · encerra em até '+FDI.dur(Math.max(0,T.until-Date.now()))+' (ou assim que o stop-loss e a espera forem vistos).</div>'+chk(T.checks)+
+    var X2=S.exec,paid=(T.ids||[]).reduce(function(a,id){var o=X2&&X2.orders&&X2.orders.filter(function(r){return r.id===id})[0];return a+(o?o.paidBtc||0:0)},0);
+    h+='<div class="box" style="margin:0 0 6px"><b>Em andamento</b>Começou '+dt2(T.start)+' · decorrido '+FDI.dur(Date.now()-T.start)+' · encerra em até '+FDI.dur(Math.max(0,T.until-Date.now()))+' (ou assim que o stop-loss e a espera forem vistos).<div class="kv" style="margin-top:6px"><div><small>Gasto até agora</small><span>'+btcTxt(paid)+'</span></div><div><small>Stop-loss do teste</small><span>US$15</span></div></div><div class="note">O gasto é lançado pela NiceHash com alguns minutos de atraso.</div></div>'+chk(T.checks)+
       ((T.events||[]).length?'<details><summary>Ações do robô na NiceHash ('+T.events.length+')</summary><div class="stack" style="gap:3px;margin-top:4px">'+T.events.slice().reverse().map(function(e){return '<div class="note">'+hhmm(new Date(e.t))+' · '+({create:'criou',update:'ajustou',cancel:'encerrou',erro:'erro'}[e.type]||e.type)+(e.priceEH?' a '+e.priceEH.toFixed(4).replace('.',','):'')+(e.limitPH?' · '+nf(e.limitPH,1)+' PH/s':'')+' · '+esc(e.reason||'')+'</div>'}).join('')+'</div></details>':'<p class="note">Aguardando o primeiro ciclo do robô (até 3 min).</p>')+
       '<button id="rt_stop" style="margin-top:6px">Encerrar agora e devolver a configuração</button><p class="note" id="rt_msg" style="margin:6px 0 0"></p>';
   }else{
     var all=CK.every(function(k){return T.checks&&T.checks[k[0]]});
-    h+='<div class="box" style="margin:0 0 6px"><b>Resultado ('+dt2(T.start)+')</b>'+chk(T.checks)+'<div class="note">Ordens do teste: '+(T.orders||0)+' · gasto ~'+usd(T.spentUsd||0)+'. Configuração original devolvida (modo '+esc((T.backup||{}).mode||'')+').</div>'+
+    h+='<div class="box" style="margin:0 0 6px"><b>Resultado ('+dt2(T.start)+')</b>'+chk(T.checks)+'<div class="note">Duração '+FDI.dur((T.done||Date.now())-T.start)+' · ordens do teste: '+(T.orders||0)+' · gasto ~'+usdBtc(T.spentUsd)+'. Configuração original devolvida (modo '+esc((T.backup||{}).mode||'')+').</div>'+
       '<p class="note" style="margin:6px 0 0">'+(all?'<b class="good">Todos os mecanismos funcionaram na NiceHash real.</b> O robô está pronto; falta só a fase de observação mostrar uma faixa de entrada comprovada.':'<b class="warn">Nem tudo foi exercitado.</b> Os itens sem ✓ não aconteceram no tempo do teste (por exemplo, o stop-loss não chegou a US$15 ou o preço não precisou de ajuste). Me mande este resultado: dá para repetir com outro prazo.')+'</p></div>'+
       '<button id="rt_again">Fazer outro teste</button>';
   }
@@ -1353,7 +1356,7 @@ function renderExec(){
       '<button class="pri" id="cal_go"'+(pool?'':' disabled')+'>Iniciar teste de calibração</button><p class="note" id="cal_msg" style="margin:6px 0 0"></p>';
   }else if(!C.done){
     var left=Math.max(0,C.until-Date.now());
-    h+='<div class="box" style="margin:0 0 8px"><b>Em andamento</b>'+nf(C.ph,0)+' PH/s a '+C.priceEH.toFixed(4).replace('.',',')+' · começou '+dt2(C.start)+' · encerra em '+FDI.dur(left)+'.</div>'+
+    h+='<div class="box" style="margin:0 0 8px"><b>Em andamento</b>'+nf(C.ph,0)+' PH/s a '+C.priceEH.toFixed(4).replace('.',',')+' · começou '+dt2(C.start)+' · decorrido '+FDI.dur(Date.now()-C.start)+' · encerra em '+FDI.dur(left)+'.</div>'+
       (function(){var o=X&&X.orders&&X.orders.filter(function(r){return r.id===C.id})[0];return o?'<div class="kv" style="margin:0 0 8px"><div><small>Hash chegou em</small><span>'+(o.toHashMin!==null?nf(o.toHashMin,0)+' min':'aguardando')+'</span></div><div><small>Entrega até agora</small><span>'+(o.delivered!==null?pctp(o.delivered*100,0):'—')+'</span></div></div><p class="note" style="margin:0 0 8px">O valor pago é lançado pela NiceHash com alguns minutos de atraso: o custo real só é comparado com a simulação no fim, com o valor final da ordem.</p>':''})()+
       '<button id="cal_stop">Encerrar agora</button><p class="note" id="cal_msg" style="margin:6px 0 0">O resultado aparece aqui e no Telegram quando encerrar.</p>';
   }else{
@@ -1406,11 +1409,11 @@ function renderOps(){
     ((s.myBlocks||[]).length?'<div class="legs">Seus blocos: '+s.myBlocks.slice(-5).reverse().map(function(b){return '<b>'+b.height+'</b> ('+(+b.bch).toFixed(4).replace('.',',')+' BCH)'}).join(' · ')+'</div>':'');
   renderPaper(st);
   var btcUsd=m.btcUsd||live().btcUsd;
-  $('o_bal').innerHTML=ops.bal?'Saldo disponível: <b>'+(+ops.bal.available).toFixed(8)+' BTC</b>'+(btcUsd?' ('+usd(+ops.bal.available*btcUsd)+')':''):esc(ops.err.bal||'');
+  $('o_bal').innerHTML=ops.bal?'Saldo disponível: <b>'+(+ops.bal.available).toFixed(8).replace('.',',')+' BTC</b>'+(btcUsd?' ('+usd(+ops.bal.available*btcUsd)+')':''):esc(ops.err.bal||'');
   $('o_orders').innerHTML=ops.orders.length?ops.orders.map(function(o){
     return '<div class="card opp '+(o.managed?'g':'')+'" style="background:var(--panel2)"><div class="h"><span><b class="mono">'+esc(String(o.id).slice(0,8))+'</b>'+(o.managed?'<span class="chip ok">robô gerencia</span>':'<span class="chip">manual</span>')+'</span><span class="mono">'+esc(o.status)+'</span></div>'+
       '<div class="kv"><div><small>Preço</small><span>'+o.priceEH.toFixed(4).replace('.',',')+'</span></div><div><small>Limite</small><span>'+nf(o.limitPH,2)+' PH</span></div><div><small>Entregando</small><span>'+nf(o.speedPH,2)+' PH</span></div>'+
-      '<div><small>Gasto</small><span>'+o.paidBtc.toFixed(6)+'</span></div><div><small>Disponível</small><span>'+o.availableBtc.toFixed(6)+'</span></div><div><small>Pool</small><span style="font-size:12px">'+esc(o.poolName||'—')+'</span></div></div>'+
+      '<div><small>Gasto</small><span>'+o.paidBtc.toFixed(6).replace('.',',')+'</span>'+(btcUsd?'<div class="note">'+usd(o.paidBtc*btcUsd)+'</div>':'')+'</div><div><small>Disponível</small><span>'+o.availableBtc.toFixed(6).replace('.',',')+'</span>'+(btcUsd?'<div class="note">'+usd(o.availableBtc*btcUsd)+'</div>':'')+'</div><div><small>Aberta há</small><span>'+(o.createdTs?FDI.dur(Date.now()-o.createdTs):'—')+'</span></div><div><small>Pool</small><span style="font-size:12px">'+esc(o.poolName||'—')+'</span></div></div>'+
       '<div class="grid2"><label>Novo preço<input data-op="'+esc(o.id)+'" type="number" inputmode="decimal" step="0.0001" value="'+o.priceEH.toFixed(4)+'"></label><label>Nova potência (PH/s)<input data-ol="'+esc(o.id)+'" type="number" inputmode="decimal" value="'+o.limitPH.toFixed(2)+'"></label></div>'+
       '<div class="row"><button class="sm pri" data-oupd="'+esc(o.id)+'">Aplicar</button><button class="sm" data-orefill="'+esc(o.id)+'">Reabastecer</button><button class="sm" data-oman="'+esc(o.id)+'" data-v="'+(o.managed?0:1)+'">'+(o.managed?'Tirar do robô':'Robô gerencia')+'</button><button class="sm" data-ocancel="'+esc(o.id)+'">Cancelar</button></div></div>';
   }).join(''):'<p class="note">'+esc(ops.err.orders||'Nenhuma ordem ativa.')+'</p>';
