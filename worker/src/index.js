@@ -301,7 +301,7 @@ export async function tick(env, opts = {}) {
         await kvPut(env, 'config', cfg);
       }
       results.push(Object.assign({ executed: true }, a));
-      if (a.type !== 'update') await notify(env, `${a.type === 'cancel' ? 'ordem encerrada' : 'ordem criada'}: ${a.reason}`, fetchFn);
+      if (a.type !== 'update') await notify(env, plain(`${a.type === 'cancel' ? 'ordem encerrada' : 'ordem criada'}: ${a.reason}`), fetchFn);
     } catch (e) {
       results.push(Object.assign({ executed: false, error: String(e.message || e) }, a));
       errors.push(`${a.type} ${a.id || ''}: ${e.message || e}`);
@@ -314,7 +314,7 @@ export async function tick(env, opts = {}) {
   if (robotTest && !robotTest.done) {
     const ev = (robotTest.events || []).slice(), chk = Object.assign({}, robotTest.checks), ids = (robotTest.ids || []).slice();
     for (const r of results) {
-      if (r.executed) { ev.push({ t: now, type: r.type, reason: r.reason, priceEH: r.priceEH, limitPH: r.limitPH }); if (r.type === 'create' && r.id) ids.push(r.id); }
+      if (r.executed) { ev.push({ t: now, type: r.type, reason: plain(r.reason || ''), priceEH: r.priceEH, limitPH: r.limitPH }); if (r.type === 'create' && r.id) ids.push(r.id); }
       if (r.error) ev.push({ t: now, type: 'erro', reason: r.error });
     }
     if (results.some((r) => r.executed && r.type === 'create')) chk.create = chk.create || now;
