@@ -1040,6 +1040,8 @@ function powerHTML(P){
 function ctx24HTML(E){
   var S=ops.status.state,cfg=ops.status.config||{},M=S.mktMargin||{},H=M.h24||M.d7,L=S.luck24,mk=S.market||{},R=S.minEdgeNow||{},B=E.market&&E.market.band;
   if(!H)return '';
+  // a configuração salva manda: se a regra foi trocada depois do último ciclo, o painel já mostra a nova
+  if(cfg.minEdgeMode!=='relativo')R={value:cfg.minEdgePct,relative:false,base:cfg.minEdgePct};
   var fixed=R.base!==undefined?R.base:cfg.minEdgePct,base=R.relative?R.value:fixed,now=mk.edgeAtBidPct,diff=base-H.avg,stop=cfg.sessionBudgetUsd||300;
   var lossTry=function(m){return m<0?usd(-m/100*stop,0):'US$0'};
   var h='<div class="box" style="margin:0 0 8px"><b>Contexto para minerar (últimas '+esc(H.label||'24 h')+')</b>'+
@@ -1060,8 +1062,9 @@ function renderEntry(){
   var V={entrar:['ok','✓ Entrar'],cautela:['warn','! Cautela'],esperar:['warn','… Esperar'],nao:['bad','✕ Não entrar']}[E.verdict]||['','—'];
   el.className='card sig '+({entrar:'favoravel',cautela:'neutro',esperar:'neutro',nao:'desfavoravel'}[E.verdict]||'');
   var S={ok:['ok','✓'],warn:['warn','!'],bad:['bad','✕'],na:['','—'],info:['','i']};
-  var RT=ops.status.state.robotTest,rtOn=RT&&!RT.done;
-  el.innerHTML=(rtOn?'<div class="box" style="margin:0 0 8px"><b class="warn">Teste do robô em andamento</b>A margem mínima está temporariamente em −5% para o teste; por isso o veredito pode dizer "Entrar" com margem negativa. Ele volta à sua regra quando o teste terminar.</div>':'')+'<div class="row between"><div class="eyebrow">Cartilha de entrada · '+E.okCount+' de '+E.scored+' a favor</div><span class="chip '+V[0]+'">'+V[1]+'</span></div>'+
+  var RT=ops.status.state.robotTest,rtOn=RT&&!RT.done,C0=ops.status.config||{},MN=ops.status.state.minEdgeNow||{};
+  var stale=(C0.minEdgeMode==='relativo')!==!!MN.relative||(C0.minEdgeMode!=='relativo'&&MN.value!==undefined&&MN.value!==C0.minEdgePct);
+  el.innerHTML=(stale?'<div class="box" style="margin:0 0 8px"><b class="warn">Configuração alterada</b>A cartilha e o copiloto são recalculados pelo servidor a cada 3 min: os textos abaixo ainda usam a regra anterior e se atualizam no próximo ciclo.</div>':'')+(rtOn?'<div class="box" style="margin:0 0 8px"><b class="warn">Teste do robô em andamento</b>A margem mínima está temporariamente em −5% para o teste; por isso o veredito pode dizer "Entrar" com margem negativa. Ele volta à sua regra quando o teste terminar.</div>':'')+'<div class="row between"><div class="eyebrow">Cartilha de entrada · '+E.okCount+' de '+E.scored+' a favor</div><span class="chip '+V[0]+'">'+V[1]+'</span></div>'+
     '<div class="lead">'+esc(E.title)+'</div><p class="why" style="margin:0 0 8px">'+esc(E.text)+'</p>'+
     ctx24HTML(E)+
     '<div class="stack" style="gap:4px">'+E.steps.map(function(s){var c=S[s.status]||S.na;
