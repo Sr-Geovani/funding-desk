@@ -1458,6 +1458,10 @@ function renderOps(){
   var popts='<option value="">—</option>'+okPools.map(function(p){return '<option value="'+esc(p.id)+'">'+esc(p.name)+' ('+esc(p.stratumHostname)+')</option>'}).join('');
   $('b_poolId').innerHTML=popts;$('n_pool').innerHTML=popts;
   if(!ops.dirty)BOT_FIELDS.forEach(function(k){var el=$('b_'+k);if(el)el.value=cfg[k]===undefined?'':cfg[k]});
+  (function(){var el=$('b_relNow');if(!el)return;var R=(st.state||{}).minEdgeNow,H=((st.state||{}).mktMargin||{}).h24,fl=cfg.relFloorPct===undefined?-2:cfg.relFloorPct;
+    if(cfg.minEdgeMode!=='relativo'){el.textContent='Regra fixa: o robô compra com margem a partir de '+String(cfg.minEdgePct).replace('.',',')+'%.';return}
+    var calc=H&&isFinite(H.top25)?H.top25:null,used=R&&R.relative?R.value:null;
+    el.innerHTML='<b>Regra relativa hoje:</b> os 25% melhores momentos das últimas 24 h chegaram a '+(calc!==null?pct(calc,1):'—')+'; o piso é '+pct(fl,1)+'. O robô usa o maior dos dois: <b>'+(used!==null?pct(used,1):'—')+'</b>. O piso só vale num dia em que o mercado todo esteja pior que ele.'})();
   $('b_autoCreate').checked=!!cfg.autoCreate;
   if(cfg.poolId)$('n_pool').value=cfg.poolId;
   if(m.bidEH&&!$('n_price').value)$('n_price').value=m.bidEH.toFixed(4);
