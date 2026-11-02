@@ -1345,7 +1345,8 @@ test('integração: teste do robô em Ativo com limites mínimos e devolução d
     const r = await t.call('POST', '/api/robottest/start', { hours: 1 });
     assert.equal(r.status, 200, JSON.stringify(r.body));
     let cfg = (await t.call('GET', '/api/status')).body.config;
-    assert.equal(cfg.mode, 'active'); assert.equal(cfg.targetPh, 10); assert.equal(cfg.sessionBudgetUsd, 15); assert.equal(cfg.minEdgePct, -5);
+    assert.equal(cfg.mode, 'active'); assert.equal(cfg.targetPh, 10); assert.equal(cfg.sessionBudgetUsd, 8); assert.equal(cfg.minEdgePct, -5);
+    const f = await t.call('POST', '/api/robottest/fast', {}); assert.equal(f.status, 200); assert.equal((await t.call('GET', '/api/status')).body.config.sessionBudgetUsd, 1);
     const now = Date.now();
     await tick(t.env, { now: now + 3 * 60e3 });
     const ids = Object.keys(t.state.orders);

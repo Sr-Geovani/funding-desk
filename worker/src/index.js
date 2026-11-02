@@ -827,13 +827,25 @@ async function api(req, env, url, fetchFn) {
     const u = await nh.units(), now = Date.now(), hours = Math.max(0.5, Math.min(+body.hours || 2, 4));
     const keys = ['mode', 'minEdgePct', 'targetPh', 'sessionBudgetUsd', 'stopCooldownH', 'dailyBudgetUsd', 'orderAmountBtc', 'autoCreate', 'onBlock', 'poolId'];
     const backup = Object.fromEntries(keys.map((k) => [k, cfg[k]]));
-    const test = { mode: 'active', minEdgePct: -5, targetPh: 10, sessionBudgetUsd: 15, stopCooldownH: 0.5, dailyBudgetUsd: 30, orderAmountBtc: u.minOrderBtc, autoCreate: true, onBlock: 'cancel', poolId };
+    const test = { mode: 'active', minEdgePct: -5, targetPh: 10, sessionBudgetUsd: 8, stopCooldownH: 0.25, dailyBudgetUsd: 20, orderAmountBtc: u.minOrderBtc, autoCreate: true, onBlock: 'cancel', poolId };
     await kvPut(env, 'config', Object.assign({}, cfg, test));
     st.robotTest = { start: now, until: now + hours * 3600e3, backup, test, events: [], checks: {}, ids: [] };
     st.stopUntil = null; st.sess = null;
     await kvPut(env, 'state', st);
-    await appendLog(env, [{ t: now, kind: 'config', text: `Teste do robô iniciado por ${hours} h: modo Ativo, 10 PH/s, margem mínima −5% (temporária), stop-loss US$15, espera 30 min, limite diário US$30; a configuração original volta no fim` }]);
+    await appendLog(env, [{ t: now, kind: 'config', text: `Teste do robô iniciado por ${hours} h: modo Ativo, 10 PH/s, margem mínima −5% (temporária), stop-loss US$8, espera 15 min, limite diário US$20; a configuração original volta no fim` }]);
     return json(st.robotTest);
+  }
+  if (p === '/robottest/fast' && m === 'POST') {
+    // Concluir mais rápido: stop-loss logo acima do gasto da tentativa atual e espera de 10 min, para exercitar os dois
+    // mecanismos que faltam sem gastar mais.
+    const st = await kvGet(env, 'state', {}), cfg = await getConfig(env);
+    if (!st.robotTest || st.robotTest.done) return json({ error: 'nenhum teste do robô em andamento' }, 400);
+    const spent = st.sessionUsd || 0, stop = Math.max(1, Math.ceil(spent + 1));
+    await kvPut(env, 'config', Object.assign({}, cfg, { sessionBudgetUsd: stop, stopCooldownH: 1 / 6 }));
+    st.robotTest.fast = { at: Date.now(), stopUsd: stop, coolMin: 10 };
+    await kvPut(env, 'state', st);
+    await appendLog(env, [{ t: Date.now(), kind: 'config', text: `Teste do robô acelerado: stop-loss em US$${stop} (gasto da tentativa US$${spent.toFixed(2).replace('.', ',')}) e espera de 10 min` }]);
+    return json({ stopUsd: stop, spentUsd: spent });
   }
   if (p === '/robottest/stop' && m === 'POST') {
     const st = await kvGet(env, 'state', {});

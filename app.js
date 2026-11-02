@@ -1317,15 +1317,15 @@ function renderRTest(){
   var chk=function(c){return '<div class="stack" style="gap:3px;margin:6px 0">'+CK.map(function(k){var v=c&&c[k[0]];return '<div class="note"><span class="chip '+(v?'ok':'')+'">'+(v?'✓':'…')+'</span> '+k[1]+(v?' · '+hhmm(new Date(v)):'')+'</div>'}).join('')+'</div>'};
   if(!T){
     var calibBusy=C&&!C.done,pool=cfg.poolId;
-    h+='<p class="note" style="margin:0 0 6px">Depois da calibração, este teste põe o robô para operar sozinho na NiceHash real por até 2 horas, com limites que não deixam o gasto passar de cerca de US$30, para ver cada mecanismo funcionar: criar a ordem, ajustar o preço, parar no stop-loss e esperar antes de voltar.</p>'+
-      '<div class="box" style="margin:0 0 6px"><b>O que muda só durante o teste</b>Modo Ativo · 10 PH/s · margem mínima −5% (para o robô entrar com o mercado de agora) · stop-loss US$15 por tentativa · espera de 30 min · limite diário US$30 · ordem de 0,001 BTC. No fim, o servidor encerra as ordens do teste e devolve exatamente a sua configuração (modo, margem mínima de '+nf(cfg.minEdgePct||0,0)+'%, potência de '+nf(cfg.targetPh||0,0)+' PH/s, stop-loss de US$'+nf(cfg.sessionBudgetUsd||0,0)+').</div>'+
-      '<p class="note" style="margin:0 0 6px">Gasto esperado: US$15 a US$30. Com a margem de agora, a perda esperada é de cerca de US$1; o resto depende da sorte (chance pequena de bloco). Precisa de pelo menos 0,001 BTC livre na NiceHash'+(pool?'':' e do pool escolhido <b class="bad">(falta)</b>')+'.</p>'+
+    h+='<p class="note" style="margin:0 0 6px">Depois da calibração, este teste põe o robô para operar sozinho na NiceHash real por até 2 horas, com limites que não deixam o gasto passar de cerca de US$20, para ver cada mecanismo funcionar: criar a ordem, ajustar o preço, parar no stop-loss e esperar antes de voltar.</p>'+
+      '<div class="box" style="margin:0 0 6px"><b>O que muda só durante o teste</b>Modo Ativo · 10 PH/s · margem mínima −5% (para o robô entrar com o mercado de agora) · stop-loss US$8 por tentativa · espera de 15 min · limite diário US$20 · ordem de 0,001 BTC. No fim, o servidor encerra as ordens do teste e devolve exatamente a sua configuração (modo, margem mínima de '+nf(cfg.minEdgePct||0,0)+'%, potência de '+nf(cfg.targetPh||0,0)+' PH/s, stop-loss de US$'+nf(cfg.sessionBudgetUsd||0,0)+').</div>'+
+      '<p class="note" style="margin:0 0 6px">Gasto esperado: US$8 a US$16 (cerca de 50 minutos). Com a margem de agora, a perda esperada é de cerca de US$1; o resto depende da sorte (chance pequena de bloco). Precisa de pelo menos 0,001 BTC livre na NiceHash'+(pool?'':' e do pool escolhido <b class="bad">(falta)</b>')+'.</p>'+
       '<button class="pri" id="rt_go"'+(calibBusy||!pool?' disabled':'')+'>Iniciar teste do robô</button>'+(calibBusy?'<p class="note" style="margin:6px 0 0">Disponível quando o teste de calibração terminar.</p>':'')+'<p class="note" id="rt_msg" style="margin:6px 0 0"></p>';
   }else if(!T.done){
     var X2=S.exec,paid=(T.ids||[]).reduce(function(a,id){var o=X2&&X2.orders&&X2.orders.filter(function(r){return r.id===id})[0];return a+(o?o.paidBtc||0:0)},0);
     h+='<div class="box" style="margin:0 0 6px"><b>Em andamento</b>Começou '+dt2(T.start)+' · decorrido '+FDI.dur(Date.now()-T.start)+' · encerra em até '+FDI.dur(Math.max(0,T.until-Date.now()))+' (ou assim que o stop-loss e a espera forem vistos).<div class="kv" style="margin-top:6px"><div><small>Gasto até agora</small><span>'+btcTxt(paid)+'</span></div><div><small>Stop-loss do teste</small><span>US$15</span></div></div><div class="note">O gasto é lançado pela NiceHash com alguns minutos de atraso.</div></div>'+chk(T.checks)+
       ((T.events||[]).length?'<details><summary>Ações do robô na NiceHash ('+T.events.length+')</summary><div class="stack" style="gap:3px;margin-top:4px">'+T.events.slice().reverse().map(function(e){return '<div class="note">'+hhmm(new Date(e.t))+' · '+({create:'criou',update:'ajustou',cancel:'encerrou',erro:'erro'}[e.type]||e.type)+(e.priceEH?' a '+e.priceEH.toFixed(4).replace('.',','):'')+(e.limitPH?' · '+nf(e.limitPH,1)+' PH/s':'')+' · '+esc(e.reason||'')+'</div>'}).join('')+'</div></details>':'<p class="note">Aguardando o primeiro ciclo do robô (até 3 min).</p>')+
-      '<button id="rt_stop" style="margin-top:6px">Encerrar agora e devolver a configuração</button><p class="note" id="rt_msg" style="margin:6px 0 0"></p>';
+      (T.fast?'<p class="note" style="margin:6px 0 0">Acelerado: stop-loss em US$'+nf(T.fast.stopUsd,0)+' e espera de 10 min.</p>':(T.checks&&T.checks.create?'<button class="pri" id="rt_fast" style="margin-top:6px">Concluir mais rápido (stop-loss agora, espera de 10 min)</button> ':''))+'<button id="rt_stop" style="margin-top:6px">Encerrar agora e devolver a configuração</button><p class="note" id="rt_msg" style="margin:6px 0 0"></p>';
   }else{
     var all=CK.every(function(k){return T.checks&&T.checks[k[0]]});
     h+='<div class="box" style="margin:0 0 6px"><b>Resultado ('+dt2(T.start)+')</b>'+chk(T.checks)+'<div class="note">Duração '+FDI.dur((T.done||Date.now())-T.start)+' · ordens do teste: '+(T.orders||0)+' · gasto ~'+usdBtc(T.spentUsd)+'. Configuração original devolvida (modo '+esc((T.backup||{}).mode||'')+').</div>'+
@@ -1335,11 +1335,12 @@ function renderRTest(){
   el.innerHTML=h;
 }
 document.addEventListener('click',function(e){
-  var id=e.target.id;if(['rt_go','rt_stop','rt_again'].indexOf(id)<0)return;
-  if(id==='rt_go'&&!confirm('Iniciar o teste do robô? Ele vai operar em modo Ativo por até 2 horas com stop-loss de US$15 e limite diário de US$30, e devolver a sua configuração no fim.'))return;
+  var id=e.target.id;if(['rt_go','rt_stop','rt_again','rt_fast'].indexOf(id)<0)return;
+  if(id==='rt_fast'&&!confirm('Baixar o stop-loss do teste para logo acima do gasto atual e a espera para 10 min? O teste termina em uns 15 min.'))return;
+  if(id==='rt_go'&&!confirm('Iniciar o teste do robô? Ele vai operar em modo Ativo por até 2 horas com stop-loss de US$8 e limite diário de US$20, e devolver a sua configuração no fim.'))return;
   if(id==='rt_stop'&&!confirm('Encerrar o teste agora e devolver a configuração?'))return;
   var b=e.target;b.disabled=true;
-  var go=id==='rt_go'?apiCall('POST','/robottest/start',{hours:2}):id==='rt_stop'?apiCall('POST','/robottest/stop',{}):apiCall('POST','/robottest/clear',{});
+  var go=id==='rt_fast'?apiCall('POST','/robottest/fast',{}):id==='rt_go'?apiCall('POST','/robottest/start',{hours:2}):id==='rt_stop'?apiCall('POST','/robottest/stop',{}):apiCall('POST','/robottest/clear',{});
   go.then(function(){if($('rt_msg'))$('rt_msg').textContent='Feito. Atualizando…';loadOps()},function(er){b.disabled=false;if($('rt_msg'))$('rt_msg').textContent='Não deu: '+er.message});
 });
 // Execução real × simulação (calibração): o que de fato aconteceu com as ordens do robô no modo Ativo.
