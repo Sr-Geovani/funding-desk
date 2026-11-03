@@ -18,14 +18,14 @@ export const DEFAULT_CONFIG = {
   dailyBudgetUsd: 500,      // gasto máximo por dia (UTC); ao atingir, reduz para a potência de pausa
   weeklyLossUsd: 1000,
   sniper: false,            // MODO_SNIPER: tiro curto quando o bloco do BCH atrasa (substitui só a regra de entrada)
-  sniperAgeMin: 20,         // sniper (opcional): gatilho por atraso do último bloco, em min (sniperUseAge)
-  sniperUseAge: false,      // sniper: usar também o gatilho por atraso (sem memória: não aumenta a chance)
-  sniperDiffDropPct: 10,    // sniper: dificuldade atual X% abaixo da média dos últimos 12 blocos
-  sniperFeeX: 3,            // sniper: mempool X vezes acima da média das últimas 24 h
+  sniperAgeMin: 15,         // sniper: gatilho por atraso do último bloco, em min (sniperUseAge)
+  sniperUseAge: true,       // sniper: usar também o gatilho por atraso (sem memória: não aumenta a chance)
+  sniperDiffDropPct: 1,     // sniper: dificuldade atual X% (ou mais) abaixo da média dos últimos 12 blocos
+  sniperFeeX: 100,          // sniper: mempool X vezes acima da média das últimas 24 h (100 = desligado na prática)
   sniperMinEdge: -7,        // sniper: e a margem é de pelo menos X% (aceita negativa)
   sniperPh: 25,             // sniper: potência do tiro (PH/s)
   sniperIdlePh: 1,          // sniper: potência de espera (PH/s)
-  sniperShotMin: 4,         // sniper: duração máxima do tiro sem bloco (kill switch, min)
+  sniperShotMin: 7,         // sniper: duração máxima do tiro sem bloco (kill switch, min); cobre a rampa de ~3 min da NiceHash
   minEdgeMode: 'fixo',      // 'fixo' (margem mínima da config) | 'relativo' (os X% melhores momentos das últimas 24 h, com piso)
   relPct: 75,               // regra relativa: entra quando a margem está entre os (100 − relPct)% melhores das últimas 24 h
   relFloorPct: -2,          // regra relativa: nunca entra com margem abaixo deste piso      // perda máxima em 7 dias (gasto − recebido, resultado real); ao atingir, encerra tudo e avisa (0 = desligado)
@@ -159,30 +159,35 @@ function utcDay(ms) { return new Date(ms).toISOString().slice(0, 10); }
 // sniperIdlePh quando sai bloco novo ou quando o tiro passa de sniperShotMin min sem bloco (um tiro por bloco atrasado).
 // Observação: o sorteio dos blocos não tem memória; o tempo desde o último bloco não aumenta a chance do próximo.
 const f1 = (x) => Number(x).toFixed(1).replace('.', ',');
-export function sniperDecide(prev, { now, blockT, edge, cfg, diffDropPct = null, feeX = null }) {
-  const s = Object.assign({ shotStart: null, shotBlockT: null, usedBlockT: null, shots: 0, endsBlock: 0, endsTime: 0 }, prev || {});
-  const ageMin = cfg.sniperAgeMin === undefined ? 20 : cfg.sniperAgeMin, minE = cfg.sniperMinEdge === undefined ? -7 : cfg.sniperMinEdge;
-  const dur = (cfg.sniperShotMin === undefined ? 4 : cfg.sniperShotMin) * 60e3, age = blockT ? (now - blockT) / 60e3 : null;
-  let reason = null;
+export function sniperDecide(prev, { now, blockT, blockId = null, edge, cfg, diffDropPct = null, feeX = null }) {
+  // Um tiro por ID de bloco (altura). O ID identifica o bloco que a rede está tentando achar agora; o horário só mede a idade.
+  const s = Object.assign({ shotStart: null, shotBlockId: null, usedBlockId: null, shots: 0, endsBlock: 0, endsTime: 0 }, prev || {});
+  const id = blockId !== null && blockId !== undefined ? blockId : (blockT || null);
+  if (s.shotStart && (s.shotBlockId === null || s.shotBlockId === undefined)) s.shotBlockId = s.shotBlockT || id; // estado antigo
+  const ageMin = cfg.sniperAgeMin === undefined ? 15 : cfg.sniperAgeMin, minE = cfg.sniperMinEdge === undefined ? -7 : cfg.sniperMinEdge;
+  const dur = (cfg.sniperShotMin === undefined ? 7 : cfg.sniperShotMin) * 60e3, age = blockT ? (now - blockT) / 60e3 : null;
+  let reason = null, endedByTime = false;
   if (s.shotStart) {
-    if (blockT && s.shotBlockT && blockT > s.shotBlockT) { s.shotStart = null; s.endsBlock++; s.lastEnd = { t: now, why: 'bloco' }; reason = 'sniper: bloco novo na rede, recuo para a potência de espera'; }
-    else if (now - s.shotStart >= dur) { s.shotStart = null; s.usedBlockT = s.shotBlockT; s.endsTime++; s.lastEnd = { t: now, why: 'tempo' }; reason = `sniper: tiro de ${Math.round(dur / 60e3)} min sem bloco, recuo (kill switch)`; }
+    if (id !== null && s.shotBlockId !== null && id !== s.shotBlockId) { s.shotStart = null; s.endsBlock++; s.lastEnd = { t: now, why: 'bloco' }; reason = 'sniper: bloco novo na rede, recuo para a potência de espera'; }
+    else if (now - s.shotStart >= dur) { s.shotStart = null; s.usedBlockId = s.shotBlockId; s.endsTime++; s.lastEnd = { t: now, why: 'tempo' }; endedByTime = true; reason = `sniper: tiro de ${Math.round(dur / 60e3)} min sem bloco, recuo (kill switch); sem novo tiro neste bloco`; }
   }
+  // a trava "já atirou neste bloco" vale só para o bloco do tiro: zera na virada de bloco
+  if (s.usedBlockId !== null && id !== null && s.usedBlockId !== id) s.usedBlockId = null;
   if (!s.shotStart) {
-    // gatilhos: dificuldade em queda (DAA), mempool cheia (taxas) e, opcional, atraso do bloco
-    const dLim = cfg.sniperDiffDropPct === undefined ? 10 : cfg.sniperDiffDropPct, fLim = cfg.sniperFeeX === undefined ? 3 : cfg.sniperFeeX;
+    // gatilhos: dificuldade em queda (DAA), mempool cheia (taxas) e atraso do bloco (opcional)
+    const dLim = cfg.sniperDiffDropPct === undefined ? 1 : cfg.sniperDiffDropPct, fLim = cfg.sniperFeeX === undefined ? 100 : cfg.sniperFeeX;
     const g = { dif: isFinite(diffDropPct) && diffDropPct !== null && diffDropPct >= dLim, fee: isFinite(feeX) && feeX !== null && feeX >= fLim, age: !!cfg.sniperUseAge && age !== null && age > ageMin };
     const which = [g.dif ? `dificuldade ${f1(diffDropPct)}% abaixo da média de 12 blocos (gatilho ${f1(dLim)}%)` : '', g.fee ? `mempool ${f1(feeX)} vezes a média do dia (gatilho ${f1(fLim)})` : '', g.age ? `último bloco há ${Math.round(age)} min (gatilho ${ageMin})` : ''].filter(Boolean);
-    const okEdge = isFinite(edge) && edge >= minE, used = s.usedBlockT === blockT && blockT;
-    // depois de um recuo, o próximo tiro só no ciclo seguinte
-    if (which.length && okEdge && !used && !reason) { s.shotStart = now; s.shotBlockT = blockT; s.shots++; reason = `sniper: ${which.join(' e ')}; margem do tiro ${f1(edge)}% (limite ${f1(minE)}%): tiro`; }
-    else if (!reason) reason = which.length && used ? 'sniper: já atirou neste bloco; espera o próximo bloco' : which.length && !okEdge ? `sniper: gatilho ativo (${which.join(' e ')}), mas margem ${isFinite(edge) ? f1(edge) : '—'}% abaixo do limite ${f1(minE)}%; em espera` :
+    const okEdge = isFinite(edge) && edge >= minE, used = s.usedBlockId !== null && s.usedBlockId === id;
+    // efeito estilingue: depois do recuo por bloco novo, o novo bloco pode receber o tiro no mesmo ciclo
+    if (which.length && okEdge && !used && !endedByTime) { s.shotStart = now; s.shotBlockId = id; s.shots++; reason = (reason ? reason + '; ' : '') + `sniper: ${which.join(' e ')}; margem do tiro ${f1(edge)}% (limite ${f1(minE)}%): tiro no bloco ${id}`; }
+    else if (!reason) reason = which.length && used ? `sniper: já atirou no bloco ${id}; espera a virada para o próximo` : which.length && !okEdge ? `sniper: gatilho ativo (${which.join(' e ')}), mas margem ${isFinite(edge) ? f1(edge) : '—'}% abaixo do limite ${f1(minE)}%; em espera` :
       `sniper: em espera (dificuldade ${diffDropPct === null || !isFinite(diffDropPct) ? 'sem dado' : diffDropPct >= 0 ? f1(diffDropPct) + '% abaixo' : f1(-diffDropPct) + '% acima'} da média de 12 blocos, gatilho ${f1(dLim)}% abaixo; mempool ${feeX === null || !isFinite(feeX) ? 'juntando 2 h de leituras' : f1(feeX) + ' vezes a média'}, gatilho ${f1(fLim)} vezes${cfg.sniperUseAge ? `; último bloco há ${age === null ? '—' : Math.round(age)} min, gatilho ${ageMin}` : ''})`;
   }
   return { shot: !!s.shotStart, state: s, reason, ageMin: age, diffDropPct, feeX };
 }
 
-export function decide({ cfg, mkt, orders, state = {}, now, units, limits = limitsFromEnv(), blockEvent = null, weekLossUsd = 0, blockT = null, snMetrics = {} }) {
+export function decide({ cfg, mkt, orders, state = {}, now, units, limits = limitsFromEnv(), blockEvent = null, weekLossUsd = 0, blockT = null, blockId = null, snMetrics = {} }) {
   const st = JSON.parse(JSON.stringify(state || {}));
   st.lastDecrease = st.lastDecrease || {}; st.lastPriceChange = st.lastPriceChange || {}; st.dayStart = st.dayStart || {};
   const actions = [], notes = [];
@@ -245,7 +250,7 @@ export function decide({ cfg, mkt, orders, state = {}, now, units, limits = limi
 
   // MODO_SNIPER (opcional): a decisão do tiro sai da idade do último bloco; sem a flag, nada muda
   const mktShot = cfg.sniper && mkt.ok ? sizeMarket(mkt, Math.min(cfg.sniperPh || 25, limits.maxLimitPh), cfg) : null; // preço e margem para a potência do tiro
-  const SN = mktShot ? sniperDecide(st.sniper, Object.assign({ now, blockT, edge: mktShot.edgeAtBidPct, cfg }, snMetrics)) : null;
+  const SN = mktShot ? sniperDecide(st.sniper, Object.assign({ now, blockT, blockId, edge: mktShot.edgeAtBidPct, cfg }, snMetrics)) : null;
   if (SN) st.sniper = SN.state;
   for (const o of managed) {
     if (blockEvent) {

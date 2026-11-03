@@ -160,6 +160,13 @@ export async function tick(env, opts = {}) {
     }
   }
 
+  // Calibração do Sniper v3 (03/11): aplica uma vez os parâmetros pedidos à configuração salva (o usuário pode mudar depois).
+  if (cfg.sniperCalV !== 3) {
+    Object.assign(cfg, { sniperDiffDropPct: 1, sniperUseAge: true, sniperAgeMin: 15, sniperFeeX: 100, sniperMinEdge: -7, sniperShotMin: 7, sniperCalV: 3 });
+    const saved = await kvGet(env, 'config', {});
+    await kvPut(env, 'config', Object.assign(saved, { sniperDiffDropPct: 1, sniperUseAge: true, sniperAgeMin: 15, sniperFeeX: 100, sniperMinEdge: -7, sniperShotMin: 7, sniperCalV: 3 }));
+    log.push({ t: now, kind: 'config', text: 'Sniper recalibrado: dificuldade 1% abaixo da média de 12 blocos, atraso de 15 min, mempool 100 (desligada), trava de margem −7%, prazo do tiro 7 min, um tiro por bloco' });
+  }
   // Regra relativa de entrada (opcional): troca a margem mínima pela dos melhores momentos das últimas 24 h, com piso.
   if (cfg.minEdgeMode === 'relativo') {
     const r = relativeMinEdge(state.edgeHist, { now, fixAt: state.paperArchive && state.paperArchive.at, pct: cfg.relPct || 75, floor: cfg.relFloorPct === undefined ? -2 : cfg.relFloorPct });
@@ -181,6 +188,7 @@ export async function tick(env, opts = {}) {
     return Object.entries(d).filter(([k]) => k >= from).reduce((a, [, x]) => a + (x.spendUsd || 0) - (x.revenueUsd || 0), 0); })();
   // horário do último bloco da rede (para o MODO_SNIPER): o mais novo entre o registro e os blocos deste ciclo
   const lastNetBlockT = Math.max(state.lastBlockT || 0, ...newBlocks.map((b) => b.time || 0)) || null;
+  const lastNetHeight = Math.max(state.lastHeight || 0, ...newBlocks.map((b) => b.height || 0)) || null; // ID do último bloco (altura)
   // MODO_SNIPER: sinais de dificuldade (DAA) e de mempool.
   // dHist: dificuldade dos últimos 12 blocos; queda = dificuldade de agora abaixo da média deles.
   let dHist = Array.isArray(state.dHist) ? state.dHist.slice() : (await kvGet(env, 'blocks', [])).slice(-12).map((b) => b.D).filter((x) => x > 0);
@@ -196,7 +204,7 @@ export async function tick(env, opts = {}) {
   const feeX = mpBytes !== null && mpAvg > 0 ? mpBytes / mpAvg : null;
   const snMetrics = { diffDropPct, feeX };
   const snInfo = { at: now, dNow, dAvg, diffDropPct, mpBytes, mpAvg, feeX, feeBchMin: mpBytes !== null ? mpBytes * 1e-8 : null };
-  const dec = decide({ cfg, mkt, orders, state, now, units, limits, blockEvent, weekLossUsd, blockT: lastNetBlockT, snMetrics });
+  const dec = decide({ cfg, mkt, orders, state, now, units, limits, blockEvent, weekLossUsd, blockT: lastNetBlockT, blockId: lastNetHeight, snMetrics });
   if (dec.state.weekStop && !state.weekStop) await notify(env, `limite de perda semanal atingido (perda real de US$${weekLossUsd.toFixed(2).replace('.', ',')} em 7 dias; limite US$${cfg.weeklyLossUsd}). Robô encerrou as ordens e não cria novas até a perda da semana baixar.`, fetchFn);
 
   // Simulação (só no modo Observar) e resultado real (ordens gerenciadas + blocos).
@@ -276,7 +284,7 @@ export async function tick(env, opts = {}) {
   // Cenário Sniper (simulado, sempre ligado para comparar): mesma regra do robô (sniperDecide), mesmos blocos e sorteio.
   let paperSniper = state.paperSniper || null;
   if (mkt.ok) {
-    const sd = sniperDecide(paperSniper && paperSniper.sn, Object.assign({ now, blockT: lastNetBlockT, edge: sizeMarket(mkt, Math.min(cfg.sniperPh || 25, limits.maxLimitPh), cfg).edgeAtBidPct, cfg }, snMetrics));
+    const sd = sniperDecide(paperSniper && paperSniper.sn, Object.assign({ now, blockT: lastNetBlockT, blockId: lastNetHeight, edge: sizeMarket(mkt, Math.min(cfg.sniperPh || 25, limits.maxLimitPh), cfg).edgeAtBidPct, cfg }, snMetrics));
     const php = sd.shot ? Math.min(cfg.sniperPh || 25, limits.maxLimitPh) : Math.max(cfg.sniperIdlePh === undefined ? 1 : cfg.sniperIdlePh, units.minLimitPH || 1);
     const ps = paperStep(paperSniper, { cfg: Object.assign({}, cfg, { targetPh: php, minPh: php, onBlock: 'continue', dailyBudgetUsd: 0 }), mkt: Object.assign({}, sizeMarket(mkt, php, cfg), { green: true }), now, units, limits, blocks: newBlocks });
     paperSniper = Object.assign(ps.paper, { sn: sd.state, shot: sd.shot, reason: sd.reason, ageMin: sd.ageMin });

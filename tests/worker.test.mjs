@@ -1408,25 +1408,38 @@ test('plano para o saldo: uma ordem com o saldo, regra relativa, chance de bloco
   assert.equal(low.ok, false); assert.match(low.why, /mínimo de uma ordem/);
 });
 
-test('MODO_SNIPER: tiro por dificuldade em queda ou mempool cheia, com limite de margem; recua no bloco novo ou no prazo; um tiro por bloco', async () => {
+test('MODO_SNIPER: um tiro por ID de bloco, kill switch de 7 min, trava zera na virada e efeito estilingue', async () => {
   const { sniperDecide } = await import('../worker/src/bot.js');
-  const cfg = Object.assign({}, DEFAULT_CONFIG, { sniper: true }), T = Date.UTC(2026, 10, 3, 3), M = 60e3, b0 = T - 21 * M;
-  let r = sniperDecide(null, { now: T, blockT: b0, edge: -3, cfg, diffDropPct: 1.2, feeX: 1.1 });
-  assert.equal(r.shot, false, 'bloco atrasado sozinho não dispara (atraso desligado por padrão)'); assert.match(r.reason, /em espera/);
-  r = sniperDecide(r.state, { now: T, blockT: b0, edge: -8, cfg, diffDropPct: 11, feeX: 1 }); assert.equal(r.shot, false, 'margem abaixo de −7%');
-  r = sniperDecide(r.state, { now: T, blockT: b0, edge: -6.6, cfg, diffDropPct: 11, feeX: 1 }); assert.equal(r.shot, true); assert.match(r.reason, /dificuldade 11,0% abaixo/);
-  let k = sniperDecide(r.state, { now: T + 3 * M, blockT: T + 2 * M, edge: -6.6, cfg, diffDropPct: 11 }); assert.equal(k.shot, false); assert.match(k.reason, /bloco novo/);
-  let t = sniperDecide(r.state, { now: T + 4 * M, blockT: b0, edge: -6.6, cfg, diffDropPct: 11 }); assert.equal(t.shot, false); assert.match(t.reason, /kill switch/);
-  t = sniperDecide(t.state, { now: T + 7 * M, blockT: b0, edge: -6.6, cfg, diffDropPct: 11 }); assert.equal(t.shot, false, 'um tiro por bloco'); assert.match(t.reason, /já atirou/);
-  const f = sniperDecide(null, { now: T, blockT: T - 2 * M, edge: -5, cfg, diffDropPct: 0.2, feeX: 3.4 }); assert.equal(f.shot, true); assert.match(f.reason, /mempool 3,4 vezes/);
-  const a = sniperDecide(null, { now: T, blockT: b0, edge: -5, cfg: Object.assign({}, cfg, { sniperUseAge: true }) }); assert.equal(a.shot, true, 'atraso como gatilho opcional');
-  // robô: com a flag, sobe para 25 PH/s; sem a flag, a regra de margem segue igual
+  const cfg = Object.assign({}, DEFAULT_CONFIG, { sniper: true }), T = Date.UTC(2026, 10, 3, 3), M = 60e3;
+  assert.equal(cfg.sniperDiffDropPct, 1); assert.equal(cfg.sniperAgeMin, 15); assert.equal(cfg.sniperUseAge, true); assert.equal(cfg.sniperFeeX, 100); assert.equal(cfg.sniperMinEdge, -7); assert.equal(cfg.sniperShotMin, 7);
+  const X = 975600, tX = T - 16 * M;
+  // bloco X atrasado (16 min > 15), margem ok: tiro
+  let r = sniperDecide(null, { now: T, blockT: tX, blockId: X, edge: -6, cfg, diffDropPct: 0.2, feeX: 1 });
+  assert.equal(r.shot, true); assert.match(r.reason, /tiro no bloco 975600/);
+  // 7 min sem bloco: kill switch; não atira de novo no mesmo bloco X
+  let k = sniperDecide(r.state, { now: T + 7 * M, blockT: tX, blockId: X, edge: -6, cfg, diffDropPct: 2 });
+  assert.equal(k.shot, false); assert.match(k.reason, /kill switch/);
+  k = sniperDecide(k.state, { now: T + 10 * M, blockT: tX, blockId: X, edge: -6, cfg, diffDropPct: 2 });
+  assert.equal(k.shot, false); assert.match(k.reason, /já atirou no bloco 975600/);
+  // virada: nasce X+1 com dificuldade 1,2% abaixo da média: a trava zera e o tiro sai na hora
+  const n = sniperDecide(k.state, { now: T + 12 * M, blockT: T + 11 * M, blockId: X + 1, edge: -6, cfg, diffDropPct: 1.2 });
+  assert.equal(n.shot, true); assert.match(n.reason, /tiro no bloco 975601/);
+  // estilingue: tiro em andamento no bloco X+1, sai X+2 com gatilho ativo: recua e atira de novo no mesmo ciclo
+  const e = sniperDecide(n.state, { now: T + 14 * M, blockT: T + 13 * M, blockId: X + 2, edge: -6, cfg, diffDropPct: 1.5 });
+  assert.equal(e.shot, true); assert.match(e.reason, /bloco novo na rede.*tiro no bloco 975602/); assert.equal(e.state.endsBlock, 1);
+  // virada sem gatilho: recua e fica em espera
+  const w = sniperDecide(e.state, { now: T + 16 * M, blockT: T + 15 * M, blockId: X + 3, edge: -6, cfg, diffDropPct: 0.1 });
+  assert.equal(w.shot, false); assert.match(w.reason, /bloco novo/);
+  // trava de margem e mempool neutralizada
+  assert.equal(sniperDecide(null, { now: T, blockT: tX, blockId: X, edge: -8, cfg, diffDropPct: 3 }).shot, false);
+  assert.equal(sniperDecide(null, { now: T, blockT: T - 2 * M, blockId: X, edge: -5, cfg, diffDropPct: 0, feeX: 50 }).shot, false, 'mempool em 100 não dispara');
+  // robô: com a flag sobe para 25 PH/s; sem a flag, a regra de margem segue igual
   const ord = order({ priceEH: 0.42, limitPH: 1 }), m = mk({ green: false, bidEH: 0.42, capEH: 0.40, edgeAtBidPct: -6.6 });
-  const on = decide({ cfg: cfgOf({ sniper: true }), mkt: m, orders: [ord], now: T, units, limits: lim, blockT: b0, snMetrics: { diffDropPct: 12, feeX: 1 } });
+  const on = decide({ cfg: cfgOf({ sniper: true }), mkt: m, orders: [ord], now: T, units, limits: lim, blockT: tX, blockId: X, snMetrics: { diffDropPct: 1.1 } });
   assert.equal(on.actions[0].limitPH, 25); assert.match(on.actions[0].reason, /sniper/);
-  const off = decide({ cfg: cfgOf({ sniper: false }), mkt: m, orders: [ord], now: T, units, limits: lim, blockT: b0, snMetrics: { diffDropPct: 12 } });
+  const off = decide({ cfg: cfgOf({ sniper: false }), mkt: m, orders: [ord], now: T, units, limits: lim, blockT: tX, blockId: X, snMetrics: { diffDropPct: 2 } });
   assert.ok(!off.actions.some((x) => x.limitPH === 25), 'sem a flag, nada muda');
-  const c = decide({ cfg: cfgOf({ sniper: true, autoCreate: true, poolId: 'p', managed: [] }), mkt: m, orders: [], now: T, units, limits: lim, blockT: T - 5 * M, snMetrics: {} });
+  const c = decide({ cfg: cfgOf({ sniper: true, autoCreate: true, poolId: 'p', managed: [] }), mkt: m, orders: [], now: T, units, limits: lim, blockT: T - 5 * M, blockId: X, snMetrics: {} });
   assert.equal(c.actions[0].type, 'create'); assert.equal(c.actions[0].limitPH, 1);
 });
 
@@ -1438,6 +1451,8 @@ test('integração: Sniper avisa no Telegram o tiro e o recuo', async () => {
     const fetchFn = (u, o) => { if (String(u).includes('api.telegram.org')) { sent.push(JSON.parse(o.body).text); return Promise.resolve(new Response('{}')); } return fetch(u, o); };
     const o = await t.call('POST', '/api/orders', { priceEH: 0.40, limitPH: 1, amountBtc: 0.005, poolId: 'pool-1' });
     assert.equal(o.status, 200, JSON.stringify(o.body));
+    await tick(env, { fetchFn });                            // primeiro ciclo: aplica a calibração v3 uma vez
+    { const c0 = (await t.call('GET', '/api/status')).body.config; assert.deepEqual([c0.sniperDiffDropPct, c0.sniperAgeMin, c0.sniperUseAge, c0.sniperFeeX, c0.sniperMinEdge, c0.sniperShotMin, c0.sniperCalV], [1, 15, true, 100, -7, 7, 3]); }
     await t.call('PUT', '/api/config', { mode: 'active', payoutAddress: 'bitcoincash:q' + 'a'.repeat(41), sniper: true, sniperUseAge: true, sniperAgeMin: 5, sniperMinEdge: -20, sniperDiffDropPct: 50, sniperFeeX: 100, sniperShotMin: 4 });
     const st0 = JSON.parse((await t.env.FD_KV.get('state')) || '{}'); st0.lastBlockT = Date.now() - 10 * 60e3; await t.env.FD_KV.put('state', JSON.stringify(st0)); // último bloco conhecido
     const T = Date.now() + 30 * 60e3;                       // 40 min depois dele: gatilho por atraso
