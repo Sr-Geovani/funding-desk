@@ -1042,6 +1042,7 @@ function ctx24HTML(E){
   if(!H)return '';
   // a configuração salva manda: se a regra foi trocada depois do último ciclo, o painel já mostra a nova
   if(cfg.minEdgeMode!=='relativo')R={value:cfg.minEdgePct,relative:false,base:cfg.minEdgePct};
+  var snOn=!!cfg.sniper;
   var fixed=R.base!==undefined?R.base:cfg.minEdgePct,base=R.relative?R.value:fixed,now=mk.edgeAtBidPct,diff=base-H.avg,stop=cfg.sessionBudgetUsd||300;
   var lossTry=function(m){return m<0?usd(-m/100*stop,0):'US$0'};
   var h='<div class="box" style="margin:0 0 8px"><b>Contexto para minerar (últimas '+esc(H.label||'24 h')+')</b>'+
@@ -1480,6 +1481,18 @@ function renderOps(){
   $('b_poolId').innerHTML=popts;$('n_pool').innerHTML=popts;
   if(!ops.dirty)BOT_FIELDS.forEach(function(k){var el=$('b_'+k);if(el)el.value=cfg[k]===undefined?'':cfg[k]});
   relCalcUI();
+  (function(){var el=$('b_rules');if(!el){var anchor=$('b_minEdgePct');if(!anchor)return;var box=anchor.closest('.grid2')||anchor.parentNode;el=document.createElement('div');el.id='b_rules';el.className='box';el.style.margin='0 0 10px';box.parentNode.insertBefore(el,box)}
+    var S=st.state||{},on=function(x){return x?'<span class="chip ok">ligada</span>':'<span class="chip">desligada</span>'},sn=!!cfg.sniper,rel=cfg.minEdgeMode==='relativo';
+    var entry=sn?'Sniper (bloco há mais de '+nf(cfg.sniperAgeMin||20,0)+' min e margem do tiro a partir de '+pct(cfg.sniperMinEdge===undefined?-7:cfg.sniperMinEdge,1)+')':rel?'Relativa (os '+(100-(cfg.relPct||75))+'% melhores momentos das 24 h; hoje '+pct((S.minEdgeNow||{}).value,1)+')':'Fixa (margem a partir de '+pct(cfg.minEdgePct,1)+')';
+    el.innerHTML='<b>Regras em vigor agora ('+(cfg.mode==='active'?'Ativo: operando':cfg.mode==='observe'?'Observar: só simula':'desligado')+')</b>'+
+      '<ol class="note" style="margin:6px 0 0;padding-left:18px">'+
+      '<li><b>Perda máxima em 7 dias</b> US$'+nf(cfg.weeklyLossUsd||0,0)+': passou, encerra tudo. Vale sobre todas.</li>'+
+      '<li><b>Stop-loss</b> US$'+nf(cfg.sessionBudgetUsd||0,0)+' por tentativa e espera de '+nf(cfg.stopCooldownH||0,1)+' h: encerra e espera, inclusive no Sniper.</li>'+
+      '<li><b>Bloco no seu endereço</b>: '+({cancel:'encerra a ordem',min:'reduz à potência de pausa',continue:'continua'}[cfg.onBlock]||cfg.onBlock)+'.</li>'+
+      '<li><b>Regra de entrada (só uma vale):</b> '+entry+'.'+(sn&&rel?' A regra relativa está ligada, mas fica de lado enquanto o Sniper estiver ligado.':'')+'</li>'+
+      '<li><b>Limite diário</b> US$'+nf(cfg.dailyBudgetUsd||0,0)+': passou, reduz para a potência mínima até o dia seguinte (UTC).</li>'+
+      '<li><b>Regra da NiceHash:</b> o preço só baixa 10 min depois de qualquer mudança.</li></ol>'+
+      (S.planOn?'<div class="note" style="margin-top:4px">Plano para o saldo aplicado: ele definiu o valor da ordem, o stop-loss e o limite diário acima.</div>':'')})();
   (function(){var f=$('b_minEdgePct');if(!f)return;var rel=(($('b_minEdgeMode')||{}).value||cfg.minEdgeMode)==='relativo',lab=f.parentNode;
     f.style.opacity=rel?'.5':'';var n=$('b_minNote');if(!n){n=document.createElement('small');n.id='b_minNote';n.className='note';n.style.display='block';lab.appendChild(n)}
     n.textContent=rel?'Guardada: não vale com a regra relativa ligada; volta a valer se escolher "Fixa".':''})();

@@ -599,7 +599,7 @@ export async function tick(env, opts = {}) {
     sniper: paperSniper ? { shot: paperSniper.shot, reason: paperSniper.reason } : null, fund: { passing: ((funding && funding.best) || []).length, sim: fundPaper ? fundPaperSummary(fundPaper, FD.DEFAULT_FEES) : null } });
 
   const next = Object.assign({}, dec.state, alertState, {
-    lastTick: now, verified: Object.fromEntries(Object.entries(verified).filter(([, x]) => now - x.at <= 6 * 3600e3)), ai: br.ai, aiAnalysis, plan, acct, algoMap, mempool, stable24, pairStats, msig, darr, recentBlocks, nhWeek, paper, paperBurst, paperPlan, paperAlways, paperSniper, hashMkts, fronts, frontsPaper, ltStreak, fundPaperLT, market2, aiPanorama, entryCheck, calib, robotTest, luck24, balPlan, minEdgeNow: { value: cfg.minEdgePct, relative: !!cfg.minEdgeRel, base: cfg.minEdgeRel ? cfg.minEdgeBase : cfg.minEdgePct }, aiReport: aiRep, mktMargin, asertF, execLog, bestScen, paperArchive, paperPriceV: 2, blockBuf, blockFlush, lastBlockT, real, fundPaper, alertScore, algoPaper, algoTs, aiScores, fundPaperAI, fhistHour, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig, errNotified,
+    lastTick: now, verified: Object.fromEntries(Object.entries(verified).filter(([, x]) => now - x.at <= 6 * 3600e3)), ai: br.ai, aiAnalysis, plan, acct, algoMap, mempool, stable24, pairStats, msig, darr, recentBlocks, nhWeek, paper, paperBurst, paperPlan, paperAlways, paperSniper, hashMkts, fronts, frontsPaper, ltStreak, fundPaperLT, market2, aiPanorama, entryCheck, calib, robotTest, luck24, balPlan, minEdgeNow: { value: cfg.minEdgePct, relative: !!cfg.minEdgeRel, base: cfg.minEdgeRel ? cfg.minEdgeBase : cfg.minEdgePct, sniper: !!cfg.sniper }, aiReport: aiRep, mktMargin, asertF, execLog, bestScen, paperArchive, paperPriceV: 2, blockBuf, blockFlush, lastBlockT, real, fundPaper, alertScore, algoPaper, algoTs, aiScores, fundPaperAI, fhistHour, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig, errNotified,
     market: mkt.ok ? { breakEvenEH: mkt.breakEvenEH, capEH: mkt.capEH, fillEH: mkt.fillEH, medianEH: mkt.medianEH, bidEH: mkt.bidEH,
       edgeAtBidPct: mkt.edgeAtBidPct, green: mkt.green, D: mkt.D, bookTotalPH: book ? book.totalPH : 0, bchUsd: mkt.bchUsd, btcUsd: mkt.btcUsd, costPerBlockUsd: mkt.costPerBlockUsd,
       hashpriceNet: mkt.hashpriceNet, blockNetUsd: mkt.blockNetUsd, phDaysPerBlock: mkt.phDaysPerBlock, market: mkt.market } : { ok: false, reason: mkt.reason },
@@ -853,9 +853,9 @@ async function api(req, env, url, fetchFn) {
     if (st.calib && !st.calib.done) return json({ error: 'espere o teste de calibração terminar' }, 400);
     const poolId = body.poolId || cfg.poolId; if (!poolId) return json({ error: 'escolha o pool (Mineração → Robô → Pool para ordens novas)' }, 400);
     const u = await nh.units(), now = Date.now(), hours = Math.max(0.5, Math.min(+body.hours || 2, 4));
-    const keys = ['mode', 'minEdgePct', 'minEdgeMode', 'targetPh', 'sessionBudgetUsd', 'stopCooldownH', 'dailyBudgetUsd', 'orderAmountBtc', 'autoCreate', 'onBlock', 'poolId'];
+    const keys = ['mode', 'sniper', 'minEdgePct', 'minEdgeMode', 'targetPh', 'sessionBudgetUsd', 'stopCooldownH', 'dailyBudgetUsd', 'orderAmountBtc', 'autoCreate', 'onBlock', 'poolId'];
     const backup = Object.fromEntries(keys.map((k) => [k, cfg[k]]));
-    const test = { mode: 'active', minEdgeMode: 'fixo', minEdgePct: -5, targetPh: 10, sessionBudgetUsd: 8, stopCooldownH: 0.25, dailyBudgetUsd: 20, orderAmountBtc: u.minOrderBtc, autoCreate: true, onBlock: 'cancel', poolId };
+    const test = { mode: 'active', sniper: false, minEdgeMode: 'fixo', minEdgePct: -5, targetPh: 10, sessionBudgetUsd: 8, stopCooldownH: 0.25, dailyBudgetUsd: 20, orderAmountBtc: u.minOrderBtc, autoCreate: true, onBlock: 'cancel', poolId };
     await kvPut(env, 'config', Object.assign({}, cfg, test));
     st.robotTest = { start: now, until: now + hours * 3600e3, backup, test, events: [], checks: {}, ids: [] };
     st.stopUntil = null; st.sess = null;
