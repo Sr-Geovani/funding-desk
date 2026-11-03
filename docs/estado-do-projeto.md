@@ -187,3 +187,4 @@ sempre identificado; nada de prometer previsão de sorte (Poisson é sem memóri
 - [ ] Funding automático: exige servidor no Brasil (Binance/Bybit bloqueiam EUA), chaves de trade sem saque.
 - [ ] Robô multi-algoritmo (pool PPS) para Scrypt/RandomX/Equihash etc.
 - [ ] Mais exchanges: dYdX (CORS ok), MEXC e KuCoin (via backend).
+- Vigia de bloco do Sniper (03/11): cron a cada minuto; o ciclo completo segue a cada 3 min e, nos minutos entre eles, com o Sniper ligado, o servidor confere a altura da rede a cada 6 s e roda o ciclo assim que o bloco vira (recuo, trava zerada e novo tiro sem esperar os 3 min).

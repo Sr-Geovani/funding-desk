@@ -4,7 +4,7 @@ compatibility_date = "2026-01-01"
 
 # Robô de mineração: um ciclo a cada 3 min (cabe no limite grátis de escritas do KV).
 [triggers]
-crons = ["*/3 * * * *"]
+crons = ["* * * * *"] # ciclo completo nos minutos múltiplos de 3; nos outros, só o vigia de bloco do Sniper
 
 # Armazena configuração, estado e log do robô. O id é preenchido pelo workflow de deploy.
 [[kv_namespaces]]

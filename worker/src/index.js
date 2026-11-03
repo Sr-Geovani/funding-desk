@@ -739,8 +739,8 @@ async function api(req, env, url, fetchFn) {
 
   if (p === '/readtoken' && m === 'GET') return json({ token: await readToken(env) });
   if (p === '/status' && m === 'GET') {
-    const [cfg, state] = await Promise.all([getConfig(env), kvGet(env, 'state', {})]);
-    return json({ version: VERSION, algo: nh.algorithm, nhEnv: env.NH_BASE ? 'personalizado' : (env.NH_ENV === 'prod' ? 'produção' : 'teste'), keys: hasKeys(env),
+    const [cfg, state, watch] = await Promise.all([getConfig(env), kvGet(env, 'state', {}), kvGet(env, 'watch', null)]);
+    return json({ watch, version: VERSION, algo: nh.algorithm, nhEnv: env.NH_BASE ? 'personalizado' : (env.NH_ENV === 'prod' ? 'produção' : 'teste'), keys: hasKeys(env),
       telegram: !!(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID), creds: credStatus(env), limits, config: cfg,
       state: { lastTick: state.lastTick, lastHeight: state.lastHeight, market: state.market, myBlocks: state.myBlocks || [], dailyUsd: state.dailyUsd || 0,
         errors: state.errors || [], edgeHist: state.edgeHist || [], alerts: (state.alerts || []).slice(-30).reverse(),
@@ -996,6 +996,35 @@ async function api(req, env, url, fetchFn) {
   return json({ error: 'rota não encontrada' }, 404);
 }
 
+// Vigia de bloco do MODO_SNIPER: o ciclo completo continua a cada 3 min; nos minutos entre eles, com o Sniper ligado,
+// o servidor confere só a altura da rede a cada poucos segundos. Quando nasce um bloco novo, roda o ciclo na hora
+// (mesma decisão do ciclo normal: recuo do tiro, trava zerada e novo tiro se o gatilho de 1% já valer).
+export async function blockWatch(env, opts = {}) {
+  const fetchFn = opts.fetchFn || fetch, clock = opts.clock || Date.now, sleep = opts.sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
+  const budget = opts.budgetMs === undefined ? 35e3 : opts.budgetMs, every = opts.everyMs || 6e3, start = clock();
+  const cfg = await getConfig(env);
+  if (!cfg.sniper || !env.FD_KV) return { fired: false, why: 'sniper desligado' };
+  const chain = chainClient(env, fetchFn), state = await kvGet(env, 'state', {}), known = state.lastHeight || 0;
+  let polls = 0, seen = known;
+  while (clock() - start <= budget) {
+    const r = await settle(chain.info()); polls++;
+    if (r.ok && r.v.height > known) {
+      seen = r.v.height;
+      const lock = await kvGet(env, 'watch', {}); // outra execução já disparou este bloco: não repete
+      if (lock.firedH >= seen && clock() - (lock.firedAt || 0) < 150e3) return { fired: false, why: 'já disparado', h: seen };
+      const t0 = clock();
+      await kvPut(env, 'watch', { at: t0, h: seen, firedH: seen, firedAt: t0, polls, every });
+      await tick(env, { fetchFn, watch: true });
+      await kvPut(env, 'watch', { at: clock(), h: seen, firedH: seen, firedAt: t0, polls, every, tookMs: clock() - t0 });
+      return { fired: true, h: seen, polls };
+    }
+    if (clock() - start + every > budget) break;
+    await sleep(every);
+  }
+  await kvPut(env, 'watch', Object.assign(await kvGet(env, 'watch', {}), { at: clock(), h: seen, polls, every }));
+  return { fired: false, polls };
+}
+
 export default {
   async fetch(req, env, ctx, fetchFn) {
     const url = new URL(req.url), h = cors(env, req);
@@ -1030,6 +1059,13 @@ export default {
     }
   },
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(tick(env).catch((e) => appendLog(env, [{ t: Date.now(), kind: 'erro', text: 'ciclo falhou: ' + (e.message || e) }])));
+    // cron a cada minuto: no minuto múltiplo de 3 roda o ciclo completo (como antes); nos outros, só o vigia de bloco do Sniper.
+    const min = new Date(event.scheduledTime || Date.now()).getUTCMinutes(), fail = (w) => (e) => appendLog(env, [{ t: Date.now(), kind: 'erro', text: w + ' falhou: ' + (e.message || e) }]);
+    const full = async () => { // se o vigia ainda está rodando um ciclo disparado por bloco, espera ele terminar (não gravam juntos)
+      const w = await kvGet(env, 'watch', {}).catch(() => ({}));
+      if (w.firedAt && !w.tookMs && Date.now() - w.firedAt < 45e3) await new Promise((r) => setTimeout(r, 25e3));
+      return tick(env);
+    };
+    ctx.waitUntil(min % 3 === 0 ? full().catch(fail('ciclo')) : blockWatch(env).catch(fail('vigia de bloco')));
   }
 };

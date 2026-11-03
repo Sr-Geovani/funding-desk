@@ -7,7 +7,7 @@ import { createRequire } from 'node:module';
 import { authMessage, hmacHex, algoUnits, createClient } from '../worker/src/nicehash.js';
 import { paidTo, normAddr, createChain } from '../worker/src/chain.js';
 import { DEFAULT_CONFIG, sanitizeConfig, parseBook, computeMarket, decide, DOWN_STEP_MS } from '../worker/src/bot.js';
-import worker, { tick } from '../worker/src/index.js';
+import worker, { tick, blockWatch } from '../worker/src/index.js';
 import { createMock, MOCK_KEYS } from '../worker/dev/mock.mjs';
 import { memoryKV } from '../worker/dev/server.mjs';
 import { seal, unseal, chatFromUpdates, parseNiceHash } from '../worker/src/creds.js';
@@ -1460,5 +1460,34 @@ test('integração: Sniper avisa no Telegram o tiro e o recuo', async () => {
     { const st = (await t.call('GET', '/api/status')).body; assert.ok(sent.some((x) => /Sniper: tiro de 25 PH\/s/.test(x)), JSON.stringify({ sent, cfg: { mode: st.config.mode, sniper: st.config.sniper, managed: st.config.managed }, sn: st.state.sniper, err: st.state.errors, lbt: st.state.lastBlockT, T })); }
     await tick(env, { fetchFn, now: T + 5 * 60e3 });        // 5 min sem bloco: recuo pelo prazo
     assert.ok(sent.some((x) => /Sniper: recuo para 1 PH\/s/.test(x) && /kill switch/.test(x)), JSON.stringify(sent));
+  } finally { t.server.close(); }
+});
+
+test('integração: vigia de bloco do Sniper roda o ciclo na hora em que o bloco vira', async () => {
+  const t = await setup();
+  try {
+    await tick(t.env);
+    // Sniper desligado: o vigia não faz nada (nem consulta a rede)
+    assert.equal((await blockWatch(t.env, { budgetMs: 0 })).why, 'sniper desligado');
+    await t.call('PUT', '/api/config', { sniper: true, mode: 'active', payoutAddress: 'bitcoincash:q' + 'a'.repeat(41) });
+    let ms = 0; const clock = () => ms;
+    // sem bloco novo: confere a cada 6 s dentro de 35 s e não dispara
+    const r0 = await blockWatch(t.env, { clock, sleep: async (d) => { ms += d; } });
+    assert.equal(r0.fired, false); assert.equal(r0.polls, 6);
+    const s0 = JSON.parse(await t.env.FD_KV.get('state')), h0 = s0.lastHeight, tick0 = s0.lastTick;
+    s0.sniper = { shotStart: Date.now() - 60e3, shotBlockId: h0, usedBlockId: null, shots: 1, endsBlock: 0, endsTime: 0 }; // tiro em andamento no bloco atual
+    await t.env.FD_KV.put('state', JSON.stringify(s0));
+    // o bloco nasce entre duas conferências: o ciclo roda na conferência seguinte, sem esperar os 3 min
+    ms = 0; let n = 0;
+    const r1 = await blockWatch(t.env, { clock, sleep: async (d) => { ms += d; if (++n === 2) await fetch(t.base + '/_mine', { method: 'POST', body: JSON.stringify({ address: 'qoutro' }) }); } });
+    assert.equal(r1.fired, true); assert.equal(r1.h, h0 + 1); assert.equal(r1.polls, 3);
+    const st = JSON.parse(await t.env.FD_KV.get('state'));
+    assert.equal(st.lastHeight, h0 + 1); assert.ok(st.lastTick >= tick0);
+    assert.equal(st.sniper.endsBlock, 1, JSON.stringify(st.sniper)); // recuo pelo bloco novo já no ciclo disparado pelo vigia
+    // outra execução que vê o mesmo bloco antes de o estado gravar não repete o ciclo
+    await t.env.FD_KV.put('state', JSON.stringify(Object.assign(st, { lastHeight: h0 })));
+    const r2 = await blockWatch(t.env, { clock, sleep: async (d) => { ms += d; } });
+    assert.equal(r2.fired, false); assert.equal(r2.why, 'já disparado');
+    assert.equal((await t.call('GET', '/api/status')).body.watch.firedH, h0 + 1);
   } finally { t.server.close(); }
 });
