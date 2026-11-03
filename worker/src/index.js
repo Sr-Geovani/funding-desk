@@ -181,7 +181,22 @@ export async function tick(env, opts = {}) {
     return Object.entries(d).filter(([k]) => k >= from).reduce((a, [, x]) => a + (x.spendUsd || 0) - (x.revenueUsd || 0), 0); })();
   // horário do último bloco da rede (para o MODO_SNIPER): o mais novo entre o registro e os blocos deste ciclo
   const lastNetBlockT = Math.max(state.lastBlockT || 0, ...newBlocks.map((b) => b.time || 0)) || null;
-  const dec = decide({ cfg, mkt, orders, state, now, units, limits, blockEvent, weekLossUsd, blockT: lastNetBlockT });
+  // MODO_SNIPER: sinais de dificuldade (DAA) e de mempool.
+  // dHist: dificuldade dos últimos 12 blocos; queda = dificuldade de agora abaixo da média deles.
+  let dHist = Array.isArray(state.dHist) ? state.dHist.slice() : (await kvGet(env, 'blocks', [])).slice(-12).map((b) => b.D).filter((x) => x > 0);
+  for (const b of newBlocks) if (b.difficulty > 0) dHist.push(b.difficulty);
+  dHist = dHist.slice(-12);
+  const dNow = info.ok ? info.v.difficulty : null, dAvg = dHist.length >= 6 ? dHist.reduce((a, x) => a + x, 0) / dHist.length : null;
+  const diffDropPct = dNow && dAvg ? (1 - dNow / dAvg) * 100 : null;
+  // mpHist: tamanho da mempool a cada 15 min nas últimas 24 h; cheia = tamanho de agora dividido pela média.
+  let mpHist = Array.isArray(state.mpHist) ? state.mpHist.filter((x) => now - x[0] <= 864e5) : [];
+  const mpBytes = mpR.ok && mpR.v ? +mpR.v.bytes || 0 : null;
+  if (mpBytes !== null && (!mpHist.length || now - mpHist[mpHist.length - 1][0] >= 15 * 60e3)) mpHist.push([now, mpBytes]);
+  const mpAvg = mpHist.length >= 8 ? mpHist.reduce((a, x) => a + x[1], 0) / mpHist.length : null;
+  const feeX = mpBytes !== null && mpAvg > 0 ? mpBytes / mpAvg : null;
+  const snMetrics = { diffDropPct, feeX };
+  const snInfo = { at: now, dNow, dAvg, diffDropPct, mpBytes, mpAvg, feeX, feeBchMin: mpBytes !== null ? mpBytes * 1e-8 : null };
+  const dec = decide({ cfg, mkt, orders, state, now, units, limits, blockEvent, weekLossUsd, blockT: lastNetBlockT, snMetrics });
   if (dec.state.weekStop && !state.weekStop) await notify(env, `limite de perda semanal atingido (perda real de US$${weekLossUsd.toFixed(2).replace('.', ',')} em 7 dias; limite US$${cfg.weeklyLossUsd}). Robô encerrou as ordens e não cria novas até a perda da semana baixar.`, fetchFn);
 
   // Simulação (só no modo Observar) e resultado real (ordens gerenciadas + blocos).
@@ -261,7 +276,7 @@ export async function tick(env, opts = {}) {
   // Cenário Sniper (simulado, sempre ligado para comparar): mesma regra do robô (sniperDecide), mesmos blocos e sorteio.
   let paperSniper = state.paperSniper || null;
   if (mkt.ok) {
-    const sd = sniperDecide(paperSniper && paperSniper.sn, { now, blockT: lastNetBlockT, edge: sizeMarket(mkt, Math.min(cfg.sniperPh || 25, limits.maxLimitPh), cfg).edgeAtBidPct, cfg });
+    const sd = sniperDecide(paperSniper && paperSniper.sn, Object.assign({ now, blockT: lastNetBlockT, edge: sizeMarket(mkt, Math.min(cfg.sniperPh || 25, limits.maxLimitPh), cfg).edgeAtBidPct, cfg }, snMetrics));
     const php = sd.shot ? Math.min(cfg.sniperPh || 25, limits.maxLimitPh) : Math.max(cfg.sniperIdlePh === undefined ? 1 : cfg.sniperIdlePh, units.minLimitPH || 1);
     const ps = paperStep(paperSniper, { cfg: Object.assign({}, cfg, { targetPh: php, minPh: php, onBlock: 'continue', dailyBudgetUsd: 0 }), mkt: Object.assign({}, sizeMarket(mkt, php, cfg), { green: true }), now, units, limits, blocks: newBlocks });
     paperSniper = Object.assign(ps.paper, { sn: sd.state, shot: sd.shot, reason: sd.reason, ageMin: sd.ageMin });
@@ -599,7 +614,7 @@ export async function tick(env, opts = {}) {
     sniper: paperSniper ? { shot: paperSniper.shot, reason: paperSniper.reason } : null, fund: { passing: ((funding && funding.best) || []).length, sim: fundPaper ? fundPaperSummary(fundPaper, FD.DEFAULT_FEES) : null } });
 
   const next = Object.assign({}, dec.state, alertState, {
-    lastTick: now, verified: Object.fromEntries(Object.entries(verified).filter(([, x]) => now - x.at <= 6 * 3600e3)), ai: br.ai, aiAnalysis, plan, acct, algoMap, mempool, stable24, pairStats, msig, darr, recentBlocks, nhWeek, paper, paperBurst, paperPlan, paperAlways, paperSniper, hashMkts, fronts, frontsPaper, ltStreak, fundPaperLT, market2, aiPanorama, entryCheck, calib, robotTest, luck24, balPlan, minEdgeNow: { value: cfg.minEdgePct, relative: !!cfg.minEdgeRel, base: cfg.minEdgeRel ? cfg.minEdgeBase : cfg.minEdgePct, sniper: !!cfg.sniper }, aiReport: aiRep, mktMargin, asertF, execLog, bestScen, paperArchive, paperPriceV: 2, blockBuf, blockFlush, lastBlockT, real, fundPaper, alertScore, algoPaper, algoTs, aiScores, fundPaperAI, fhistHour, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig, errNotified,
+    lastTick: now, verified: Object.fromEntries(Object.entries(verified).filter(([, x]) => now - x.at <= 6 * 3600e3)), ai: br.ai, aiAnalysis, plan, acct, algoMap, mempool, stable24, pairStats, msig, darr, recentBlocks, nhWeek, paper, paperBurst, paperPlan, paperAlways, paperSniper, dHist, mpHist, snInfo, hashMkts, fronts, frontsPaper, ltStreak, fundPaperLT, market2, aiPanorama, entryCheck, calib, robotTest, luck24, balPlan, minEdgeNow: { value: cfg.minEdgePct, relative: !!cfg.minEdgeRel, base: cfg.minEdgeRel ? cfg.minEdgeBase : cfg.minEdgePct, sniper: !!cfg.sniper }, aiReport: aiRep, mktMargin, asertF, execLog, bestScen, paperArchive, paperPriceV: 2, blockBuf, blockFlush, lastBlockT, real, fundPaper, alertScore, algoPaper, algoTs, aiScores, fundPaperAI, fhistHour, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig, errNotified,
     market: mkt.ok ? { breakEvenEH: mkt.breakEvenEH, capEH: mkt.capEH, fillEH: mkt.fillEH, medianEH: mkt.medianEH, bidEH: mkt.bidEH,
       edgeAtBidPct: mkt.edgeAtBidPct, green: mkt.green, D: mkt.D, bookTotalPH: book ? book.totalPH : 0, bchUsd: mkt.bchUsd, btcUsd: mkt.btcUsd, costPerBlockUsd: mkt.costPerBlockUsd,
       hashpriceNet: mkt.hashpriceNet, blockNetUsd: mkt.blockNetUsd, phDaysPerBlock: mkt.phDaysPerBlock, market: mkt.market } : { ok: false, reason: mkt.reason },
@@ -710,7 +725,7 @@ async function api(req, env, url, fetchFn) {
       telegram: !!(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID), creds: credStatus(env), limits, config: cfg,
       state: { lastTick: state.lastTick, lastHeight: state.lastHeight, market: state.market, myBlocks: state.myBlocks || [], dailyUsd: state.dailyUsd || 0,
         errors: state.errors || [], edgeHist: state.edgeHist || [], alerts: (state.alerts || []).slice(-30).reverse(),
-        paper: state.paper || null, paperBurst: state.paperBurst || null, paperPlan: state.paperPlan || null, paperAlways: state.paperAlways || null, paperSniper: state.paperSniper || null, sniper: state.sniper || null, paperArchive: state.paperArchive || null, entryCheck: state.entryCheck || null, calib: state.calib || null, minEdgeNow: state.minEdgeNow || null, luck24: state.luck24 || null, balPlan: state.balPlan || null, planOn: !!state.planBackup, calibPrev: state.calibPrev || null, robotTest: state.robotTest || null, aiReport: state.aiReport || null, mktMargin: state.mktMargin || null, asertF: state.asertF || null, exec: execSummary(state.execLog), bestScen: state.bestScen || null, hashMkts: state.hashMkts || null, fronts: state.fronts || null, frontsPaper: state.frontsPaper || null, market2: state.market2 || null, aiPanorama: state.aiPanorama || null,
+        paper: state.paper || null, paperBurst: state.paperBurst || null, paperPlan: state.paperPlan || null, paperAlways: state.paperAlways || null, paperSniper: state.paperSniper || null, sniper: state.sniper || null, snInfo: state.snInfo || null, paperArchive: state.paperArchive || null, entryCheck: state.entryCheck || null, calib: state.calib || null, minEdgeNow: state.minEdgeNow || null, luck24: state.luck24 || null, balPlan: state.balPlan || null, planOn: !!state.planBackup, calibPrev: state.calibPrev || null, robotTest: state.robotTest || null, aiReport: state.aiReport || null, mktMargin: state.mktMargin || null, asertF: state.asertF || null, exec: execSummary(state.execLog), bestScen: state.bestScen || null, hashMkts: state.hashMkts || null, fronts: state.fronts || null, frontsPaper: state.frontsPaper || null, market2: state.market2 || null, aiPanorama: state.aiPanorama || null,
         fundPaperLT: state.fundPaperLT ? { summary: fundPaperSummary(state.fundPaperLT, LT_FEES), open: state.fundPaperLT.open, closed: state.fundPaperLT.closed.slice(-50).reverse() } : null, opLog: (state.opLog || []).slice(-20).reverse(), real: state.real ? Object.assign({}, state.real, { paid: undefined }) : null,
         fundPaper: state.fundPaper ? { summary: fundPaperSummary(state.fundPaper, FD.DEFAULT_FEES), open: state.fundPaper.open, closed: state.fundPaper.closed.slice(-100).reverse() } : null,
         algoPaper: state.algoPaper || null,

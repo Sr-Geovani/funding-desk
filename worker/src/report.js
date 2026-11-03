@@ -78,8 +78,8 @@ export function aiReport({ now, mkt, cfg, asert, mm, ai, mom, ret, win, darr, po
   if (cfg.sniper && sniper) {
     act.length = 0;
     act.push(`Modo Sniper ligado${cfg.mode === 'active' ? ' (robô em Ativo)' : ' (robô em Observar: só simula)'}: ${sniper.shot ? `tiro em andamento a ${cfg.sniperPh || 25} PH/s` : `espera a ${cfg.sniperIdlePh === undefined ? 1 : cfg.sniperIdlePh} PH/s`}. ${sniper.reason || ''}.`);
-    act.push(`Regra: tiro quando o último bloco passar de ${cfg.sniperAgeMin || 20} min e a margem estiver em ${f(cfg.sniperMinEdge === undefined ? -7 : cfg.sniperMinEdge, 1)}% ou mais; recuo no bloco novo ou depois de ${cfg.sniperShotMin || 4} min. A regra por margem fica de lado enquanto o Sniper estiver ligado.`);
-    act.push('Leitura honesta: o sorteio dos blocos não tem memória. Um bloco atrasado tem a mesma chance de sair no próximo minuto que qualquer outro; o Sniper muda quando se gasta, não a chance por dólar. O cenário "Sniper" na tabela de cenários mede isso com os blocos reais.');
+    act.push(`Regra: tiro quando a dificuldade ficar ${f(cfg.sniperDiffDropPct || 10, 1)}% abaixo da média dos últimos 12 blocos ou a mempool chegar a ${f(cfg.sniperFeeX || 3, 1)} vezes a média do dia${cfg.sniperUseAge ? ` ou o último bloco passar de ${cfg.sniperAgeMin || 20} min` : ''}, com margem do tiro em ${f(cfg.sniperMinEdge === undefined ? -7 : cfg.sniperMinEdge, 1)}% ou mais; recuo no bloco novo ou depois de ${cfg.sniperShotMin || 4} min. A regra por margem fica de lado enquanto o Sniper estiver ligado.`);
+    act.push('Leitura honesta: no BCH (ASERT) a dificuldade muda menos de 0,5% por bloco; cair 10% abaixo da média de 12 blocos exige horas sem bloco e não aconteceu nos últimos 300 blocos (a maior queda foi 1,2%). As taxas da mempool valem em média 0,05% do bloco: mesmo 3 vezes a média somam menos de 1%. A dificuldade e as taxas já entram na margem; o cenário "Sniper" mede o resultado com os blocos reais.');
   }
   add('fazer', 'O que fazer agora', act);
   add('ajustes', 'Ajustes sugeridos (a decisão é sua)', adj.length ? adj : ['Sua configuração está coerente com o mercado de agora: nenhum ajuste necessário.']);

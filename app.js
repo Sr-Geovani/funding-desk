@@ -704,7 +704,7 @@ function freshen(){
   if(settings.apiUrl&&!$('tab-mine').hidden&&!$('mine-net').hidden&&now-blk.at>120000)loadBlocksLog();
 }
 var MODE_TXT={off:'Desligado',observe:'Observando',active:'Ativo'},MODE_CHIP={off:'',observe:'warn',active:'ok'};
-var BOT_FIELDS=['mode','onBlock','payoutAddress','minEdgePct','minEdgeMode','relPct','relFloorPct','sniperAgeMin','sniperMinEdge','sniperPh','sniperIdlePh','sniperShotMin','bidPremiumPct','targetPh','minPh','sessionBudgetUsd','stopCooldownH','dailyBudgetUsd','weeklyLossUsd','poolFeePct','rentFeePct','poolId','orderAmountBtc'];
+var BOT_FIELDS=['mode','onBlock','payoutAddress','minEdgePct','minEdgeMode','relPct','relFloorPct','sniperDiffDropPct','sniperFeeX','sniperAgeMin','sniperMinEdge','sniperPh','sniperIdlePh','sniperShotMin','bidPremiumPct','targetPh','minPh','sessionBudgetUsd','stopCooldownH','dailyBudgetUsd','weeklyLossUsd','poolFeePct','rentFeePct','poolId','orderAmountBtc'];
 // Margem em linguagem simples: retorno médio (não é chance) e a chance de achar bloco com a potência alvo em 24 h.
 function robotExplain(m,cfg){
   var ph=+cfg.targetPh||0,pd=m.phDaysPerBlock||(m.D?m.D*4294967296/1e15/86400:0),blk=m.blockNetUsd||(m.bchUsd?3.125*m.bchUsd*(1-(cfg.poolFeePct||2)/100):0);
@@ -1067,7 +1067,7 @@ function renderEntry(){
   var stale=(C0.minEdgeMode==='relativo')!==!!MN.relative||(C0.minEdgeMode!=='relativo'&&MN.value!==undefined&&MN.value!==C0.minEdgePct);
   var SNc=ops.status.config||{},SNs=ops.status.state.sniper||{},PS=ops.status.state.paperSniper||{},lbt=ops.status.state.lastBlockT,sAge=lbt?(Date.now()-lbt)/60e3:null;
   var snHTML=SNc.sniper?'<div class="box" style="margin:0 0 8px"><b>Modo Sniper '+(SNc.mode==='active'?'ligado (robô em Ativo)':'ligado (robô em Observar: só simula)')+'</b>'+
-    '<div class="kv" style="margin-top:4px"><div><small>Último bloco há</small><span class="'+(sAge!==null&&sAge>(SNc.sniperAgeMin||20)?'warn':'')+'">'+(sAge!==null?nf(sAge,0)+' min':'—')+'</span></div><div><small>Gatilho</small><span>'+nf(SNc.sniperAgeMin||20,0)+' min · margem a partir de '+pct(SNc.sniperMinEdge===undefined?-7:SNc.sniperMinEdge,1)+'</span></div><div><small>Agora</small><span>'+((SNs.shotStart||PS.shot)?'<b class="warn">tiro: '+nf(SNc.sniperPh||25,0)+' PH/s</b>':'espera: '+nf(SNc.sniperIdlePh===undefined?1:SNc.sniperIdlePh,0)+' PH/s')+'</span></div></div>'+
+    (function(){var I=ops.status.state.snInfo||{},bch=(ops.status.state.market||{}).bchUsd||0;return '<div class="kv" style="margin-top:4px"><div><small>Dificuldade × média de 12 blocos</small><span class="'+(I.diffDropPct!==null&&I.diffDropPct>=(SNc.sniperDiffDropPct||10)?'warn':'')+'">'+(I.diffDropPct!==null&&I.diffDropPct!==undefined?(I.diffDropPct>=0?nf(I.diffDropPct,2)+'% abaixo':nf(-I.diffDropPct,2)+'% acima'):'—')+'</span><div class="note">gatilho: '+nf(SNc.sniperDiffDropPct||10,1)+'% abaixo</div></div><div><small>Mempool × média do dia</small><span class="'+(I.feeX>=(SNc.sniperFeeX||3)?'warn':'')+'">'+(I.feeX?nf(I.feeX,1)+' vezes':'—')+'</span><div class="note">gatilho: '+nf(SNc.sniperFeeX||3,1)+' vezes · '+(I.mpBytes!==null&&I.mpBytes!==undefined?nf(I.mpBytes/1000,1)+' KB, taxas de ~'+usd((I.feeBchMin||0)*bch,2):'—')+'</div></div></div>'})()+'<div class="kv" style="margin-top:4px"><div><small>Último bloco há</small><span class="'+(sAge!==null&&sAge>(SNc.sniperAgeMin||20)?'warn':'')+'">'+(sAge!==null?nf(sAge,0)+' min':'—')+'</span></div><div><small>Gatilho</small><span>'+nf(SNc.sniperAgeMin||20,0)+' min · margem a partir de '+pct(SNc.sniperMinEdge===undefined?-7:SNc.sniperMinEdge,1)+'</span></div><div><small>Agora</small><span>'+((SNs.shotStart||PS.shot)?'<b class="warn">tiro: '+nf(SNc.sniperPh||25,0)+' PH/s</b>':'espera: '+nf(SNc.sniperIdlePh===undefined?1:SNc.sniperIdlePh,0)+' PH/s')+'</span></div></div>'+
     '<div class="note" style="margin-top:4px">'+esc(PS.reason||'')+'. Tiros: '+((SNs.shots||(PS.sn&&PS.sn.shots))||0)+' (encerrados por bloco '+((SNs.endsBlock||(PS.sn&&PS.sn.endsBlock))||0)+', por prazo '+((SNs.endsTime||(PS.sn&&PS.sn.endsTime))||0)+'). A cartilha abaixo continua mostrando a leitura por margem, que fica de lado enquanto o Sniper estiver ligado.</div></div>':'';
   el.innerHTML=snHTML+(stale?'<div class="box" style="margin:0 0 8px"><b class="warn">Configuração alterada</b>A cartilha e o copiloto são recalculados pelo servidor a cada 3 min: os textos abaixo ainda usam a regra anterior e se atualizam no próximo ciclo.</div>':'')+(rtOn?'<div class="box" style="margin:0 0 8px"><b class="warn">Teste do robô em andamento</b>A margem mínima está temporariamente em −5% para o teste; por isso o veredito pode dizer "Entrar" com margem negativa. Ele volta à sua regra quando o teste terminar.</div>':'')+'<div class="row between"><div class="eyebrow">Cartilha de entrada · '+E.okCount+' de '+E.scored+' a favor</div><span class="chip '+V[0]+'">'+V[1]+'</span></div>'+
     '<div class="lead">'+esc(E.title)+'</div><p class="why" style="margin:0 0 8px">'+esc(E.text)+'</p>'+
@@ -1483,7 +1483,7 @@ function renderOps(){
   relCalcUI();
   (function(){var el=$('b_rules');if(!el){var anchor=$('b_minEdgePct');if(!anchor)return;var box=anchor.closest('.grid2')||anchor.parentNode;el=document.createElement('div');el.id='b_rules';el.className='box';el.style.margin='0 0 10px';box.parentNode.insertBefore(el,box)}
     var S=st.state||{},on=function(x){return x?'<span class="chip ok">ligada</span>':'<span class="chip">desligada</span>'},sn=!!cfg.sniper,rel=cfg.minEdgeMode==='relativo';
-    var entry=sn?'Sniper (bloco há mais de '+nf(cfg.sniperAgeMin||20,0)+' min e margem do tiro a partir de '+pct(cfg.sniperMinEdge===undefined?-7:cfg.sniperMinEdge,1)+')':rel?'Relativa (os '+(100-(cfg.relPct||75))+'% melhores momentos das 24 h; hoje '+pct((S.minEdgeNow||{}).value,1)+')':'Fixa (margem a partir de '+pct(cfg.minEdgePct,1)+')';
+    var entry=sn?'Sniper (dificuldade '+nf(cfg.sniperDiffDropPct||10,1)+'% abaixo da média de 12 blocos ou mempool '+nf(cfg.sniperFeeX||3,1)+' vezes a média do dia'+(cfg.sniperUseAge?' ou bloco há mais de '+nf(cfg.sniperAgeMin||20,0)+' min':'')+', com margem do tiro a partir de '+pct(cfg.sniperMinEdge===undefined?-7:cfg.sniperMinEdge,1)+')':rel?'Relativa (os '+(100-(cfg.relPct||75))+'% melhores momentos das 24 h; hoje '+pct((S.minEdgeNow||{}).value,1)+')':'Fixa (margem a partir de '+pct(cfg.minEdgePct,1)+')';
     el.innerHTML='<b>Regras em vigor agora ('+(cfg.mode==='active'?'Ativo: operando':cfg.mode==='observe'?'Observar: só simula':'desligado')+')</b>'+
       '<ol class="note" style="margin:6px 0 0;padding-left:18px">'+
       '<li><b>Perda máxima em 7 dias</b> US$'+nf(cfg.weeklyLossUsd||0,0)+': passou, encerra tudo. Vale sobre todas.</li>'+
@@ -1496,7 +1496,7 @@ function renderOps(){
   (function(){var f=$('b_minEdgePct');if(!f)return;var rel=(($('b_minEdgeMode')||{}).value||cfg.minEdgeMode)==='relativo',lab=f.parentNode;
     f.style.opacity=rel?'.5':'';var n=$('b_minNote');if(!n){n=document.createElement('small');n.id='b_minNote';n.className='note';n.style.display='block';lab.appendChild(n)}
     n.textContent=rel?'Guardada: não vale com a regra relativa ligada; volta a valer se escolher "Fixa".':''})();
-  $('b_autoCreate').checked=!!cfg.autoCreate;if($('b_sniper'))$('b_sniper').checked=!!cfg.sniper;
+  $('b_autoCreate').checked=!!cfg.autoCreate;if($('b_sniper'))$('b_sniper').checked=!!cfg.sniper;if($('b_sniperUseAge'))$('b_sniperUseAge').checked=!!cfg.sniperUseAge;
   if(cfg.poolId)$('n_pool').value=cfg.poolId;
   if(m.bidEH&&!$('n_price').value)$('n_price').value=m.bidEH.toFixed(4);
   if(!$('pl_user').value&&cfg.payoutAddress)$('pl_user').value=cfg.payoutAddress;
@@ -1508,7 +1508,7 @@ function renderOps(){
 }
 function opsMsg(id,t,bad){$(id).textContent=t;$(id).className='note'+(bad?' bad':'')}
 function botForm(){
-  var o={autoCreate:$('b_autoCreate').checked,sniper:!!($('b_sniper')&&$('b_sniper').checked)};
+  var o={autoCreate:$('b_autoCreate').checked,sniper:!!($('b_sniper')&&$('b_sniper').checked),sniperUseAge:!!($('b_sniperUseAge')&&$('b_sniperUseAge').checked)};
   BOT_FIELDS.forEach(function(k){var v=$('b_'+k).value;o[k]=['mode','onBlock','payoutAddress','poolId','minEdgeMode'].indexOf(k)>=0?v:parseFloat(v)});
   return o;
 }
