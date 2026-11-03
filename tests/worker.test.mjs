@@ -1437,6 +1437,13 @@ test('MODO_SNIPER: um tiro por ID de bloco, kill switch de 7 min, trava zera na 
   const ord = order({ priceEH: 0.42, limitPH: 1 }), m = mk({ green: false, bidEH: 0.42, capEH: 0.40, edgeAtBidPct: -6.6 });
   const on = decide({ cfg: cfgOf({ sniper: true }), mkt: m, orders: [ord], now: T, units, limits: lim, blockT: tX, blockId: X, snMetrics: { diffDropPct: 1.1 } });
   assert.equal(on.actions[0].limitPH, 25); assert.match(on.actions[0].reason, /sniper/);
+  // caso real de 03/11: ordem de espera abaixo do mercado (0,3969). No tiro o preço precisa subir junto, senão o hash não vem
+  const low = order({ priceEH: 0.3969, limitPH: 1 });
+  const up = decide({ cfg: cfgOf({ sniper: true }), mkt: m, orders: [low], now: T, units, limits: lim, blockT: tX, blockId: X, snMetrics: { diffDropPct: 1.1 } });
+  assert.equal(up.actions[0].limitPH, 25); assert.ok(up.actions[0].priceEH >= m.bidEH, 'tiro com preço de mercado: ' + up.actions[0].priceEH);
+  // na espera o preço não sobe (não paga 1 PH/s a preço de mercado entre os tiros)
+  const idle = decide({ cfg: cfgOf({ sniper: true }), mkt: m, orders: [low], now: T, units, limits: lim, blockT: T - 2 * M, blockId: X, snMetrics: { diffDropPct: 0 } });
+  assert.ok(!idle.actions.some((x) => x.priceEH > 0.3969), JSON.stringify(idle.actions));
   const off = decide({ cfg: cfgOf({ sniper: false }), mkt: m, orders: [ord], now: T, units, limits: lim, blockT: tX, blockId: X, snMetrics: { diffDropPct: 2 } });
   assert.ok(!off.actions.some((x) => x.limitPH === 25), 'sem a flag, nada muda');
   const c = decide({ cfg: cfgOf({ sniper: true, autoCreate: true, poolId: 'p', managed: [] }), mkt: m, orders: [], now: T, units, limits: lim, blockT: T - 5 * M, blockId: X, snMetrics: {} });
