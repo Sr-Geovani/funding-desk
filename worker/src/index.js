@@ -160,6 +160,13 @@ export async function tick(env, opts = {}) {
     }
   }
 
+  // Calibração do Sniper v3 (03/11): aplica uma vez os parâmetros pedidos à configuração salva (o usuário pode mudar depois).
+  if (cfg.sniperCalV !== 3) {
+    Object.assign(cfg, { sniperDiffDropPct: 1, sniperUseAge: true, sniperAgeMin: 15, sniperFeeX: 100, sniperMinEdge: -7, sniperShotMin: 7, sniperCalV: 3 });
+    const saved = await kvGet(env, 'config', {});
+    await kvPut(env, 'config', Object.assign(saved, { sniperDiffDropPct: 1, sniperUseAge: true, sniperAgeMin: 15, sniperFeeX: 100, sniperMinEdge: -7, sniperShotMin: 7, sniperCalV: 3 }));
+    log.push({ t: now, kind: 'config', text: 'Sniper recalibrado: dificuldade 1% abaixo da média de 12 blocos, atraso de 15 min, mempool 100 (desligada), trava de margem −7%, prazo do tiro 7 min, um tiro por bloco' });
+  }
   // Regra relativa de entrada (opcional): troca a margem mínima pela dos melhores momentos das últimas 24 h, com piso.
   if (cfg.minEdgeMode === 'relativo') {
     const r = relativeMinEdge(state.edgeHist, { now, fixAt: state.paperArchive && state.paperArchive.at, pct: cfg.relPct || 75, floor: cfg.relFloorPct === undefined ? -2 : cfg.relFloorPct });
@@ -181,6 +188,7 @@ export async function tick(env, opts = {}) {
     return Object.entries(d).filter(([k]) => k >= from).reduce((a, [, x]) => a + (x.spendUsd || 0) - (x.revenueUsd || 0), 0); })();
   // horário do último bloco da rede (para o MODO_SNIPER): o mais novo entre o registro e os blocos deste ciclo
   const lastNetBlockT = Math.max(state.lastBlockT || 0, ...newBlocks.map((b) => b.time || 0)) || null;
+  const lastNetHeight = Math.max(state.lastHeight || 0, ...newBlocks.map((b) => b.height || 0)) || null; // ID do último bloco (altura)
   // MODO_SNIPER: sinais de dificuldade (DAA) e de mempool.
   // dHist: dificuldade dos últimos 12 blocos; queda = dificuldade de agora abaixo da média deles.
   let dHist = Array.isArray(state.dHist) ? state.dHist.slice() : (await kvGet(env, 'blocks', [])).slice(-12).map((b) => b.D).filter((x) => x > 0);
@@ -196,7 +204,7 @@ export async function tick(env, opts = {}) {
   const feeX = mpBytes !== null && mpAvg > 0 ? mpBytes / mpAvg : null;
   const snMetrics = { diffDropPct, feeX };
   const snInfo = { at: now, dNow, dAvg, diffDropPct, mpBytes, mpAvg, feeX, feeBchMin: mpBytes !== null ? mpBytes * 1e-8 : null };
-  const dec = decide({ cfg, mkt, orders, state, now, units, limits, blockEvent, weekLossUsd, blockT: lastNetBlockT, snMetrics });
+  const dec = decide({ cfg, mkt, orders, state, now, units, limits, blockEvent, weekLossUsd, blockT: lastNetBlockT, blockId: lastNetHeight, snMetrics });
   if (dec.state.weekStop && !state.weekStop) await notify(env, `limite de perda semanal atingido (perda real de US$${weekLossUsd.toFixed(2).replace('.', ',')} em 7 dias; limite US$${cfg.weeklyLossUsd}). Robô encerrou as ordens e não cria novas até a perda da semana baixar.`, fetchFn);
 
   // Simulação (só no modo Observar) e resultado real (ordens gerenciadas + blocos).
@@ -276,7 +284,7 @@ export async function tick(env, opts = {}) {
   // Cenário Sniper (simulado, sempre ligado para comparar): mesma regra do robô (sniperDecide), mesmos blocos e sorteio.
   let paperSniper = state.paperSniper || null;
   if (mkt.ok) {
-    const sd = sniperDecide(paperSniper && paperSniper.sn, Object.assign({ now, blockT: lastNetBlockT, edge: sizeMarket(mkt, Math.min(cfg.sniperPh || 25, limits.maxLimitPh), cfg).edgeAtBidPct, cfg }, snMetrics));
+    const sd = sniperDecide(paperSniper && paperSniper.sn, Object.assign({ now, blockT: lastNetBlockT, blockId: lastNetHeight, edge: sizeMarket(mkt, Math.min(cfg.sniperPh || 25, limits.maxLimitPh), cfg).edgeAtBidPct, cfg }, snMetrics));
     const php = sd.shot ? Math.min(cfg.sniperPh || 25, limits.maxLimitPh) : Math.max(cfg.sniperIdlePh === undefined ? 1 : cfg.sniperIdlePh, units.minLimitPH || 1);
     const ps = paperStep(paperSniper, { cfg: Object.assign({}, cfg, { targetPh: php, minPh: php, onBlock: 'continue', dailyBudgetUsd: 0 }), mkt: Object.assign({}, sizeMarket(mkt, php, cfg), { green: true }), now, units, limits, blocks: newBlocks });
     paperSniper = Object.assign(ps.paper, { sn: sd.state, shot: sd.shot, reason: sd.reason, ageMin: sd.ageMin });
@@ -731,8 +739,8 @@ async function api(req, env, url, fetchFn) {
 
   if (p === '/readtoken' && m === 'GET') return json({ token: await readToken(env) });
   if (p === '/status' && m === 'GET') {
-    const [cfg, state] = await Promise.all([getConfig(env), kvGet(env, 'state', {})]);
-    return json({ version: VERSION, algo: nh.algorithm, nhEnv: env.NH_BASE ? 'personalizado' : (env.NH_ENV === 'prod' ? 'produção' : 'teste'), keys: hasKeys(env),
+    const [cfg, state, watch] = await Promise.all([getConfig(env), kvGet(env, 'state', {}), kvGet(env, 'watch', null)]);
+    return json({ watch, version: VERSION, algo: nh.algorithm, nhEnv: env.NH_BASE ? 'personalizado' : (env.NH_ENV === 'prod' ? 'produção' : 'teste'), keys: hasKeys(env),
       telegram: !!(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID), creds: credStatus(env), limits, config: cfg,
       state: { lastTick: state.lastTick, lastHeight: state.lastHeight, market: state.market, myBlocks: state.myBlocks || [], dailyUsd: state.dailyUsd || 0,
         errors: state.errors || [], edgeHist: state.edgeHist || [], alerts: (state.alerts || []).slice(-30).reverse(),
@@ -988,6 +996,35 @@ async function api(req, env, url, fetchFn) {
   return json({ error: 'rota não encontrada' }, 404);
 }
 
+// Vigia de bloco do MODO_SNIPER: o ciclo completo continua a cada 3 min; nos minutos entre eles, com o Sniper ligado,
+// o servidor confere só a altura da rede a cada poucos segundos. Quando nasce um bloco novo, roda o ciclo na hora
+// (mesma decisão do ciclo normal: recuo do tiro, trava zerada e novo tiro se o gatilho de 1% já valer).
+export async function blockWatch(env, opts = {}) {
+  const fetchFn = opts.fetchFn || fetch, clock = opts.clock || Date.now, sleep = opts.sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
+  const budget = opts.budgetMs === undefined ? 35e3 : opts.budgetMs, every = opts.everyMs || 6e3, start = clock();
+  const cfg = await getConfig(env);
+  if (!cfg.sniper || !env.FD_KV) return { fired: false, why: 'sniper desligado' };
+  const chain = chainClient(env, fetchFn), state = await kvGet(env, 'state', {}), known = state.lastHeight || 0;
+  let polls = 0, seen = known;
+  while (clock() - start <= budget) {
+    const r = await settle(chain.info()); polls++;
+    if (r.ok && r.v.height > known) {
+      seen = r.v.height;
+      const lock = await kvGet(env, 'watch', {}); // outra execução já disparou este bloco: não repete
+      if (lock.firedH >= seen && clock() - (lock.firedAt || 0) < 150e3) return { fired: false, why: 'já disparado', h: seen };
+      const t0 = clock();
+      await kvPut(env, 'watch', { at: t0, h: seen, firedH: seen, firedAt: t0, polls, every });
+      await tick(env, { fetchFn, watch: true });
+      await kvPut(env, 'watch', { at: clock(), h: seen, firedH: seen, firedAt: t0, polls, every, tookMs: clock() - t0 });
+      return { fired: true, h: seen, polls };
+    }
+    if (clock() - start + every > budget) break;
+    await sleep(every);
+  }
+  await kvPut(env, 'watch', Object.assign(await kvGet(env, 'watch', {}), { at: clock(), h: seen, polls, every }));
+  return { fired: false, polls };
+}
+
 export default {
   async fetch(req, env, ctx, fetchFn) {
     const url = new URL(req.url), h = cors(env, req);
@@ -1022,6 +1059,13 @@ export default {
     }
   },
   async scheduled(event, env, ctx) {
-    ctx.waitUntil(tick(env).catch((e) => appendLog(env, [{ t: Date.now(), kind: 'erro', text: 'ciclo falhou: ' + (e.message || e) }])));
+    // cron a cada minuto: no minuto múltiplo de 3 roda o ciclo completo (como antes); nos outros, só o vigia de bloco do Sniper.
+    const min = new Date(event.scheduledTime || Date.now()).getUTCMinutes(), fail = (w) => (e) => appendLog(env, [{ t: Date.now(), kind: 'erro', text: w + ' falhou: ' + (e.message || e) }]);
+    const full = async () => { // se o vigia ainda está rodando um ciclo disparado por bloco, espera ele terminar (não gravam juntos)
+      const w = await kvGet(env, 'watch', {}).catch(() => ({}));
+      if (w.firedAt && !w.tookMs && Date.now() - w.firedAt < 45e3) await new Promise((r) => setTimeout(r, 25e3));
+      return tick(env);
+    };
+    ctx.waitUntil(min % 3 === 0 ? full().catch(fail('ciclo')) : blockWatch(env).catch(fail('vigia de bloco')));
   }
 };
