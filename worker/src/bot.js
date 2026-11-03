@@ -69,7 +69,7 @@ export function sanitizeConfig(input = {}, prev = DEFAULT_CONFIG, limits = limit
   if (input.poolId !== undefined) c.poolId = String(input.poolId).slice(0, 64);
   if (input.sniper !== undefined) c.sniper = !!input.sniper;
   if (input.sniperUseAge !== undefined) c.sniperUseAge = !!input.sniperUseAge;
-  num('sniperDiffDropPct', 0.1, 50); num('sniperFeeX', 1.1, 100);
+  num('sniperDiffDropPct', 0.1, 50); num('sniperFeeX', 1, 100);
   num('sniperAgeMin', 5, 120); num('sniperMinEdge', -20, 20); num('sniperPh', 1, limits.maxLimitPh); num('sniperIdlePh', 0, limits.maxLimitPh); num('sniperShotMin', 1, 60);
   if (input.minEdgeMode !== undefined) { if (['fixo', 'relativo'].includes(input.minEdgeMode)) c.minEdgeMode = input.minEdgeMode; else errors.push('minEdgeMode inválido'); }
   num('relPct', 50, 95); num('relFloorPct', -10, 20);

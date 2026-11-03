@@ -2379,7 +2379,14 @@ BOT_FIELDS.forEach(function(k){$('b_'+k).addEventListener('input',function(){ops
 $('b_save').addEventListener('click',function(){
   var f=botForm();
   if(f.mode==='active'&&ops.status&&ops.status.config.mode!=='active'&&!confirm('Ativar o robô? Ele vai alterar e cancelar as ordens marcadas como "robô gerencia" na NiceHash ('+(ops.status?ops.status.nhEnv:'')+').'))return;
-  apiCall('PUT','/config',f).then(function(){ops.dirty=false;opsMsg('b_msg','Robô salvo.');loadOps()},function(e){opsMsg('b_msg','Erro: '+e.message,true)});
+  // confere no painel antes de enviar e traduz qualquer erro do servidor para o nome do campo e a faixa aceita
+  var NAMES={minEdgePct:['Margem mínima',-50,100],relFloorPct:['Piso da regra relativa',-10,20],bidPremiumPct:['Lance acima do menor',0,50],targetPh:['Potência alvo',0,null],minPh:['Potência de pausa',0,null],
+    sessionBudgetUsd:['Stop-loss por tentativa',0,null],stopCooldownH:['Espera após stop-loss',0,72],dailyBudgetUsd:['Limite diário',0,null],weeklyLossUsd:['Perda máxima em 7 dias',0,null],poolFeePct:['Taxa do pool',0,20],rentFeePct:['Taxa do aluguel',0,20],
+    sniperDiffDropPct:['Gatilho da dificuldade',0.1,50],sniperFeeX:['Gatilho da mempool',1,100],sniperAgeMin:['Atraso do bloco',5,120],sniperMinEdge:['Margem mínima do tiro',-20,20],sniperPh:['Potência do tiro',1,null],sniperIdlePh:['Potência de espera',0,null],sniperShotMin:['Prazo do tiro',1,60]};
+  var bad=Object.keys(NAMES).filter(function(k){var v=f[k],L=NAMES[k];return v!==undefined&&(!isFinite(v)||v<L[1]||(L[2]!==null&&v>L[2]))});
+  if(bad.length){opsMsg('b_msg',bad.map(function(k){var L=NAMES[k];return L[0]+': use um valor '+(L[2]===null?'a partir de '+String(L[1]).replace('.',','):'entre '+String(L[1]).replace('.',',')+' e '+String(L[2]).replace('.',','))}).join('; ')+'.',true);return}
+  var friendly=function(m){return String(m).replace(/([a-zA-Z]+) fora de (-?[\d.]+)\.\.(-?[\d.]+)/g,function(_,k,a,b){var L=NAMES[k];return (L?L[0]:k)+': use um valor entre '+a.replace('.',',')+' e '+b.replace('.',',')})};
+  apiCall('PUT','/config',f).then(function(){ops.dirty=false;opsMsg('b_msg','Robô salvo.');loadOps()},function(e){opsMsg('b_msg','Não salvou: '+friendly(e.message),true)});
 });
 $('b_tick').addEventListener('click',function(){
   opsMsg('b_msg','Rodando ciclo…');
