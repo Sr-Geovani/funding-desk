@@ -177,7 +177,7 @@ export function sniperDecide(prev, { now, blockT, edge, cfg, diffDropPct = null,
     // depois de um recuo, o próximo tiro só no ciclo seguinte
     if (which.length && okEdge && !used && !reason) { s.shotStart = now; s.shotBlockT = blockT; s.shots++; reason = `sniper: ${which.join(' e ')}; margem do tiro ${f1(edge)}% (limite ${f1(minE)}%): tiro`; }
     else if (!reason) reason = which.length && used ? 'sniper: já atirou neste bloco; espera o próximo bloco' : which.length && !okEdge ? `sniper: gatilho ativo (${which.join(' e ')}), mas margem ${isFinite(edge) ? f1(edge) : '—'}% abaixo do limite ${f1(minE)}%; em espera` :
-      `sniper: em espera (dificuldade ${diffDropPct === null || !isFinite(diffDropPct) ? '—' : f1(diffDropPct) + '%'} abaixo da média, gatilho ${f1(dLim)}%; mempool ${feeX === null || !isFinite(feeX) ? '—' : f1(feeX) + ' vezes'} a média, gatilho ${f1(fLim)}${cfg.sniperUseAge ? `; último bloco há ${age === null ? '—' : Math.round(age)} min, gatilho ${ageMin}` : ''})`;
+      `sniper: em espera (dificuldade ${diffDropPct === null || !isFinite(diffDropPct) ? 'sem dado' : diffDropPct >= 0 ? f1(diffDropPct) + '% abaixo' : f1(-diffDropPct) + '% acima'} da média de 12 blocos, gatilho ${f1(dLim)}% abaixo; mempool ${feeX === null || !isFinite(feeX) ? 'juntando 2 h de leituras' : f1(feeX) + ' vezes a média'}, gatilho ${f1(fLim)} vezes${cfg.sniperUseAge ? `; último bloco há ${age === null ? '—' : Math.round(age)} min, gatilho ${ageMin}` : ''})`;
   }
   return { shot: !!s.shotStart, state: s, reason, ageMin: age, diffDropPct, feeX };
 }
