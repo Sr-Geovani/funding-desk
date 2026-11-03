@@ -1441,6 +1441,9 @@ test('MODO_SNIPER: um tiro por ID de bloco, kill switch de 7 min, trava zera na 
   const low = order({ priceEH: 0.3969, limitPH: 1 });
   const up = decide({ cfg: cfgOf({ sniper: true }), mkt: m, orders: [low], now: T, units, limits: lim, blockT: tX, blockId: X, snMetrics: { diffDropPct: 1.1 } });
   assert.equal(up.actions[0].limitPH, 25); assert.ok(up.actions[0].priceEH >= m.bidEH, 'tiro com preço de mercado: ' + up.actions[0].priceEH);
+  // caso real de 03/11 13:36: no meio do tiro o lance do mercado caiu um pouco abaixo do preço da ordem; a potência não pode cair
+  const mid = decide({ cfg: cfgOf({ sniper: true }), mkt: m, orders: [order({ priceEH: 0.4275, limitPH: 25 })], now: T + 2 * M, units, limits: lim, state: { sniper: up.state.sniper, lastPriceChange: { [low.id]: T } }, blockT: tX, blockId: X, snMetrics: { diffDropPct: 1.1 } });
+  assert.ok(!mid.actions.some((x) => x.limitPH < 25), JSON.stringify(mid.actions));
   // na espera o preço não sobe (não paga 1 PH/s a preço de mercado entre os tiros)
   const idle = decide({ cfg: cfgOf({ sniper: true }), mkt: m, orders: [low], now: T, units, limits: lim, blockT: T - 2 * M, blockId: X, snMetrics: { diffDropPct: 0 } });
   assert.ok(!idle.actions.some((x) => x.priceEH > 0.3969), JSON.stringify(idle.actions));

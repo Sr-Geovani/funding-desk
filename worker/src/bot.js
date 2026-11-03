@@ -279,7 +279,8 @@ export function decide({ cfg, mkt, orders, state = {}, now, units, limits = limi
       const last = Math.max(st.lastDecrease[o.id] || 0, st.lastPriceChange[o.id] || 0, o.createdTs || 0);
       if (now - last >= DOWN_STEP_MS + 30e3) { price = Math.max(want, r4(o.priceEH - units.priceDownStepEH)); st.lastDecrease[o.id] = now; }
       else price = o.priceEH;
-      if (price > mkt.capEH + 1e-9) { limit = minPh; reason += '; baixando o preço aos poucos (regra da NiceHash)'; }
+      // no tiro do Sniper o preço fica acima do teto de propósito (a trava é a margem do tiro): não corta a potência
+      if (price > mkt.capEH + 1e-9 && !(SN && SN.shot)) { limit = minPh; reason += '; baixando o preço aos poucos (regra da NiceHash)'; }
     }
     if (Math.abs(price - o.priceEH) >= 0.00005 || Math.abs(limit - o.limitPH) >= 0.001) {
       if (Math.abs(price - o.priceEH) >= 0.00005) st.lastPriceChange[o.id] = now;
