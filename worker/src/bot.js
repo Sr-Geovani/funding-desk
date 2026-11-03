@@ -271,7 +271,7 @@ export function decide({ cfg, mkt, orders, state = {}, now, units, limits = limi
     if (dailyHit && mkt.green) reason = 'limite diário: pausa';
     if (SN) { // MODO_SNIPER: substitui só a regra de entrada; travas (stop-loss, limites, bloco) continuam iguais
       limit = SN.shot && !dailyHit ? Math.min(cfg.sniperPh || 25, limits.maxLimitPh) : Math.max(minPh, cfg.sniperIdlePh === undefined ? 1 : cfg.sniperIdlePh);
-      want = mktShot.bidEH; reason = SN.reason + (dailyHit ? '; limite diário: espera' : '');
+      if (SN.shot) { want = mktShot.bidEH; price = want; } reason = SN.reason + (dailyHit ? '; limite diário: espera' : ''); // no tiro o preço sobe na hora para o lance da potência do tiro (antes ficava o da regra de margem, abaixo do mercado, e o hash não vinha); na espera segue a regra de margem e desce aos poucos, sem pagar 1 PH/s a preço de mercado o dia todo
     }
     if (want < o.priceEH - 1e-9) {
       // A NiceHash só aceita baixar o preço 10 min depois de QUALQUER mudança de preço (subida inclusive) e da criação da
