@@ -1407,3 +1407,24 @@ test('plano para o saldo: uma ordem com o saldo, regra relativa, chance de bloco
   const low = balancePlan({ balanceBtc: 0.0005, mkt, mm: null, cfg: DEFAULT_CONFIG, units: { minOrderBtc: 0.001 }, limits: { maxOrderBtc: 0.01, maxLimitPh: 100 } });
   assert.equal(low.ok, false); assert.match(low.why, /mínimo de uma ordem/);
 });
+
+test('MODO_SNIPER: tiro com bloco atrasado e margem acima do limite; recua no bloco novo ou no prazo; um tiro por bloco', async () => {
+  const { sniperDecide } = await import('../worker/src/bot.js');
+  const cfg = Object.assign({}, DEFAULT_CONFIG, { sniper: true }), T = Date.UTC(2026, 10, 3, 3), M = 60e3, b0 = T - 21 * M;
+  let r = sniperDecide(null, { now: T, blockT: T - 10 * M, edge: -3, cfg });
+  assert.equal(r.shot, false); assert.match(r.reason, /gatilho em 20 min/);
+  r = sniperDecide(r.state, { now: T, blockT: b0, edge: -8, cfg }); assert.equal(r.shot, false, 'margem abaixo de −7%');
+  r = sniperDecide(r.state, { now: T, blockT: b0, edge: -6.6, cfg }); assert.equal(r.shot, true, 'tiro');
+  let k = sniperDecide(r.state, { now: T + 3 * M, blockT: T + 2 * M, edge: -6.6, cfg }); assert.equal(k.shot, false); assert.match(k.reason, /bloco novo/);
+  let t = sniperDecide(r.state, { now: T + 4 * M, blockT: b0, edge: -6.6, cfg }); assert.equal(t.shot, false); assert.match(t.reason, /kill switch/);
+  t = sniperDecide(t.state, { now: T + 7 * M, blockT: b0, edge: -6.6, cfg }); assert.equal(t.shot, false, 'não atira de novo no mesmo bloco'); assert.match(t.reason, /já atirou/);
+  // robô: com a flag, sobe para 25 PH/s mesmo com margem negativa; sem a flag, a regra de margem segue igual
+  const ord = order({ priceEH: 0.42, limitPH: 1 }), m = mk({ green: false, bidEH: 0.42, capEH: 0.40, edgeAtBidPct: -6.6 });
+  const on = decide({ cfg: cfgOf({ sniper: true }), mkt: m, orders: [ord], now: T, units, limits: lim, blockT: b0 });
+  assert.equal(on.actions[0].limitPH, 25); assert.match(on.actions[0].reason, /sniper/);
+  const off = decide({ cfg: cfgOf({ sniper: false }), mkt: m, orders: [ord], now: T, units, limits: lim, blockT: b0 });
+  assert.ok(!off.actions.some((a) => a.limitPH === 25), 'sem a flag, nada muda');
+  // cria a ordem de espera (1 PH/s) mesmo com margem negativa
+  const c = decide({ cfg: cfgOf({ sniper: true, autoCreate: true, poolId: 'p', managed: [] }), mkt: m, orders: [], now: T, units, limits: lim, blockT: T - 5 * M });
+  assert.equal(c.actions[0].type, 'create'); assert.equal(c.actions[0].limitPH, 1);
+});

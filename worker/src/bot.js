@@ -17,6 +17,12 @@ export const DEFAULT_CONFIG = {
   stopCooldownH: 6,         // depois do stop-loss, horas sem criar ordem nova (a janela que comeu o orçamento passa)
   dailyBudgetUsd: 500,      // gasto máximo por dia (UTC); ao atingir, reduz para a potência de pausa
   weeklyLossUsd: 1000,
+  sniper: false,            // MODO_SNIPER: tiro curto quando o bloco do BCH atrasa (substitui só a regra de entrada)
+  sniperAgeMin: 20,         // sniper: dispara quando o último bloco tem mais de X min
+  sniperMinEdge: -7,        // sniper: e a margem é de pelo menos X% (aceita negativa)
+  sniperPh: 25,             // sniper: potência do tiro (PH/s)
+  sniperIdlePh: 1,          // sniper: potência de espera (PH/s)
+  sniperShotMin: 4,         // sniper: duração máxima do tiro sem bloco (kill switch, min)
   minEdgeMode: 'fixo',      // 'fixo' (margem mínima da config) | 'relativo' (os X% melhores momentos das últimas 24 h, com piso)
   relPct: 75,               // regra relativa: entra quando a margem está entre os (100 − relPct)% melhores das últimas 24 h
   relFloorPct: -2,          // regra relativa: nunca entra com margem abaixo deste piso      // perda máxima em 7 dias (gasto − recebido, resultado real); ao atingir, encerra tudo e avisa (0 = desligado)
@@ -58,6 +64,8 @@ export function sanitizeConfig(input = {}, prev = DEFAULT_CONFIG, limits = limit
     if (a === '' || ADDR.test(a)) c.payoutAddress = a; else errors.push('endereço BCH inválido (use o formato cashaddr)');
   }
   if (input.poolId !== undefined) c.poolId = String(input.poolId).slice(0, 64);
+  if (input.sniper !== undefined) c.sniper = !!input.sniper;
+  num('sniperAgeMin', 5, 120); num('sniperMinEdge', -20, 20); num('sniperPh', 1, limits.maxLimitPh); num('sniperIdlePh', 0, limits.maxLimitPh); num('sniperShotMin', 1, 60);
   if (input.minEdgeMode !== undefined) { if (['fixo', 'relativo'].includes(input.minEdgeMode)) c.minEdgeMode = input.minEdgeMode; else errors.push('minEdgeMode inválido'); }
   num('relPct', 50, 95); num('relFloorPct', -10, 20);
   num('poolFeePct', 0, 20); num('rentFeePct', 0, 20); num('minEdgePct', -50, 100); num('bidPremiumPct', 0, 50);
@@ -140,7 +148,30 @@ function utcDay(ms) { return new Date(ms).toISOString().slice(0, 10); }
 // Decide as ações do ciclo. Não executa nada: devolve ações, notas e o novo estado.
 // orders: ordens normalizadas (priceEH, limitPH, paidBtc, alive, createdTs).
 // blockEvent: { height, bch } quando a recompensa de um bloco caiu no endereço desde o último ciclo.
-export function decide({ cfg, mkt, orders, state = {}, now, units, limits = limitsFromEnv(), blockEvent = null, weekLossUsd = 0 }) {
+// MODO_SNIPER: decide o tiro pela idade do último bloco do BCH. Mesma função para o robô real e para a simulação.
+// prev: estado anterior; blockT: horário do último bloco da rede; edge: margem real de agora (%).
+// Dispara (sniperPh) quando o bloco tem mais de sniperAgeMin min e a margem é de pelo menos sniperMinEdge; recua para
+// sniperIdlePh quando sai bloco novo ou quando o tiro passa de sniperShotMin min sem bloco (um tiro por bloco atrasado).
+// Observação: o sorteio dos blocos não tem memória; o tempo desde o último bloco não aumenta a chance do próximo.
+export function sniperDecide(prev, { now, blockT, edge, cfg }) {
+  const s = Object.assign({ shotStart: null, shotBlockT: null, usedBlockT: null, shots: 0, endsBlock: 0, endsTime: 0 }, prev || {});
+  const ageMin = cfg.sniperAgeMin === undefined ? 20 : cfg.sniperAgeMin, minE = cfg.sniperMinEdge === undefined ? -7 : cfg.sniperMinEdge;
+  const dur = (cfg.sniperShotMin === undefined ? 4 : cfg.sniperShotMin) * 60e3, age = blockT ? (now - blockT) / 60e3 : null;
+  let reason = null;
+  if (s.shotStart) {
+    if (blockT && s.shotBlockT && blockT > s.shotBlockT) { s.shotStart = null; s.endsBlock++; s.lastEnd = { t: now, why: 'bloco' }; reason = 'sniper: bloco novo na rede, recuo para a potência de espera'; }
+    else if (now - s.shotStart >= dur) { s.shotStart = null; s.usedBlockT = s.shotBlockT; s.endsTime++; s.lastEnd = { t: now, why: 'tempo' }; reason = `sniper: tiro de ${Math.round(dur / 60e3)} min sem bloco, recuo (kill switch)`; }
+  }
+  if (!s.shotStart) {
+    const fire = age !== null && age > ageMin && isFinite(edge) && edge >= minE && s.usedBlockT !== blockT;
+    if (fire) { s.shotStart = now; s.shotBlockT = blockT; s.shots++; reason = `sniper: último bloco há ${Math.round(age)} min (gatilho ${ageMin}) e margem ${edge.toFixed(1).replace('.', ',')}% (limite ${String(minE).replace('.', ',')}%): tiro`; }
+    else if (!reason) reason = age === null ? 'sniper: sem horário do último bloco' : s.usedBlockT === blockT && age > ageMin ? `sniper: já atirou neste bloco atrasado (há ${Math.round(age)} min); espera o próximo` :
+      age <= ageMin ? `sniper: último bloco há ${Math.round(age)} min, gatilho em ${ageMin} min; em espera` : `sniper: bloco atrasado (${Math.round(age)} min), mas margem ${isFinite(edge) ? edge.toFixed(1).replace('.', ',') : '—'}% abaixo do limite ${String(minE).replace('.', ',')}%; em espera`;
+  }
+  return { shot: !!s.shotStart, state: s, reason, ageMin: age };
+}
+
+export function decide({ cfg, mkt, orders, state = {}, now, units, limits = limitsFromEnv(), blockEvent = null, weekLossUsd = 0, blockT = null }) {
   const st = JSON.parse(JSON.stringify(state || {}));
   st.lastDecrease = st.lastDecrease || {}; st.lastPriceChange = st.lastPriceChange || {}; st.dayStart = st.dayStart || {};
   const actions = [], notes = [];
@@ -201,6 +232,10 @@ export function decide({ cfg, mkt, orders, state = {}, now, units, limits = limi
     return { actions, notes, state: st };
   }
 
+  // MODO_SNIPER (opcional): a decisão do tiro sai da idade do último bloco; sem a flag, nada muda
+  const mktShot = cfg.sniper && mkt.ok ? sizeMarket(mkt, Math.min(cfg.sniperPh || 25, limits.maxLimitPh), cfg) : null; // preço e margem para a potência do tiro
+  const SN = mktShot ? sniperDecide(st.sniper, { now, blockT, edge: mktShot.edgeAtBidPct, cfg }) : null;
+  if (SN) st.sniper = SN.state;
   for (const o of managed) {
     if (blockEvent) {
       const why = `bloco ${blockEvent.height} pago no seu endereço`;
@@ -213,11 +248,15 @@ export function decide({ cfg, mkt, orders, state = {}, now, units, limits = limi
     if (!mkt.ok) { notes.push(`ordem ${o.id}: sem dados de mercado (${mkt.reason}), nada alterado`); continue; }
 
     let limit = mkt.green && !dailyHit ? target : minPh;
-    const want = mkt.green ? mkt.bidEH : Math.min(o.priceEH, r4(mkt.capEH));
+    let want = mkt.green ? mkt.bidEH : Math.min(o.priceEH, r4(mkt.capEH));
     const rule = `empate ${isFinite(mkt.breakEvenEH) ? mkt.breakEvenEH.toFixed(4).replace('.', ',') : '—'} − sua margem ${String(cfg.minEdgePct).replace('.', ',')}% = teto ${isFinite(mkt.capEH) ? mkt.capEH.toFixed(4).replace('.', ',') : '—'}`;
     let price = want, reason = mkt.green ? `sinal verde: margem ${mkt.edgeAtBidPct.toFixed(1).replace('.', ',')}% no lance. Por quê: lance ${mkt.bidEH.toFixed(4).replace('.', ',')} ≤ teto (${rule})`
       : `acima do teto (${mkt.capEH.toFixed(4).replace('.', ',')}): pausa. Por quê: lance ${mkt.bidEH.toFixed(4).replace('.', ',')} > teto (${rule}); comprar acima disso dá prejuízo médio`;
     if (dailyHit && mkt.green) reason = 'limite diário: pausa';
+    if (SN) { // MODO_SNIPER: substitui só a regra de entrada; travas (stop-loss, limites, bloco) continuam iguais
+      limit = SN.shot && !dailyHit ? Math.min(cfg.sniperPh || 25, limits.maxLimitPh) : Math.max(minPh, cfg.sniperIdlePh === undefined ? 1 : cfg.sniperIdlePh);
+      want = mktShot.bidEH; reason = SN.reason + (dailyHit ? '; limite diário: espera' : '');
+    }
     if (want < o.priceEH - 1e-9) {
       // A NiceHash só aceita baixar o preço 10 min depois de QUALQUER mudança de preço (subida inclusive) e da criação da
       // ordem (erro 5061 visto no teste real de 01/11). 30 s de folga para o relógio dos dois lados.
@@ -232,7 +271,11 @@ export function decide({ cfg, mkt, orders, state = {}, now, units, limits = limi
     }
   }
 
-  if (cfg.autoCreate && !managed.length && mkt.ok && mkt.green && !dailyHit && cfg.poolId && !blockEvent) {
+  if (SN && cfg.autoCreate && !managed.length && mkt.ok && !dailyHit && cfg.poolId && !blockEvent) {
+    const amount = Math.max(units.minOrderBtc, Math.min(cfg.orderAmountBtc, limits.maxOrderBtc));
+    actions.push({ type: 'create', priceEH: mktShot.bidEH, limitPH: SN.shot ? Math.min(cfg.sniperPh || 25, limits.maxLimitPh) : Math.max(minPh, cfg.sniperIdlePh === undefined ? 1 : cfg.sniperIdlePh), amountBtc: amount, poolId: cfg.poolId,
+      market: mkt.market, reason: 'sniper: ordem de espera criada. ' + SN.reason });
+  } else if (!SN && cfg.autoCreate && !managed.length && mkt.ok && mkt.green && !dailyHit && cfg.poolId && !blockEvent) {
     const amount = Math.max(units.minOrderBtc, Math.min(cfg.orderAmountBtc, limits.maxOrderBtc));
     actions.push({ type: 'create', priceEH: mkt.bidEH, limitPH: target, amountBtc: amount, poolId: cfg.poolId,
       market: mkt.market, reason: `sinal verde sem ordem ativa: criando (margem ${mkt.edgeAtBidPct.toFixed(1).replace('.', ',')}%)` });

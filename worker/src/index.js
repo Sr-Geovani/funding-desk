@@ -5,7 +5,7 @@
 // - Agendamento (cron): robô de mineração. Começa em modo "observe" (só registra o que faria).
 import { createClient, NH_HOSTS, DEFAULT_ALGO } from './nicehash.js';
 import { createChain, paidTo, DEFAULT_BCH_REST, DEFAULT_PRICE_URL } from './chain.js';
-import { DEFAULT_CONFIG, sanitizeConfig, parseBook, computeMarket, sizeMarket, decide, limitsFromEnv } from './bot.js';
+import { DEFAULT_CONFIG, sanitizeConfig, parseBook, computeMarket, sizeMarket, decide, limitsFromEnv, sniperDecide } from './bot.js';
 import { fundingSnapshot, runAlerts } from './alerts.js';
 import { paperStep, realStep, execStep, execSummary } from './paper.js';
 import { fundPaperStep, fundPaperSummary, alertScoreStep, alertScoreSummary } from './paperfund.js';
@@ -179,7 +179,9 @@ export async function tick(env, opts = {}) {
   // perda real dos últimos 7 dias (UTC): gasto − recebido das ordens gerenciadas e blocos pagos
   const weekLossUsd = (() => { const d = (state.real && state.real.days) || {}, from = new Date(now - 6 * 864e5).toISOString().slice(0, 10);
     return Object.entries(d).filter(([k]) => k >= from).reduce((a, [, x]) => a + (x.spendUsd || 0) - (x.revenueUsd || 0), 0); })();
-  const dec = decide({ cfg, mkt, orders, state, now, units, limits, blockEvent, weekLossUsd });
+  // horário do último bloco da rede (para o MODO_SNIPER): o mais novo entre o registro e os blocos deste ciclo
+  const lastNetBlockT = Math.max(state.lastBlockT || 0, ...newBlocks.map((b) => b.time || 0)) || null;
+  const dec = decide({ cfg, mkt, orders, state, now, units, limits, blockEvent, weekLossUsd, blockT: lastNetBlockT });
   if (dec.state.weekStop && !state.weekStop) await notify(env, `limite de perda semanal atingido (perda real de US$${weekLossUsd.toFixed(2).replace('.', ',')} em 7 dias; limite US$${cfg.weeklyLossUsd}). Robô encerrou as ordens e não cria novas até a perda da semana baixar.`, fetchFn);
 
   // Simulação (só no modo Observar) e resultado real (ordens gerenciadas + blocos).
@@ -256,6 +258,14 @@ export async function tick(env, opts = {}) {
   if (cfg.mode === 'observe') paperAlways = paperStep(paperAlways, { cfg: Object.assign({}, cfg, { sessionBudgetUsd: 0, dailyBudgetUsd: 0, onBlock: 'continue' }),
     mkt: mkt.ok ? Object.assign({}, mkt, { green: true }) : mkt, now, units, limits, blocks: newBlocks }).paper;
   else if (paperAlways) paperAlways.lastTs = now;
+  // Cenário Sniper (simulado, sempre ligado para comparar): mesma regra do robô (sniperDecide), mesmos blocos e sorteio.
+  let paperSniper = state.paperSniper || null;
+  if (mkt.ok) {
+    const sd = sniperDecide(paperSniper && paperSniper.sn, { now, blockT: lastNetBlockT, edge: sizeMarket(mkt, Math.min(cfg.sniperPh || 25, limits.maxLimitPh), cfg).edgeAtBidPct, cfg });
+    const php = sd.shot ? Math.min(cfg.sniperPh || 25, limits.maxLimitPh) : Math.max(cfg.sniperIdlePh === undefined ? 1 : cfg.sniperIdlePh, units.minLimitPH || 1);
+    const ps = paperStep(paperSniper, { cfg: Object.assign({}, cfg, { targetPh: php, minPh: php, onBlock: 'continue', dailyBudgetUsd: 0 }), mkt: Object.assign({}, sizeMarket(mkt, php, cfg), { green: true }), now, units, limits, blocks: newBlocks });
+    paperSniper = Object.assign(ps.paper, { sn: sd.state, shot: sd.shot, reason: sd.reason, ageMin: sd.ageMin });
+  } else if (paperSniper) paperSniper.lastTs = now;
   // Os 5 cenários que teriam dado mais lucro na janela dos cenários acompanhados (worker/src/replay.js), a cada 15 min.
   let bestScen = state.bestScen || null, luck24 = state.luck24 || null;
   if (mkt.ok && now - ((bestScen && bestScen.at) || 0) >= 15 * 60e3) {
@@ -586,10 +596,10 @@ export async function tick(env, opts = {}) {
     power: plan && plan.mining ? plan.mining.power : null, cfg, now, mm: mktMargin, band: bandThreshold(br.ai.band), bins: br.ai.band && br.ai.band.bins });
   const aiRep = aiReport({ now, mkt, cfg, asert: asertF, mm: mktMargin, ai: br.ai, mom: msig.mom, ret: snap.ret, win: snap.win, darr: darr ? darr.v : null,
     power: plan && plan.mining ? plan.mining.power : null, algos: snap.algos,
-    fund: { passing: ((funding && funding.best) || []).length, sim: fundPaper ? fundPaperSummary(fundPaper, FD.DEFAULT_FEES) : null } });
+    sniper: paperSniper ? { shot: paperSniper.shot, reason: paperSniper.reason } : null, fund: { passing: ((funding && funding.best) || []).length, sim: fundPaper ? fundPaperSummary(fundPaper, FD.DEFAULT_FEES) : null } });
 
   const next = Object.assign({}, dec.state, alertState, {
-    lastTick: now, verified: Object.fromEntries(Object.entries(verified).filter(([, x]) => now - x.at <= 6 * 3600e3)), ai: br.ai, aiAnalysis, plan, acct, algoMap, mempool, stable24, pairStats, msig, darr, recentBlocks, nhWeek, paper, paperBurst, paperPlan, paperAlways, hashMkts, fronts, frontsPaper, ltStreak, fundPaperLT, market2, aiPanorama, entryCheck, calib, robotTest, luck24, balPlan, minEdgeNow: { value: cfg.minEdgePct, relative: !!cfg.minEdgeRel, base: cfg.minEdgeRel ? cfg.minEdgeBase : cfg.minEdgePct }, aiReport: aiRep, mktMargin, asertF, execLog, bestScen, paperArchive, paperPriceV: 2, blockBuf, blockFlush, lastBlockT, real, fundPaper, alertScore, algoPaper, algoTs, aiScores, fundPaperAI, fhistHour, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig, errNotified,
+    lastTick: now, verified: Object.fromEntries(Object.entries(verified).filter(([, x]) => now - x.at <= 6 * 3600e3)), ai: br.ai, aiAnalysis, plan, acct, algoMap, mempool, stable24, pairStats, msig, darr, recentBlocks, nhWeek, paper, paperBurst, paperPlan, paperAlways, paperSniper, hashMkts, fronts, frontsPaper, ltStreak, fundPaperLT, market2, aiPanorama, entryCheck, calib, robotTest, luck24, balPlan, minEdgeNow: { value: cfg.minEdgePct, relative: !!cfg.minEdgeRel, base: cfg.minEdgeRel ? cfg.minEdgeBase : cfg.minEdgePct }, aiReport: aiRep, mktMargin, asertF, execLog, bestScen, paperArchive, paperPriceV: 2, blockBuf, blockFlush, lastBlockT, real, fundPaper, alertScore, algoPaper, algoTs, aiScores, fundPaperAI, fhistHour, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig, errNotified,
     market: mkt.ok ? { breakEvenEH: mkt.breakEvenEH, capEH: mkt.capEH, fillEH: mkt.fillEH, medianEH: mkt.medianEH, bidEH: mkt.bidEH,
       edgeAtBidPct: mkt.edgeAtBidPct, green: mkt.green, D: mkt.D, bookTotalPH: book ? book.totalPH : 0, bchUsd: mkt.bchUsd, btcUsd: mkt.btcUsd, costPerBlockUsd: mkt.costPerBlockUsd,
       hashpriceNet: mkt.hashpriceNet, blockNetUsd: mkt.blockNetUsd, phDaysPerBlock: mkt.phDaysPerBlock, market: mkt.market } : { ok: false, reason: mkt.reason },
@@ -700,7 +710,7 @@ async function api(req, env, url, fetchFn) {
       telegram: !!(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID), creds: credStatus(env), limits, config: cfg,
       state: { lastTick: state.lastTick, lastHeight: state.lastHeight, market: state.market, myBlocks: state.myBlocks || [], dailyUsd: state.dailyUsd || 0,
         errors: state.errors || [], edgeHist: state.edgeHist || [], alerts: (state.alerts || []).slice(-30).reverse(),
-        paper: state.paper || null, paperBurst: state.paperBurst || null, paperPlan: state.paperPlan || null, paperAlways: state.paperAlways || null, paperArchive: state.paperArchive || null, entryCheck: state.entryCheck || null, calib: state.calib || null, minEdgeNow: state.minEdgeNow || null, luck24: state.luck24 || null, balPlan: state.balPlan || null, planOn: !!state.planBackup, calibPrev: state.calibPrev || null, robotTest: state.robotTest || null, aiReport: state.aiReport || null, mktMargin: state.mktMargin || null, asertF: state.asertF || null, exec: execSummary(state.execLog), bestScen: state.bestScen || null, hashMkts: state.hashMkts || null, fronts: state.fronts || null, frontsPaper: state.frontsPaper || null, market2: state.market2 || null, aiPanorama: state.aiPanorama || null,
+        paper: state.paper || null, paperBurst: state.paperBurst || null, paperPlan: state.paperPlan || null, paperAlways: state.paperAlways || null, paperSniper: state.paperSniper || null, sniper: state.sniper || null, paperArchive: state.paperArchive || null, entryCheck: state.entryCheck || null, calib: state.calib || null, minEdgeNow: state.minEdgeNow || null, luck24: state.luck24 || null, balPlan: state.balPlan || null, planOn: !!state.planBackup, calibPrev: state.calibPrev || null, robotTest: state.robotTest || null, aiReport: state.aiReport || null, mktMargin: state.mktMargin || null, asertF: state.asertF || null, exec: execSummary(state.execLog), bestScen: state.bestScen || null, hashMkts: state.hashMkts || null, fronts: state.fronts || null, frontsPaper: state.frontsPaper || null, market2: state.market2 || null, aiPanorama: state.aiPanorama || null,
         fundPaperLT: state.fundPaperLT ? { summary: fundPaperSummary(state.fundPaperLT, LT_FEES), open: state.fundPaperLT.open, closed: state.fundPaperLT.closed.slice(-50).reverse() } : null, opLog: (state.opLog || []).slice(-20).reverse(), real: state.real ? Object.assign({}, state.real, { paid: undefined }) : null,
         fundPaper: state.fundPaper ? { summary: fundPaperSummary(state.fundPaper, FD.DEFAULT_FEES), open: state.fundPaper.open, closed: state.fundPaper.closed.slice(-100).reverse() } : null,
         algoPaper: state.algoPaper || null,

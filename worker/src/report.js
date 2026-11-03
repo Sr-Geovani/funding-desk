@@ -8,7 +8,7 @@ const ok = (x) => x !== null && x !== undefined && isFinite(x);
 const sg = (x, d = 1) => (x > 0 ? '+' : '') + f(x, d) + '%';
 const word = (x) => (x > 0 ? 'positiva' : x < 0 ? 'negativa' : 'zero');
 
-export function aiReport({ now, mkt, cfg, asert, mm, ai, mom, ret, win, darr, power, fund, algos, entry }) {
+export function aiReport({ now, mkt, cfg, asert, mm, ai, mom, ret, win, darr, power, fund, algos, entry, sniper }) {
   const S = [], add = (id, title, items) => { const it = items.filter(Boolean).map(plain); if (it.length) S.push({ id, title, items: it }); };
   if (!(mkt && mkt.ok)) return { at: now, tone: 'neutro', headline: 'Sem dados de mercado da NiceHash neste ciclo: nada a recomendar até a próxima leitura.', sections: [] };
   const e = mkt.edgeAtBidPct, minE = cfg.minEdgePct, W = mm && (mm.d7 || mm.h24), T = bandThreshold(ai && ai.band), L = ai ? levelOf(ai) : null;
@@ -75,6 +75,12 @@ export function aiReport({ now, mkt, cfg, asert, mm, ai, mom, ret, win, darr, po
   if (power && power.idealPh > 0 && Math.abs(power.idealPh - cfg.targetPh) / cfg.targetPh > 0.3) adj.push(`Potência alvo: o livro de agora favorece ${power.idealPh} PH/s (sua configuração: ${cfg.targetPh}). Acima disso o lance sobe e a margem cai.`);
   if (cfg.dailyBudgetUsd > 0 && cfg.sessionBudgetUsd > cfg.dailyBudgetUsd) adj.push(`Limite diário (US$${cfg.dailyBudgetUsd}) menor que o stop-loss (US$${cfg.sessionBudgetUsd}): o limite diário corta a tentativa antes. Iguale os dois ou aumente o diário.`);
   if (cfg.weeklyLossUsd > 0 && cfg.weeklyLossUsd < cfg.sessionBudgetUsd * 2) adj.push(`Perda máxima em 7 dias (US$${cfg.weeklyLossUsd}) cobre menos de 2 tentativas completas: o robô para cedo. Considere ao menos US$${cfg.sessionBudgetUsd * 3}.`);
+  if (cfg.sniper && sniper) {
+    act.length = 0;
+    act.push(`Modo Sniper ligado${cfg.mode === 'active' ? ' (robô em Ativo)' : ' (robô em Observar: só simula)'}: ${sniper.shot ? `tiro em andamento a ${cfg.sniperPh || 25} PH/s` : `espera a ${cfg.sniperIdlePh === undefined ? 1 : cfg.sniperIdlePh} PH/s`}. ${sniper.reason || ''}.`);
+    act.push(`Regra: tiro quando o último bloco passar de ${cfg.sniperAgeMin || 20} min e a margem estiver em ${f(cfg.sniperMinEdge === undefined ? -7 : cfg.sniperMinEdge, 1)}% ou mais; recuo no bloco novo ou depois de ${cfg.sniperShotMin || 4} min. A regra por margem fica de lado enquanto o Sniper estiver ligado.`);
+    act.push('Leitura honesta: o sorteio dos blocos não tem memória. Um bloco atrasado tem a mesma chance de sair no próximo minuto que qualquer outro; o Sniper muda quando se gasta, não a chance por dólar. O cenário "Sniper" na tabela de cenários mede isso com os blocos reais.');
+  }
   add('fazer', 'O que fazer agora', act);
   add('ajustes', 'Ajustes sugeridos (a decisão é sua)', adj.length ? adj : ['Sua configuração está coerente com o mercado de agora: nenhum ajuste necessário.']);
 

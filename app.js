@@ -704,7 +704,7 @@ function freshen(){
   if(settings.apiUrl&&!$('tab-mine').hidden&&!$('mine-net').hidden&&now-blk.at>120000)loadBlocksLog();
 }
 var MODE_TXT={off:'Desligado',observe:'Observando',active:'Ativo'},MODE_CHIP={off:'',observe:'warn',active:'ok'};
-var BOT_FIELDS=['mode','onBlock','payoutAddress','minEdgePct','minEdgeMode','relPct','relFloorPct','bidPremiumPct','targetPh','minPh','sessionBudgetUsd','stopCooldownH','dailyBudgetUsd','weeklyLossUsd','poolFeePct','rentFeePct','poolId','orderAmountBtc'];
+var BOT_FIELDS=['mode','onBlock','payoutAddress','minEdgePct','minEdgeMode','relPct','relFloorPct','sniperAgeMin','sniperMinEdge','sniperPh','sniperIdlePh','sniperShotMin','bidPremiumPct','targetPh','minPh','sessionBudgetUsd','stopCooldownH','dailyBudgetUsd','weeklyLossUsd','poolFeePct','rentFeePct','poolId','orderAmountBtc'];
 // Margem em linguagem simples: retorno médio (não é chance) e a chance de achar bloco com a potência alvo em 24 h.
 function robotExplain(m,cfg){
   var ph=+cfg.targetPh||0,pd=m.phDaysPerBlock||(m.D?m.D*4294967296/1e15/86400:0),blk=m.blockNetUsd||(m.bchUsd?3.125*m.bchUsd*(1-(cfg.poolFeePct||2)/100):0);
@@ -755,7 +755,7 @@ function burstHTML(p,b,c,a){
   var B=(ops.status&&ops.status.state&&ops.status.state.bestScen)||null;
   var ent=function(f){return f===null||f===undefined?'sempre ligado':'margem a partir de '+nf(f,0)+'%'};
   var stp=function(x){return x.stopUsd?'stop US$'+nf(x.stopUsd,0)+' + '+nf(x.coolH,0)+' h':'sem stop'};
-  var mine=[[p,'Sua','só verde · '+stp({stopUsd:+((ops.status||{}).config||{}).sessionBudgetUsd||0,coolH:+((ops.status||{}).config||{}).stopCooldownH||6})],[c,'Copiloto','plano da IA'],[b,'Rajada','só verde · para no bloco'],[a,'Sempre ligado','sem pausa · sem stop']]
+  var mine=[[p,'Sua','só verde · '+stp({stopUsd:+((ops.status||{}).config||{}).sessionBudgetUsd||0,coolH:+((ops.status||{}).config||{}).stopCooldownH||6})],[c,'Copiloto','plano da IA'],[b,'Rajada','só verde · para no bloco'],[a,'Sempre ligado','sem pausa · sem stop'],[(ops.status&&ops.status.state&&ops.status.state.paperSniper)||null,'Sniper','bloco atrasado · tiro curto']]
     .filter(function(r){return r[0]}).map(function(r){return {x:r[0],name:r[1],sub:r[2],ph:r[0].ph}});
   var best=B&&B.top?B.top.map(function(x,i){return {x:x,name:'Melhor '+(i+1),sub:ent(x.filter)+' · '+stp(x),ph:x.ph,best:true}}):[];
   var eff=B&&B.eff?B.eff.map(function(x,i){return {x:x,name:'Eficiente '+(i+1),sub:ent(x.filter)+' · '+stp(x),ph:x.ph,best:true}}):[];
@@ -1064,7 +1064,11 @@ function renderEntry(){
   var S={ok:['ok','✓'],warn:['warn','!'],bad:['bad','✕'],na:['','—'],info:['','i']};
   var RT=ops.status.state.robotTest,rtOn=RT&&!RT.done,C0=ops.status.config||{},MN=ops.status.state.minEdgeNow||{};
   var stale=(C0.minEdgeMode==='relativo')!==!!MN.relative||(C0.minEdgeMode!=='relativo'&&MN.value!==undefined&&MN.value!==C0.minEdgePct);
-  el.innerHTML=(stale?'<div class="box" style="margin:0 0 8px"><b class="warn">Configuração alterada</b>A cartilha e o copiloto são recalculados pelo servidor a cada 3 min: os textos abaixo ainda usam a regra anterior e se atualizam no próximo ciclo.</div>':'')+(rtOn?'<div class="box" style="margin:0 0 8px"><b class="warn">Teste do robô em andamento</b>A margem mínima está temporariamente em −5% para o teste; por isso o veredito pode dizer "Entrar" com margem negativa. Ele volta à sua regra quando o teste terminar.</div>':'')+'<div class="row between"><div class="eyebrow">Cartilha de entrada · '+E.okCount+' de '+E.scored+' a favor</div><span class="chip '+V[0]+'">'+V[1]+'</span></div>'+
+  var SNc=ops.status.config||{},SNs=ops.status.state.sniper||{},PS=ops.status.state.paperSniper||{},lbt=ops.status.state.lastBlockT,sAge=lbt?(Date.now()-lbt)/60e3:null;
+  var snHTML=SNc.sniper?'<div class="box" style="margin:0 0 8px"><b>Modo Sniper '+(SNc.mode==='active'?'ligado (robô em Ativo)':'ligado (robô em Observar: só simula)')+'</b>'+
+    '<div class="kv" style="margin-top:4px"><div><small>Último bloco há</small><span class="'+(sAge!==null&&sAge>(SNc.sniperAgeMin||20)?'warn':'')+'">'+(sAge!==null?nf(sAge,0)+' min':'—')+'</span></div><div><small>Gatilho</small><span>'+nf(SNc.sniperAgeMin||20,0)+' min · margem a partir de '+pct(SNc.sniperMinEdge===undefined?-7:SNc.sniperMinEdge,1)+'</span></div><div><small>Agora</small><span>'+((SNs.shotStart||PS.shot)?'<b class="warn">tiro: '+nf(SNc.sniperPh||25,0)+' PH/s</b>':'espera: '+nf(SNc.sniperIdlePh===undefined?1:SNc.sniperIdlePh,0)+' PH/s')+'</span></div></div>'+
+    '<div class="note" style="margin-top:4px">'+esc(PS.reason||'')+'. Tiros: '+((SNs.shots||(PS.sn&&PS.sn.shots))||0)+' (encerrados por bloco '+((SNs.endsBlock||(PS.sn&&PS.sn.endsBlock))||0)+', por prazo '+((SNs.endsTime||(PS.sn&&PS.sn.endsTime))||0)+'). A cartilha abaixo continua mostrando a leitura por margem, que fica de lado enquanto o Sniper estiver ligado.</div></div>':'';
+  el.innerHTML=snHTML+(stale?'<div class="box" style="margin:0 0 8px"><b class="warn">Configuração alterada</b>A cartilha e o copiloto são recalculados pelo servidor a cada 3 min: os textos abaixo ainda usam a regra anterior e se atualizam no próximo ciclo.</div>':'')+(rtOn?'<div class="box" style="margin:0 0 8px"><b class="warn">Teste do robô em andamento</b>A margem mínima está temporariamente em −5% para o teste; por isso o veredito pode dizer "Entrar" com margem negativa. Ele volta à sua regra quando o teste terminar.</div>':'')+'<div class="row between"><div class="eyebrow">Cartilha de entrada · '+E.okCount+' de '+E.scored+' a favor</div><span class="chip '+V[0]+'">'+V[1]+'</span></div>'+
     '<div class="lead">'+esc(E.title)+'</div><p class="why" style="margin:0 0 8px">'+esc(E.text)+'</p>'+
     ctx24HTML(E)+
     '<div class="stack" style="gap:4px">'+E.steps.map(function(s){var c=S[s.status]||S.na;
@@ -1479,7 +1483,7 @@ function renderOps(){
   (function(){var f=$('b_minEdgePct');if(!f)return;var rel=(($('b_minEdgeMode')||{}).value||cfg.minEdgeMode)==='relativo',lab=f.parentNode;
     f.style.opacity=rel?'.5':'';var n=$('b_minNote');if(!n){n=document.createElement('small');n.id='b_minNote';n.className='note';n.style.display='block';lab.appendChild(n)}
     n.textContent=rel?'Guardada: não vale com a regra relativa ligada; volta a valer se escolher "Fixa".':''})();
-  $('b_autoCreate').checked=!!cfg.autoCreate;
+  $('b_autoCreate').checked=!!cfg.autoCreate;if($('b_sniper'))$('b_sniper').checked=!!cfg.sniper;
   if(cfg.poolId)$('n_pool').value=cfg.poolId;
   if(m.bidEH&&!$('n_price').value)$('n_price').value=m.bidEH.toFixed(4);
   if(!$('pl_user').value&&cfg.payoutAddress)$('pl_user').value=cfg.payoutAddress;
@@ -1491,7 +1495,7 @@ function renderOps(){
 }
 function opsMsg(id,t,bad){$(id).textContent=t;$(id).className='note'+(bad?' bad':'')}
 function botForm(){
-  var o={autoCreate:$('b_autoCreate').checked};
+  var o={autoCreate:$('b_autoCreate').checked,sniper:!!($('b_sniper')&&$('b_sniper').checked)};
   BOT_FIELDS.forEach(function(k){var v=$('b_'+k).value;o[k]=['mode','onBlock','payoutAddress','poolId','minEdgeMode'].indexOf(k)>=0?v:parseFloat(v)});
   return o;
 }

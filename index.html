@@ -462,6 +462,17 @@ details.card>summary{color:var(--fg);font-size:15px}
           <label>Valor da ordem nova (BTC)<input id="b_orderAmountBtc" type="number" inputmode="decimal" step="0.001"></label>
         </div>
         <div class="checks" style="margin-top:10px"><label><input type="checkbox" id="b_autoCreate">criar ordem sozinho quando o sinal ficar verde</label></div>
+        <details style="margin-top:10px"><summary><b>Modo Sniper</b> (tiro curto quando o bloco do BCH atrasa)</summary>
+          <p class="note" style="margin:6px 0">Com o Sniper ligado, a regra de entrada por margem fica de lado: o robô mantém uma ordem na potência de espera e sobe para a potência do tiro quando o último bloco passa do tempo de gatilho e a margem está acima do limite. Recua quando sai bloco novo ou quando o tiro dura mais que o prazo (um tiro por bloco atrasado). Stop-loss e limites continuam valendo. O servidor confere a cada 3 min. O tempo desde o último bloco não aumenta a chance do próximo (o sorteio não tem memória): o cenário "Sniper" na tabela de cenários mede se compensa.</p>
+          <div class="checks"><label><input type="checkbox" id="b_sniper">ligar o Modo Sniper</label></div>
+          <div class="grid2" style="margin-top:6px">
+            <label>Gatilho: bloco há mais de (min)<input id="b_sniperAgeMin" type="number" inputmode="decimal" step="1"></label>
+            <label>Margem mínima do tiro (%)<input id="b_sniperMinEdge" type="number" inputmode="decimal" step="0.5"></label>
+            <label>Potência do tiro (PH/s)<input id="b_sniperPh" type="number" inputmode="decimal" step="1"></label>
+            <label>Potência de espera (PH/s)<input id="b_sniperIdlePh" type="number" inputmode="decimal" step="1"></label>
+            <label>Prazo do tiro sem bloco (min)<input id="b_sniperShotMin" type="number" inputmode="decimal" step="1"></label>
+          </div>
+        </details>
         <div class="row" style="margin-top:10px"><button class="pri" id="b_save">Salvar robô</button><button id="b_tick">Rodar ciclo agora</button></div>
         <p class="note" id="b_msg" style="margin:8px 0 0">Observar: calcula e registra, não executa. Ativo: executa. O robô só mexe nas ordens marcadas como "robô gerencia". Preço máximo = preço de empate menos a margem mínima, recalculado a cada ciclo (3 min). A NiceHash só deixa baixar o preço aos poucos; nesse intervalo o robô reduz à potência de pausa.</p>
       </div>
