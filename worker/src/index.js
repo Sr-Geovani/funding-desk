@@ -348,6 +348,17 @@ export async function tick(env, opts = {}) {
     }
   }
 
+  // MODO_SNIPER: avisa no Telegram cada tiro e cada recuo (são ajustes da ordem, que não geram o aviso de criar/encerrar)
+  if (cfg.sniper && cfg.mode === 'active' && hasKeys(env)) {
+    const a0 = state.sniper || {}, a1 = dec.state.sniper || {}, executed = results.some((r) => r.executed && r.type !== 'cancel'), fx = (x) => String(x).replace('.', ',');
+    const shotPh = Math.min(cfg.sniperPh || 25, limits.maxLimitPh), idlePh = cfg.sniperIdlePh === undefined ? 1 : cfg.sniperIdlePh;
+    if (!a0.shotStart && a1.shotStart) await notify(env, plain(`Sniper: tiro de ${shotPh} PH/s${executed ? '' : ' (ordem ainda sem ajuste confirmado)'}. ${(results.find((r) => /sniper/.test(r.reason || '')) || {}).reason || ''}. Recua no bloco novo ou em ${cfg.sniperShotMin || 4} min. Tiro nº ${a1.shots || 1}.`), fetchFn);
+    else if (a0.shotStart && !a1.shotStart) {
+      const min = Math.round((now - a0.shotStart) / 60e3), why = (a1.endsBlock || 0) > (a0.endsBlock || 0) ? 'saiu bloco novo na rede' : `${cfg.sniperShotMin || 4} min sem bloco (kill switch)`;
+      await notify(env, `Sniper: recuo para ${fx(idlePh)} PH/s depois de ${min} min de tiro: ${why}. Tiros até agora: ${a1.shots || 0} (por bloco ${a1.endsBlock || 0}, por prazo ${a1.endsTime || 0}).`, fetchFn);
+    }
+  }
+
   // Teste do robô (modo Ativo com limites mínimos): registra cada ação real, confere o que foi exercitado (criar,
   // ajustar, stop-loss, espera) e, no fim, encerra as ordens do teste e devolve a configuração original.
   let robotTest = state.robotTest || null;

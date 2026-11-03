@@ -1429,3 +1429,21 @@ test('MODO_SNIPER: tiro por dificuldade em queda ou mempool cheia, com limite de
   const c = decide({ cfg: cfgOf({ sniper: true, autoCreate: true, poolId: 'p', managed: [] }), mkt: m, orders: [], now: T, units, limits: lim, blockT: T - 5 * M, snMetrics: {} });
   assert.equal(c.actions[0].type, 'create'); assert.equal(c.actions[0].limitPH, 1);
 });
+
+test('integração: Sniper avisa no Telegram o tiro e o recuo', async () => {
+  const t = await setup();
+  try {
+    const sent = [];
+    const env = Object.assign({}, t.env, { TELEGRAM_BOT_TOKEN: 'tg', TELEGRAM_CHAT_ID: '1' });
+    const fetchFn = (u, o) => { if (String(u).includes('api.telegram.org')) { sent.push(JSON.parse(o.body).text); return Promise.resolve(new Response('{}')); } return fetch(u, o); };
+    const o = await t.call('POST', '/api/orders', { priceEH: 0.40, limitPH: 1, amountBtc: 0.005, poolId: 'pool-1' });
+    assert.equal(o.status, 200, JSON.stringify(o.body));
+    await t.call('PUT', '/api/config', { mode: 'active', payoutAddress: 'bitcoincash:q' + 'a'.repeat(41), sniper: true, sniperUseAge: true, sniperAgeMin: 5, sniperMinEdge: -20, sniperDiffDropPct: 50, sniperFeeX: 100, sniperShotMin: 4 });
+    const st0 = JSON.parse((await t.env.FD_KV.get('state')) || '{}'); st0.lastBlockT = Date.now() - 10 * 60e3; await t.env.FD_KV.put('state', JSON.stringify(st0)); // último bloco conhecido
+    const T = Date.now() + 30 * 60e3;                       // 40 min depois dele: gatilho por atraso
+    await tick(env, { fetchFn, now: T });
+    { const st = (await t.call('GET', '/api/status')).body; assert.ok(sent.some((x) => /Sniper: tiro de 25 PH\/s/.test(x)), JSON.stringify({ sent, cfg: { mode: st.config.mode, sniper: st.config.sniper, managed: st.config.managed }, sn: st.state.sniper, err: st.state.errors, lbt: st.state.lastBlockT, T })); }
+    await tick(env, { fetchFn, now: T + 5 * 60e3 });        // 5 min sem bloco: recuo pelo prazo
+    assert.ok(sent.some((x) => /Sniper: recuo para 1 PH\/s/.test(x) && /kill switch/.test(x)), JSON.stringify(sent));
+  } finally { t.server.close(); }
+});
