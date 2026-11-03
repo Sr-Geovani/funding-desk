@@ -20,7 +20,7 @@ export const DEFAULT_CONFIG = {
   sniper: false,            // MODO_SNIPER: tiro curto quando o bloco do BCH atrasa (substitui só a regra de entrada)
   sniperAgeMin: 15,         // sniper: gatilho por atraso do último bloco, em min (sniperUseAge)
   sniperUseAge: true,       // sniper: usar também o gatilho por atraso (sem memória: não aumenta a chance)
-  sniperDiffDropPct: 1,     // sniper: dificuldade atual X% (ou mais) abaixo da média dos últimos 12 blocos
+  sniperDiffDropPct: 0.5,     // sniper: dificuldade atual X% (ou mais) abaixo da média dos últimos 12 blocos
   sniperFeeX: 100,          // sniper: mempool X vezes acima da média das últimas 24 h (100 = desligado na prática)
   sniperMinEdge: -7,        // sniper: e a margem é de pelo menos X% (aceita negativa)
   sniperPh: 25,             // sniper: potência do tiro (PH/s)
@@ -175,7 +175,7 @@ export function sniperDecide(prev, { now, blockT, blockId = null, edge, cfg, dif
   if (s.usedBlockId !== null && id !== null && s.usedBlockId !== id) s.usedBlockId = null;
   if (!s.shotStart) {
     // gatilhos: dificuldade em queda (DAA), mempool cheia (taxas) e atraso do bloco (opcional)
-    const dLim = cfg.sniperDiffDropPct === undefined ? 1 : cfg.sniperDiffDropPct, fLim = cfg.sniperFeeX === undefined ? 100 : cfg.sniperFeeX;
+    const dLim = cfg.sniperDiffDropPct === undefined ? 0.5 : cfg.sniperDiffDropPct, fLim = cfg.sniperFeeX === undefined ? 100 : cfg.sniperFeeX;
     const g = { dif: isFinite(diffDropPct) && diffDropPct !== null && diffDropPct >= dLim, fee: isFinite(feeX) && feeX !== null && feeX >= fLim, age: !!cfg.sniperUseAge && age !== null && age > ageMin };
     const which = [g.dif ? `dificuldade ${f1(diffDropPct)}% abaixo da média de 12 blocos (gatilho ${f1(dLim)}%)` : '', g.fee ? `mempool ${f1(feeX)} vezes a média do dia (gatilho ${f1(fLim)})` : '', g.age ? `último bloco há ${Math.round(age)} min (gatilho ${ageMin})` : ''].filter(Boolean);
     const okEdge = isFinite(edge) && edge >= minE, used = s.usedBlockId !== null && s.usedBlockId === id;

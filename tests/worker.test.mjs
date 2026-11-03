@@ -1411,7 +1411,7 @@ test('plano para o saldo: uma ordem com o saldo, regra relativa, chance de bloco
 test('MODO_SNIPER: um tiro por ID de bloco, kill switch de 7 min, trava zera na virada e efeito estilingue', async () => {
   const { sniperDecide } = await import('../worker/src/bot.js');
   const cfg = Object.assign({}, DEFAULT_CONFIG, { sniper: true }), T = Date.UTC(2026, 10, 3, 3), M = 60e3;
-  assert.equal(cfg.sniperDiffDropPct, 1); assert.equal(cfg.sniperAgeMin, 15); assert.equal(cfg.sniperUseAge, true); assert.equal(cfg.sniperFeeX, 100); assert.equal(cfg.sniperMinEdge, -7); assert.equal(cfg.sniperShotMin, 7);
+  assert.equal(cfg.sniperDiffDropPct, 0.5); assert.equal(cfg.sniperAgeMin, 15); assert.equal(cfg.sniperUseAge, true); assert.equal(cfg.sniperFeeX, 100); assert.equal(cfg.sniperMinEdge, -7); assert.equal(cfg.sniperShotMin, 7);
   const X = 975600, tX = T - 16 * M;
   // bloco X atrasado (16 min > 15), margem ok: tiro
   let r = sniperDecide(null, { now: T, blockT: tX, blockId: X, edge: -6, cfg, diffDropPct: 0.2, feeX: 1 });
@@ -1452,7 +1452,7 @@ test('integração: Sniper avisa no Telegram o tiro e o recuo', async () => {
     const o = await t.call('POST', '/api/orders', { priceEH: 0.40, limitPH: 1, amountBtc: 0.005, poolId: 'pool-1' });
     assert.equal(o.status, 200, JSON.stringify(o.body));
     await tick(env, { fetchFn });                            // primeiro ciclo: aplica a calibração v3 uma vez
-    { const c0 = (await t.call('GET', '/api/status')).body.config; assert.deepEqual([c0.sniperDiffDropPct, c0.sniperAgeMin, c0.sniperUseAge, c0.sniperFeeX, c0.sniperMinEdge, c0.sniperShotMin, c0.sniperCalV], [1, 15, true, 100, -7, 7, 3]); }
+    { const c0 = (await t.call('GET', '/api/status')).body.config; assert.deepEqual([c0.sniperDiffDropPct, c0.sniperAgeMin, c0.sniperUseAge, c0.sniperFeeX, c0.sniperMinEdge, c0.sniperShotMin, c0.sniperCalV], [0.5, 15, true, 100, -7, 7, 4]); }
     await t.call('PUT', '/api/config', { mode: 'active', payoutAddress: 'bitcoincash:q' + 'a'.repeat(41), sniper: true, sniperUseAge: true, sniperAgeMin: 5, sniperMinEdge: -20, sniperDiffDropPct: 50, sniperFeeX: 100, sniperShotMin: 4 });
     const st0 = JSON.parse((await t.env.FD_KV.get('state')) || '{}'); st0.lastBlockT = Date.now() - 10 * 60e3; await t.env.FD_KV.put('state', JSON.stringify(st0)); // último bloco conhecido
     const T = Date.now() + 30 * 60e3;                       // 40 min depois dele: gatilho por atraso
@@ -1489,5 +1489,38 @@ test('integração: vigia de bloco do Sniper roda o ciclo na hora em que o bloco
     const r2 = await blockWatch(t.env, { clock, sleep: async (d) => { ms += d; } });
     assert.equal(r2.fired, false); assert.equal(r2.why, 'já disparado');
     assert.equal((await t.call('GET', '/api/status')).body.watch.firedH, h0 + 1);
+  } finally { t.server.close(); }
+});
+
+test('Sniper v4: dificuldade do bloco em mineração (ASERT), dificuldade × média por bloco e frequência do gatilho', async () => {
+  const { nextDifficulty, diffVsAvg, triggerFreq } = await import('../worker/src/signals.js');
+  // bloco no tempo certo não muda; 28 min derruba ~0,42%; 2 min sobe ~0,16%
+  assert.equal(nextDifficulty(500, 600), 500);
+  assert.ok(Math.abs((1 - nextDifficulty(500, 1680) / 500) * 100 - 0.432) < 0.01);
+  assert.ok(nextDifficulty(500, 120) > 500);
+  assert.equal(nextDifficulty(500, null), 500);
+  // caso real: 975769 (11:42:59, D 536,57 G) e 975770 (12:10:33, D 537,39 G): a do bloco 975770 bate com a fórmula
+  assert.ok(Math.abs(nextDifficulty(536573791989.7249, 222) / 536573791989.7249 - 1 - 0.001518) < 0.0001);
+  const L = []; for (let i = 0; i < 14; i++) L.push({ h: 100 + i, t: i * 600e3, D: 1000 });
+  L[13].t = L[12].t + 5000e3; // último bloco demorou 83 min
+  const dd = diffVsAvg(L);
+  assert.equal(Object.keys(dd).length, 3); assert.ok(Math.abs(dd[113] - (1 - Math.pow(2, (600 - 5000) / 172800)) * 100) < 0.001); assert.equal(dd[112], 0);
+  const F = triggerFreq(dd, { current: 1.5, days: 1 });
+  assert.equal(F.n, 3); assert.deepEqual(F.rows.map((r) => r.pct), [0.3, 0.5, 0.7, 1, 1.5]); assert.equal(F.rows[0].n, 1); assert.equal(F.rows[4].n, 1);
+});
+
+test('integração: Sniper v4 migra o gatilho para 0,5% e a aba Blocos traz a dificuldade × média e a frequência', async () => {
+  const t = await setup();
+  try {
+    await t.env.FD_KV.put('config', JSON.stringify({ fundStable24: false, sniperCalV: 3, sniperDiffDropPct: 1 }));
+    await tick(t.env);
+    const c = (await t.call('GET', '/api/status')).body;
+    assert.equal(c.config.sniperDiffDropPct, 0.5); assert.equal(c.config.sniperCalV, 4);
+    assert.ok(c.state.snInfo.dTip > 0 && c.state.snInfo.dNow > 0);
+    const blocks = []; for (let i = 0; i < 20; i++) blocks.push({ h: 1000 + i, t: 1.7e12 + i * 600e3, D: 500e9 + i * 1e8, tag: '' });
+    await t.env.FD_KV.put('blocks', JSON.stringify(blocks));
+    const b = (await t.call('GET', '/api/blocks')).body;
+    assert.ok(b.snFreq && b.snFreq.n === 9 && b.snFreq.current === 0.5, JSON.stringify(b.snFreq));
+    assert.ok(b.blocks.some((x) => typeof x.dd === 'number'));
   } finally { t.server.close(); }
 });

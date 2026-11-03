@@ -188,3 +188,4 @@ sempre identificado; nada de prometer previsão de sorte (Poisson é sem memóri
 - [ ] Robô multi-algoritmo (pool PPS) para Scrypt/RandomX/Equihash etc.
 - [ ] Mais exchanges: dYdX (CORS ok), MEXC e KuCoin (via backend).
 - Vigia de bloco do Sniper (03/11): cron a cada minuto; o ciclo completo segue a cada 3 min e, nos minutos entre eles, com o Sniper ligado, o servidor confere a altura da rede a cada 6 s e roda o ciclo assim que o bloco vira (recuo, trava zerada e novo tiro sem esperar os 3 min).
+- Sniper v4 (03/11): a dificuldade comparada é a do bloco em mineração (fórmula ASERT a partir do último bloco e do intervalo dele; antes atrasava um bloco). Gatilho de dificuldade em 0,5% (1% disparava em 2,4% das viradas em 288 medidas; 0,5% em ~14%). Cada bloco do registro mostra a dificuldade do bloco seguinte × média de 12 e a aba Blocos mostra a frequência do gatilho por limite.
