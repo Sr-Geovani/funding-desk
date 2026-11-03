@@ -52,7 +52,7 @@ export function sanitizeConfig(input = {}, prev = DEFAULT_CONFIG, limits = limit
   const c = Object.assign({}, DEFAULT_CONFIG, prev), errors = [];
   const num = (k, lo, hi) => {
     if (input[k] === undefined) return;
-    const v = parseFloat(input[k]);
+    const v = parseFloat(String(input[k]).replace(',', '.'));
     if (!isFinite(v) || v < lo || v > hi) errors.push(`${k} fora de ${lo}..${hi}`);
     else c[k] = v;
   };

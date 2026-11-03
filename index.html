@@ -443,36 +443,36 @@ details.card>summary{color:var(--fg);font-size:15px}
           <label>Modo<select id="b_mode"><option value="off">Desligado</option><option value="observe">Observar</option><option value="active">Ativo</option></select></label>
           <label>Ao achar bloco<select id="b_onBlock"><option value="cancel">Encerrar ordem</option><option value="min">Reduzir</option><option value="continue">Continuar</option></select></label>
           <label style="grid-column:1/-1">Endereço BCH da recompensa<input id="b_payoutAddress" autocomplete="off" placeholder="bitcoincash:q..."></label>
-          <label>Margem mínima (%)<input id="b_minEdgePct" type="number" inputmode="decimal" step="0.5"></label>
+          <label>Margem mínima (%)<input id="b_minEdgePct" type="text" inputmode="text" placeholder="ex.: -2,5" autocomplete="off" autocorrect="off" spellcheck="false"></label>
           <label>Regra de entrada<select id="b_minEdgeMode"><option value="fixo">Fixa (margem mínima acima)</option><option value="relativo">Relativa às últimas 24 h</option></select></label>
           <label>Relativa: entrar nos melhores (%)<select id="b_relPct"><option value="50">50% do dia</option><option value="75">25% do dia</option><option value="90">10% do dia</option></select></label>
           <label>Regra de hoje (calculada)<input id="b_relCalc" type="text" readonly tabindex="-1" style="opacity:.85;pointer-events:none"></label>
-          <label>Relativa: piso da margem (%)<input id="b_relFloorPct" type="number" inputmode="decimal" step="0.5"></label>
+          <label>Relativa: piso da margem (%)<input id="b_relFloorPct" type="text" inputmode="text" placeholder="ex.: -2,5" autocomplete="off" autocorrect="off" spellcheck="false"></label>
           <p class="note" id="b_relNow" style="grid-column:1/-1;margin:0"></p>
-          <label>Lance acima do menor (%)<input id="b_bidPremiumPct" type="number" inputmode="decimal" step="0.1"></label>
-          <label>Potência alvo (PH/s)<input id="b_targetPh" type="number" inputmode="decimal"></label>
-          <label>Potência de pausa (PH/s)<input id="b_minPh" type="number" inputmode="decimal" step="0.1"></label>
-          <label>Stop-loss por tentativa (US$)<input id="b_sessionBudgetUsd" type="number" inputmode="decimal"></label>
-          <label>Espera após stop-loss (h)<input id="b_stopCooldownH" type="number" inputmode="decimal" step="1"></label>
-          <label>Limite diário (US$)<input id="b_dailyBudgetUsd" type="number" inputmode="decimal"></label>
-          <label>Perda máxima em 7 dias (US$)<input id="b_weeklyLossUsd" type="number" inputmode="decimal"></label>
-          <label>Taxa do pool (%)<input id="b_poolFeePct" type="number" inputmode="decimal" step="0.5"></label>
-          <label>Taxa do aluguel (%)<input id="b_rentFeePct" type="number" inputmode="decimal" step="0.5"></label>
+          <label>Lance acima do menor (%)<input id="b_bidPremiumPct" type="text" inputmode="decimal" autocomplete="off" autocorrect="off" spellcheck="false"></label>
+          <label>Potência alvo (PH/s)<input id="b_targetPh" type="text" inputmode="decimal" autocomplete="off" autocorrect="off" spellcheck="false"></label>
+          <label>Potência de pausa (PH/s)<input id="b_minPh" type="text" inputmode="decimal" autocomplete="off" autocorrect="off" spellcheck="false"></label>
+          <label>Stop-loss por tentativa (US$)<input id="b_sessionBudgetUsd" type="text" inputmode="decimal" autocomplete="off" autocorrect="off" spellcheck="false"></label>
+          <label>Espera após stop-loss (h)<input id="b_stopCooldownH" type="text" inputmode="decimal" autocomplete="off" autocorrect="off" spellcheck="false"></label>
+          <label>Limite diário (US$)<input id="b_dailyBudgetUsd" type="text" inputmode="decimal" autocomplete="off" autocorrect="off" spellcheck="false"></label>
+          <label>Perda máxima em 7 dias (US$)<input id="b_weeklyLossUsd" type="text" inputmode="decimal" autocomplete="off" autocorrect="off" spellcheck="false"></label>
+          <label>Taxa do pool (%)<input id="b_poolFeePct" type="text" inputmode="decimal" autocomplete="off" autocorrect="off" spellcheck="false"></label>
+          <label>Taxa do aluguel (%)<input id="b_rentFeePct" type="text" inputmode="decimal" autocomplete="off" autocorrect="off" spellcheck="false"></label>
           <label>Pool para ordens novas<select id="b_poolId"></select></label>
-          <label>Valor da ordem nova (BTC)<input id="b_orderAmountBtc" type="number" inputmode="decimal" step="0.001"></label>
+          <label>Valor da ordem nova (BTC)<input id="b_orderAmountBtc" type="text" inputmode="decimal" autocomplete="off" autocorrect="off" spellcheck="false"></label>
         </div>
         <div class="checks" style="margin-top:10px"><label><input type="checkbox" id="b_autoCreate">criar ordem sozinho quando o sinal ficar verde</label></div>
         <details style="margin-top:10px"><summary><b>Modo Sniper</b> (tiro curto quando o bloco do BCH atrasa)</summary>
           <p class="note" style="margin:6px 0">Com o Sniper ligado, a regra de entrada por margem fica de lado: o robô mantém uma ordem na potência de espera e sobe para a potência do tiro quando a dificuldade do BCH cai em relação à média dos últimos 12 blocos ou quando a mempool enche em relação à média do dia, desde que a margem do tiro esteja acima do limite. Recua quando sai bloco novo ou quando o tiro passa do prazo (um tiro por bloco). Stop-loss e limites continuam valendo. O servidor confere a cada 3 min. O cenário "Sniper" na tabela de cenários mede se compensa.</p>
           <div class="checks"><label><input type="checkbox" id="b_sniper">ligar o Modo Sniper</label><label><input type="checkbox" id="b_sniperUseAge">usar também o atraso do bloco (não aumenta a chance)</label></div>
           <div class="grid2" style="margin-top:6px">
-            <label>Gatilho: dificuldade abaixo da média de 12 blocos (%)<input id="b_sniperDiffDropPct" type="number" inputmode="decimal" step="0.5"></label>
-            <label>Gatilho: mempool acima da média do dia (vezes)<input id="b_sniperFeeX" type="number" inputmode="decimal" step="0.5"></label>
-            <label>Gatilho opcional: bloco há mais de (min)<input id="b_sniperAgeMin" type="number" inputmode="decimal" step="1"></label>
-            <label>Margem mínima do tiro (%)<input id="b_sniperMinEdge" type="number" inputmode="decimal" step="0.5"></label>
-            <label>Potência do tiro (PH/s)<input id="b_sniperPh" type="number" inputmode="decimal" step="1"></label>
-            <label>Potência de espera (PH/s)<input id="b_sniperIdlePh" type="number" inputmode="decimal" step="1"></label>
-            <label>Prazo do tiro sem bloco (min)<input id="b_sniperShotMin" type="number" inputmode="decimal" step="1"></label>
+            <label>Gatilho: dificuldade abaixo da média de 12 blocos (%)<input id="b_sniperDiffDropPct" type="text" inputmode="decimal" autocomplete="off" autocorrect="off" spellcheck="false"></label>
+            <label>Gatilho: mempool acima da média do dia (vezes)<input id="b_sniperFeeX" type="text" inputmode="decimal" autocomplete="off" autocorrect="off" spellcheck="false"></label>
+            <label>Gatilho opcional: bloco há mais de (min)<input id="b_sniperAgeMin" type="text" inputmode="decimal" autocomplete="off" autocorrect="off" spellcheck="false"></label>
+            <label>Margem mínima do tiro (%)<input id="b_sniperMinEdge" type="text" inputmode="text" placeholder="ex.: -2,5" autocomplete="off" autocorrect="off" spellcheck="false"></label>
+            <label>Potência do tiro (PH/s)<input id="b_sniperPh" type="text" inputmode="decimal" autocomplete="off" autocorrect="off" spellcheck="false"></label>
+            <label>Potência de espera (PH/s)<input id="b_sniperIdlePh" type="text" inputmode="decimal" autocomplete="off" autocorrect="off" spellcheck="false"></label>
+            <label>Prazo do tiro sem bloco (min)<input id="b_sniperShotMin" type="text" inputmode="decimal" autocomplete="off" autocorrect="off" spellcheck="false"></label>
           </div>
         </details>
         <div class="row" style="margin-top:10px"><button class="pri" id="b_save">Salvar robô</button><button id="b_tick">Rodar ciclo agora</button></div>

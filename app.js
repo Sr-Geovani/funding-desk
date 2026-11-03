@@ -1479,7 +1479,7 @@ function renderOps(){
   var algo=(st&&st.algo)||'SHA256ASICBOOST',okPools=ops.pools.filter(function(p){return !p.algorithm||p.algorithm===algo});
   var popts='<option value="">—</option>'+okPools.map(function(p){return '<option value="'+esc(p.id)+'">'+esc(p.name)+' ('+esc(p.stratumHostname)+')</option>'}).join('');
   $('b_poolId').innerHTML=popts;$('n_pool').innerHTML=popts;
-  if(!ops.dirty)BOT_FIELDS.forEach(function(k){var el=$('b_'+k);if(el)el.value=cfg[k]===undefined?'':cfg[k]});
+  if(!ops.dirty)BOT_FIELDS.forEach(function(k){var el=$('b_'+k);if(el){var v=cfg[k];el.value=v===undefined||v===null?'':(typeof v==='number'?String(v).replace('.',','):v)}});
   relCalcUI();
   (function(){var el=$('b_rules');if(!el){var anchor=$('b_minEdgePct');if(!anchor)return;var box=anchor.closest('.grid2')||anchor.parentNode;el=document.createElement('div');el.id='b_rules';el.className='box';el.style.margin='0 0 10px';box.parentNode.insertBefore(el,box)}
     var S=st.state||{},on=function(x){return x?'<span class="chip ok">ligada</span>':'<span class="chip">desligada</span>'},sn=!!cfg.sniper,rel=cfg.minEdgeMode==='relativo';
@@ -1509,7 +1509,9 @@ function renderOps(){
 function opsMsg(id,t,bad){$(id).textContent=t;$(id).className='note'+(bad?' bad':'')}
 function botForm(){
   var o={autoCreate:$('b_autoCreate').checked,sniper:!!($('b_sniper')&&$('b_sniper').checked),sniperUseAge:!!($('b_sniperUseAge')&&$('b_sniperUseAge').checked)};
-  BOT_FIELDS.forEach(function(k){var v=$('b_'+k).value;o[k]=['mode','onBlock','payoutAddress','poolId','minEdgeMode'].indexOf(k)>=0?v:parseFloat(v)});
+  BOT_FIELDS.forEach(function(k){var el=$('b_'+k);if(!el)return;var v=String(el.value==null?'':el.value).trim();if(['mode','onBlock','payoutAddress','poolId','minEdgeMode'].indexOf(k)>=0){o[k]=v;return}
+    // número: aceita vírgula (teclado em português) e ignora campo vazio (mantém o valor salvo)
+    if(v==='')return;var n=parseFloat(v.replace(/\s/g,'').replace(/[−–]/g,'-').replace(',','.'));if(isFinite(n))o[k]=n});
   return o;
 }
 var PRESETS={
