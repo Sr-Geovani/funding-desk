@@ -21,7 +21,7 @@ import { bitfinexOf, deribitBasisOf, ethenaOf, hlpOf, zpoolOf, brlOf, cdiOf, lig
 import { FUND_MODEL } from './fundmodel.js';
 import { updateHistory, pickCoins, scorePairs, stablePairs, pairStatsOf } from './fundai.js';
 import { blockRecord, blockSummary, poolOf, luckBoard, needPH } from './blocks.js';
-import { darrOf, retargetOf, momentumOf, windowMeter, weekAdd, marginStats, asertForecast, relativeMinEdge } from './signals.js';
+import { darrOf, retargetOf, momentumOf, windowMeter, weekAdd, marginStats, asertForecast, relativeMinEdge, nextDifficulty, diffVsAvg, triggerFreq } from './signals.js';
 import { brainStep, analysis, levelOf, TYPES, actionPlan, bandThreshold, plain, balancePlan } from './brain.js';
 import FDI from '../../insights.js';
 import { withCreds, reloadCreds, saveCreds, credStatus, parseNiceHash, TG_TOKEN_RE, chatFromUpdates } from './creds.js';
@@ -161,11 +161,17 @@ export async function tick(env, opts = {}) {
   }
 
   // Calibração do Sniper v3 (03/11): aplica uma vez os parâmetros pedidos à configuração salva (o usuário pode mudar depois).
-  if (cfg.sniperCalV !== 3) {
-    Object.assign(cfg, { sniperDiffDropPct: 1, sniperUseAge: true, sniperAgeMin: 15, sniperFeeX: 100, sniperMinEdge: -7, sniperShotMin: 7, sniperCalV: 3 });
+  // v4 (03/11): gatilho de dificuldade em 0,5% (com a dificuldade do próximo bloco, 1% disparava em 2,4% das viradas; 0,5% em ~14%).
+  if (cfg.sniperCalV === 3) {
+    cfg.sniperDiffDropPct = 0.5; cfg.sniperCalV = 4;
+    await kvPut(env, 'config', Object.assign(await kvGet(env, 'config', {}), { sniperDiffDropPct: 0.5, sniperCalV: 4 }));
+    log.push({ t: now, kind: 'config', text: 'Sniper: dificuldade agora é a do bloco em mineração (fórmula da rede) e o gatilho passou para 0,5% abaixo da média de 12 blocos' });
+  }
+  if (cfg.sniperCalV !== 3 && cfg.sniperCalV !== 4) {
+    Object.assign(cfg, { sniperDiffDropPct: 0.5, sniperUseAge: true, sniperAgeMin: 15, sniperFeeX: 100, sniperMinEdge: -7, sniperShotMin: 7, sniperCalV: 4 });
     const saved = await kvGet(env, 'config', {});
-    await kvPut(env, 'config', Object.assign(saved, { sniperDiffDropPct: 1, sniperUseAge: true, sniperAgeMin: 15, sniperFeeX: 100, sniperMinEdge: -7, sniperShotMin: 7, sniperCalV: 3 }));
-    log.push({ t: now, kind: 'config', text: 'Sniper recalibrado: dificuldade 1% abaixo da média de 12 blocos, atraso de 15 min, mempool 100 (desligada), trava de margem −7%, prazo do tiro 7 min, um tiro por bloco' });
+    await kvPut(env, 'config', Object.assign(saved, { sniperDiffDropPct: 0.5, sniperUseAge: true, sniperAgeMin: 15, sniperFeeX: 100, sniperMinEdge: -7, sniperShotMin: 7, sniperCalV: 4 }));
+    log.push({ t: now, kind: 'config', text: 'Sniper recalibrado: dificuldade 0,5% abaixo da média de 12 blocos, atraso de 15 min, mempool 100 (desligada), trava de margem −7%, prazo do tiro 7 min, um tiro por bloco' });
   }
   // Regra relativa de entrada (opcional): troca a margem mínima pela dos melhores momentos das últimas 24 h, com piso.
   if (cfg.minEdgeMode === 'relativo') {
@@ -194,7 +200,14 @@ export async function tick(env, opts = {}) {
   let dHist = Array.isArray(state.dHist) ? state.dHist.slice() : (await kvGet(env, 'blocks', [])).slice(-12).map((b) => b.D).filter((x) => x > 0);
   for (const b of newBlocks) if (b.difficulty > 0) dHist.push(b.difficulty);
   dHist = dHist.slice(-12);
-  const dNow = info.ok ? info.v.difficulty : null, dAvg = dHist.length >= 6 ? dHist.reduce((a, x) => a + x, 0) / dHist.length : null;
+  // Dificuldade de AGORA = a do bloco que está sendo minerado (ASERT a partir do último bloco e do intervalo dele).
+  // Antes usava a do último bloco minerado, que ainda não reflete a demora dele (atrasava um bloco).
+  let tHist = Array.isArray(state.tHist) ? state.tHist.slice() : (await kvGet(env, 'blocks', [])).slice(-2).map((b) => [b.h, b.t]);
+  for (const b of newBlocks) if (b.time) tHist.push([b.height, b.time]);
+  tHist = tHist.sort((a, b) => a[0] - b[0]).filter((x, i, a) => !i || x[0] !== a[i - 1][0]).slice(-3);
+  const tipD = info.ok ? info.v.difficulty : null, tip = tHist[tHist.length - 1], pre = tHist[tHist.length - 2];
+  const tipDt = info.ok && tip && pre && tip[0] === info.v.height && pre[0] === tip[0] - 1 ? (tip[1] - pre[1]) / 1000 : null;
+  const dNow = tipD ? nextDifficulty(tipD, tipDt) : null, dAvg = dHist.length >= 6 ? dHist.reduce((a, x) => a + x, 0) / dHist.length : null;
   const diffDropPct = dNow && dAvg ? (1 - dNow / dAvg) * 100 : null;
   // mpHist: tamanho da mempool a cada 15 min nas últimas 24 h; cheia = tamanho de agora dividido pela média.
   let mpHist = Array.isArray(state.mpHist) ? state.mpHist.filter((x) => now - x[0] <= 864e5) : [];
@@ -203,7 +216,7 @@ export async function tick(env, opts = {}) {
   const mpAvg = mpHist.length >= 8 ? mpHist.reduce((a, x) => a + x[1], 0) / mpHist.length : null;
   const feeX = mpBytes !== null && mpAvg > 0 ? mpBytes / mpAvg : null;
   const snMetrics = { diffDropPct, feeX };
-  const snInfo = { at: now, dNow, dAvg, diffDropPct, mpBytes, mpAvg, feeX, feeBchMin: mpBytes !== null ? mpBytes * 1e-8 : null };
+  const snInfo = { at: now, dNow, dTip: tipD, tipDt, dAvg, diffDropPct, mpBytes, mpAvg, feeX, feeBchMin: mpBytes !== null ? mpBytes * 1e-8 : null };
   const dec = decide({ cfg, mkt, orders, state, now, units, limits, blockEvent, weekLossUsd, blockT: lastNetBlockT, blockId: lastNetHeight, snMetrics });
   if (dec.state.weekStop && !state.weekStop) await notify(env, `limite de perda semanal atingido (perda real de US$${weekLossUsd.toFixed(2).replace('.', ',')} em 7 dias; limite US$${cfg.weeklyLossUsd}). Robô encerrou as ordens e não cria novas até a perda da semana baixar.`, fetchFn);
 
@@ -633,7 +646,7 @@ export async function tick(env, opts = {}) {
     sniper: paperSniper ? { shot: paperSniper.shot, reason: paperSniper.reason } : null, fund: { passing: ((funding && funding.best) || []).length, sim: fundPaper ? fundPaperSummary(fundPaper, FD.DEFAULT_FEES) : null } });
 
   const next = Object.assign({}, dec.state, alertState, {
-    lastTick: now, verified: Object.fromEntries(Object.entries(verified).filter(([, x]) => now - x.at <= 6 * 3600e3)), ai: br.ai, aiAnalysis, plan, acct, algoMap, mempool, stable24, pairStats, msig, darr, recentBlocks, nhWeek, paper, paperBurst, paperPlan, paperAlways, paperSniper, dHist, mpHist, snInfo, hashMkts, fronts, frontsPaper, ltStreak, fundPaperLT, market2, aiPanorama, entryCheck, calib, robotTest, luck24, balPlan, minEdgeNow: { value: cfg.minEdgePct, relative: !!cfg.minEdgeRel, base: cfg.minEdgeRel ? cfg.minEdgeBase : cfg.minEdgePct, sniper: !!cfg.sniper }, aiReport: aiRep, mktMargin, asertF, execLog, bestScen, paperArchive, paperPriceV: 2, blockBuf, blockFlush, lastBlockT, real, fundPaper, alertScore, algoPaper, algoTs, aiScores, fundPaperAI, fhistHour, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig, errNotified,
+    lastTick: now, verified: Object.fromEntries(Object.entries(verified).filter(([, x]) => now - x.at <= 6 * 3600e3)), ai: br.ai, aiAnalysis, plan, acct, algoMap, mempool, stable24, pairStats, msig, darr, recentBlocks, nhWeek, paper, paperBurst, paperPlan, paperAlways, paperSniper, dHist, tHist, mpHist, snInfo, hashMkts, fronts, frontsPaper, ltStreak, fundPaperLT, market2, aiPanorama, entryCheck, calib, robotTest, luck24, balPlan, minEdgeNow: { value: cfg.minEdgePct, relative: !!cfg.minEdgeRel, base: cfg.minEdgeRel ? cfg.minEdgeBase : cfg.minEdgePct, sniper: !!cfg.sniper }, aiReport: aiRep, mktMargin, asertF, execLog, bestScen, paperArchive, paperPriceV: 2, blockBuf, blockFlush, lastBlockT, real, fundPaper, alertScore, algoPaper, algoTs, aiScores, fundPaperAI, fhistHour, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig, errNotified,
     market: mkt.ok ? { breakEvenEH: mkt.breakEvenEH, capEH: mkt.capEH, fillEH: mkt.fillEH, medianEH: mkt.medianEH, bidEH: mkt.bidEH,
       edgeAtBidPct: mkt.edgeAtBidPct, green: mkt.green, D: mkt.D, bookTotalPH: book ? book.totalPH : 0, bchUsd: mkt.bchUsd, btcUsd: mkt.btcUsd, costPerBlockUsd: mkt.costPerBlockUsd,
       hashpriceNet: mkt.hashpriceNet, blockNetUsd: mkt.blockNetUsd, phDaysPerBlock: mkt.phDaysPerBlock, market: mkt.market } : { ok: false, reason: mkt.reason },
@@ -802,8 +815,11 @@ async function api(req, env, url, fetchFn) {
   if (p === '/blocks' && m === 'GET') {
     const st = await kvGet(env, 'state', {});
     const list = (await kvGet(env, 'blocks', [])).concat(st.blockBuf || []).map((b) => Object.assign(b, poolOf(b.tag))); // nomes sempre com a regra atual
-    const mk = st.market || {};
-    return json({ blocks: list.slice(-300).reverse(), summary: blockSummary(list, { fixAt: st.paperArchive && st.paperArchive.at }),
+    const mk = st.market || {}, cfg = await getConfig(env), dd = diffVsAvg(list);
+    for (const b of list) if (dd[b.h] !== undefined) b.dd = dd[b.h]; // dificuldade do bloco seguinte × média de 12 (positivo = abaixo)
+    const sorted = list.filter((b) => dd[b.h] !== undefined).map((b) => b.t).sort((a, b) => a - b);
+    const days = sorted.length > 1 ? (sorted[sorted.length - 1] - sorted[0]) / 864e5 : null;
+    return json({ snFreq: triggerFreq(dd, { current: cfg.sniperDiffDropPct, days }), blocks: list.slice(-300).reverse(), summary: blockSummary(list, { fixAt: st.paperArchive && st.paperArchive.at }),
       luck: luckBoard(list, { now: Date.now(), priceEH: mk.bidEH, btcUsd: mk.btcUsd, blockUsd: mk.blockNetUsd, rentFeePct: 3 }) });
   }
   if (p === '/pool/check' && m === 'POST') {
