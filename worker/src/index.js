@@ -408,9 +408,12 @@ export async function tick(env, opts = {}) {
     const aliveIds = new Set(orders.filter((o) => o.alive).map((o) => o.id)), cancelledNow = new Set(results.filter((r) => r.type === 'cancel' && r.executed).map((r) => r.id));
     for (const o of orders) if (o.alive && (cfg.managed || []).includes(o.id)) ordSeen[o.id] = { amount: o.amountBtc, paid: o.paidBtc, avail: o.availableBtc, at: now, by: (ordSeen[o.id] || {}).by || null };
     for (const id of cancelledNow) if (ordSeen[id]) ordSeen[id].by = 'robo';
-    const gone = Object.keys(ordSeen).filter((id) => !aliveIds.has(id));
+    const createdNow = new Set(results.filter((r) => r.type === 'create' && r.executed).map((r) => r.id));
+    const gone = [...new Set(Object.keys(ordSeen).concat(cfg.managed || []))].filter((id) => !aliveIds.has(id) && !createdNow.has(id) && !(calib && calib.id === id));
     for (const id of gone.slice(0, 3)) {
-      const was = ordSeen[id], fin = await settle(nh.getOrder(id)), f = fin.ok ? fin.v : null;
+      const was = ordSeen[id] || { legacy: true }, fin = await settle(nh.getOrder(id)), f = fin.ok ? fin.v : null;
+      if (!f && was.legacy) { cfg.managed = (cfg.managed || []).filter((x) => x !== id); await kvPut(env, 'config', Object.assign(await kvGet(env, 'config', {}), { managed: cfg.managed })); continue; } // sem dado nenhum: só limpa
+      if (f && f.alive && !/COMPLET|CANCEL|EXPIRED|DEAD/i.test(String(f.status || ''))) continue; // ainda viva (só não veio na lista)
       const paid = f ? f.paidBtc : was.paid, amount = f ? f.amountBtc : was.amount, st = f ? String(f.status || '') : '';
       const why = was.by === 'robo' || /CANCEL/i.test(st) && was.by === 'robo' ? 'robo' : (/COMPLET|EXPIRED/i.test(st) || (amount > 0 && amount - paid < 0.00005)) ? 'saldo' : 'fora';
       const nextAmt = orderAmount(cfg, units, limits, walletBtc), btc = mkt.btcUsd || 0, f6 = (x) => (x || 0).toFixed(6).replace('.', ',');
@@ -419,7 +422,7 @@ export async function tick(env, opts = {}) {
         : why === 'robo' ? `Ordem ${id.slice(0, 8)} encerrada pelo robô (gastou ${f6(paid)} BTC).` : `Ordem ${id.slice(0, 8)} encerrada fora do robô${st ? ' (status na NiceHash: ' + st + ')' : ''}; gastou ${f6(paid)} de ${f6(amount)} BTC.${after}`;
       orderEnds.push({ t: now, id, why, paid, amount, status: st, text });
       log.push({ t: now, kind: 'acao', text });
-      if (why !== 'robo') await notify(env, text, fetchFn);
+      if (why !== 'robo' && !(was.legacy && !(f && f.createdTs && now - f.createdTs < 24 * 3600e3))) await notify(env, text, fetchFn); // ordens antigas: só registra
       delete ordSeen[id];
       if ((cfg.managed || []).includes(id)) { cfg.managed = cfg.managed.filter((x) => x !== id); await kvPut(env, 'config', Object.assign(await kvGet(env, 'config', {}), { managed: cfg.managed })); }
     }
