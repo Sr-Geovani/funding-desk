@@ -7,7 +7,7 @@ import { createRequire } from 'node:module';
 import { authMessage, hmacHex, algoUnits, createClient } from '../worker/src/nicehash.js';
 import { paidTo, normAddr, createChain } from '../worker/src/chain.js';
 import { DEFAULT_CONFIG, sanitizeConfig, parseBook, computeMarket, decide, DOWN_STEP_MS } from '../worker/src/bot.js';
-import worker, { tick, blockWatch } from '../worker/src/index.js';
+import worker, { tick, blockWatch, StoreDO } from '../worker/src/index.js';
 import { createMock, MOCK_KEYS } from '../worker/dev/mock.mjs';
 import { memoryKV } from '../worker/dev/server.mjs';
 import { seal, unseal, chatFromUpdates, parseNiceHash } from '../worker/src/creds.js';
@@ -1672,4 +1672,38 @@ test('limite diário conta o gasto real do dia, inclusive de ordens que já acab
     state: { real: { days: { [day]: { spendUsd: 160 } } } }, blockT: T - 60e3, blockId: 1, walletBtc: 0.005 });
   assert.ok(d.notes.some((n) => /limite diário atingido/.test(n)), JSON.stringify(d.notes));
   assert.ok(!d.actions.some((a) => a.type === 'create'));
+});
+
+function fakeStoreNS() {
+  const m = new Map(), storage = {
+    get: async (k) => (Array.isArray(k) ? new Map(k.filter((x) => m.has(x)).map((x) => [x, m.get(x)])) : m.get(k)),
+    put: async (o) => { for (const [k, v] of Object.entries(o)) m.set(k, v); },
+    delete: async (ks) => { for (const k of ks) m.delete(k); }
+  };
+  const obj = new StoreDO({ storage });
+  return { m, ns: { idFromName: () => 'main', get: () => ({ fetch: (u, o) => obj.fetch(new Request(u, o)) }) } };
+}
+
+test('armazenamento em Durable Object: pedaços de 120 KB, migra do KV na primeira leitura e o ciclo roda inteiro', async () => {
+  const t = await setup();
+  try {
+    await tick(t.env);                                   // estado começa no KV (como hoje em produção)
+    const kvState = await t.env.FD_KV.get('state'); assert.ok(kvState);
+    const { m, ns } = fakeStoreNS();
+    t.env.FD_STORE = ns;
+    const kvPuts = []; const put0 = t.env.FD_KV.put.bind(t.env.FD_KV); t.env.FD_KV.put = async (k, v) => { kvPuts.push(k); return put0(k, v); };
+    await tick(t.env);                                    // lê do KV uma vez, grava só no Durable Object
+    assert.deepEqual(kvPuts, [], 'nenhuma gravação no KV');
+    assert.ok(m.has('n:state') && m.has('n:config'));
+    const st = (await t.call('GET', '/api/status')).body;
+    assert.ok(st.state.lastTick > 0 && st.config);
+    // valor grande vira vários pedaços e volta igual
+    const big = 'x'.repeat(300000);
+    await ns.get().fetch('https://store/put?k=big', { method: 'PUT', body: big });
+    assert.equal(m.get('n:big'), 3);
+    assert.equal(await (await ns.get().fetch('https://store/get?k=big')).text(), big);
+    await ns.get().fetch('https://store/put?k=big', { method: 'PUT', body: 'curto' });
+    assert.equal(m.get('n:big'), 1); assert.ok(!m.has('c:big:2'));
+    assert.equal((await ns.get().fetch('https://store/get?k=nada')).status, 404);
+  } finally { t.server.close(); }
 });

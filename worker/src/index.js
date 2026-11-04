@@ -80,12 +80,58 @@ async function readOk(req, env, url) {
 }
 
 /* ---------- armazenamento (KV) ---------- */
+// Armazenamento: o KV do plano gratuito aceita só 1.000 gravações por dia (estourou em 04/11 com o vigia a cada minuto).
+// Com o Durable Object FD_STORE (SQLite, ~100 mil gravações por dia no gratuito), tudo é lido e gravado nele; o KV fica
+// só como origem na primeira leitura de cada chave (migração automática). Sem FD_STORE (testes), usa o KV como antes.
+const CHUNK = 120000;
+function store(env) { return env.FD_STORE.get(env.FD_STORE.idFromName('main')); }
+async function storeGet(env, key) {
+  const r = await store(env).fetch('https://store/get?k=' + encodeURIComponent(key));
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error('armazenamento: HTTP ' + r.status);
+  return r.text();
+}
+async function storePut(env, key, text) {
+  const r = await store(env).fetch('https://store/put?k=' + encodeURIComponent(key), { method: 'PUT', body: text });
+  if (!r.ok) throw new Error('armazenamento: HTTP ' + r.status + ' ' + (await r.text()).slice(0, 120));
+}
 async function kvGet(env, key, def) {
+  if (env.FD_STORE) {
+    let v = await storeGet(env, key);
+    if (v === null && env.FD_KV) { v = await env.FD_KV.get(key); if (v) await storePut(env, key, v); } // migração da chave
+    return v ? JSON.parse(v) : def;
+  }
   if (!env.FD_KV) throw new Error('KV FD_KV não configurado no Worker');
   const v = await env.FD_KV.get(key);
   return v ? JSON.parse(v) : def;
 }
-async function kvPut(env, key, val) { await env.FD_KV.put(key, JSON.stringify(val)); }
+async function kvPut(env, key, val) {
+  if (env.FD_STORE) return storePut(env, key, JSON.stringify(val));
+  await env.FD_KV.put(key, JSON.stringify(val));
+}
+// Durable Object do armazenamento: guarda cada chave em pedaços de 120 KB (limite de valor do armazenamento).
+export class StoreDO {
+  constructor(state) { this.st = state.storage; }
+  async fetch(req) {
+    const u = new URL(req.url), k = u.searchParams.get('k');
+    if (!k) return new Response('sem chave', { status: 400 });
+    if (u.pathname === '/get') {
+      const n = await this.st.get('n:' + k);
+      if (n === undefined) return new Response('', { status: 404 });
+      const keys = Array.from({ length: n }, (_, i) => 'c:' + k + ':' + i), parts = await this.st.get(keys);
+      return new Response(keys.map((x) => parts.get(x) || '').join(''));
+    }
+    if (u.pathname === '/put' && req.method === 'PUT') {
+      const text = await req.text(), n = Math.max(1, Math.ceil(text.length / CHUNK)), obj = { ['n:' + k]: n };
+      for (let i = 0; i < n; i++) obj['c:' + k + ':' + i] = text.slice(i * CHUNK, (i + 1) * CHUNK);
+      const old = await this.st.get('n:' + k);
+      await this.st.put(obj);
+      if (old > n) await this.st.delete(Array.from({ length: old - n }, (_, i) => 'c:' + k + ':' + (n + i)));
+      return new Response('ok');
+    }
+    return new Response('rota', { status: 404 });
+  }
+}
 async function getConfig(env) { return Object.assign({}, DEFAULT_CONFIG, await kvGet(env, 'config', {})); }
 async function appendLog(env, entries) {
   if (!entries.length) return;
@@ -1119,7 +1165,7 @@ export async function blockWatch(env, opts = {}) {
   const fetchFn = opts.fetchFn || fetch, clock = opts.clock || Date.now, sleep = opts.sleep || ((ms) => new Promise((r) => setTimeout(r, ms)));
   const budget = opts.budgetMs === undefined ? 35e3 : opts.budgetMs, every = opts.everyMs || 6e3, start = clock();
   const cfg = await getConfig(env);
-  if (!cfg.sniper || !env.FD_KV) return { fired: false, why: 'sniper desligado' };
+  if (!cfg.sniper || !(env.FD_KV || env.FD_STORE)) return { fired: false, why: 'sniper desligado' };
   const chain = chainClient(env, fetchFn);
   let state = await kvGet(env, 'state', {}), known = state.lastHeight || 0, polls = 0, seen = known, fired = 0, last = null;
   // Também dispara o ciclo na hora dos eventos de tempo do Sniper (antes só no ciclo de 3 min, com até ~4 min de atraso):

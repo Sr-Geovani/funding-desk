@@ -27,3 +27,12 @@ MAX_DAILY_USD = "1000"
 # NiceHash e Telegram: cadastre no painel (Ajustes → Conectar contas). Ficam cifrados no KV e vencem
 # estes segredos opcionais, se existirem: NH_API_KEY, NH_API_SECRET, NH_ORG_ID, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID.
 # O ambiente da NiceHash (teste/produção) também é escolhido no painel; NH_ENV abaixo é só o padrão.
+
+# Armazenamento principal (o KV gratuito só aceita 1.000 gravações por dia; o Durable Object SQLite aceita muito mais)
+[[durable_objects.bindings]]
+name = "FD_STORE"
+class_name = "StoreDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["StoreDO"]
