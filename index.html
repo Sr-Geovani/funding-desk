@@ -361,6 +361,7 @@ details.card>summary{color:var(--fg);font-size:15px}
       <button data-sub="journey" aria-pressed="false">Jornada</button>
       <button data-sub="plan" aria-pressed="false">Planejar</button>
       <button data-sub="algos" aria-pressed="false">Algoritmos</button>
+      <button data-sub="pps" aria-pressed="false">Moedas PPS</button>
       <button data-sub="ops" aria-pressed="false">Operar</button>
       <button data-sub="net" aria-pressed="false">Rede</button>
     </div>
@@ -438,6 +439,7 @@ details.card>summary{color:var(--fg);font-size:15px}
         <p class="note" style="margin:0">A aba "Agora" e o robô automático cuidam do SHA-256 (BCH) em modo solo. Os outros algoritmos se mineram com <b>ordem manual na NiceHash</b> apontada para um <b>pool da moeda</b>: o pool paga proporcional ao hash entregue (pouca variação), então o resultado esperado é a margem abaixo. Os alertas desta aba avisam quando cada um começa e para de compensar.</p></div>
       <div id="m_algos" class="stack"></div>
     </div>
+    <div id="mine-pps" class="stack" hidden><div class="card sig" id="pps_head"></div><div class="card" id="pps_tab"></div><div class="card" id="pps_log"></div><div class="card" id="pps_auto"></div></div>
     <div id="mine-ops" class="stack" hidden>
       <div class="card" id="o_conn"></div>
       <div class="card sig" id="o_live" aria-live="polite"></div>

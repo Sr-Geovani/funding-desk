@@ -1574,7 +1574,7 @@ document.addEventListener('click',function(e){
   go.then(function(){$('cal_msg')&&($('cal_msg').textContent='Feito. Atualizando…');loadOps()},function(er){b.disabled=false;if($('cal_msg'))$('cal_msg').textContent='Não deu: '+er.message});
 });
 function renderOps(){
-  try{renderLive();renderXmr()}catch(e){}
+  try{renderLive();renderXmr();renderPps()}catch(e){}
   var c=apiCfg(),st=ops.status;
   if(!c.url){
     $('o_conn').innerHTML='<h2>Backend não configurado</h2><p class="note">Para operar (ordens, robô, parada no bloco) é preciso o backend. É só mandar um token do Cloudflare no chat: o passo a passo de 4 itens está em Ajustes.</p><div class="row"><button class="sm" data-go="set" data-focus="#setup">Abrir Ajustes</button></div>';
@@ -1849,7 +1849,7 @@ function renderBrain(){
   brainStart();
   $('brainInfo').innerHTML=
     '<div class="kv" style="margin-top:2px"><div><small>Dinheiro real</small><span style="font-size:15px">gasto '+usd(realSpent,0)+'</span><div class="note">'+((S.myBlocks||[]).length)+' blocos</div></div><div><small>Moedas PPS (como real)</small><span class="'+(ppsRes>0?'good':ppsRes<0?'bad':'')+'" style="font-size:15px">'+(ppsRes>=0?'+':'')+usd(ppsRes)+'</span><div class="note">'+ppsAll.length+' algoritmos acompanhados</div></div></div>'+
-    placarHTML(S,cfg)+'<div class="eyebrow" style="margin:10px 0 4px">Oportunidades agora</div><p class="note" style="margin:0 0 6px">A porcentagem é a margem: quanto a moeda paga acima (+) ou abaixo (−) do que custa o aluguel, já com as taxas. +5% = cada US$100 de aluguel voltam US$105.</p><div class="stack" style="gap:6px">'+(oppH||'<p class="note">O mapa de moedas atualiza a cada 15 min.</p>')+'</div>'+
+    placarHTML(S,cfg)+'<button class="sm pri" data-go="mine:pps" style="margin-top:8px">Ver o mapa das moedas PPS</button><div class="eyebrow" style="margin:10px 0 4px">Oportunidades agora</div><p class="note" style="margin:0 0 6px">A porcentagem é a margem: quanto a moeda paga acima (+) ou abaixo (−) do que custa o aluguel, já com as taxas. +5% = cada US$100 de aluguel voltam US$105.</p><div class="stack" style="gap:6px">'+(oppH||'<p class="note">O mapa de moedas atualiza a cada 15 min.</p>')+'</div>'+
     (yH?'<p class="note" style="margin:6px 0 0">Rendimentos ao ano em dólar: '+yH+'. CDI em reais: '+pct((S.fronts&&S.fronts.cdi)||13.65,2)+' (sem risco de cripto; em dólar some a variação do câmbio).</p>':'')+
     (acts.length?'<details style="margin-top:8px" open><summary>Atividade agora</summary><div class="stack" style="gap:2px;margin-top:4px">'+acts.map(function(x){return '<div class="note">'+hhmm(new Date(x.t))+' · '+esc(x.text)+'</div>'}).join('')+'</div></details>':'')+
     '<p class="note" style="margin:6px 0 0">Converse com o Jarbas no Telegram: /status, /monero, /bch, /funding, /saldo, /copiloto, /relatorio.</p>';
@@ -1872,6 +1872,43 @@ function placarHTML(S,cfg){
     row('Funding','simulado + reteste de 90 dias',fp?usd(fp.netUsd)+' em '+fp.closed+' operações':'—','reteste 03/08–01/11: 27% de acerto, −US$0,34 por operação; spread some em ~11 h','descartado em altcoin','bad')+
     row('Rendimentos','dólar',ys.length?'até '+pct(ys[0],1)+' a.a.':'—','CDI em reais: '+pct(cdi,2)+' a.a.','CDI vence',ys[0]>=cdi?'good':'')+
     '</table></div>'}
+// Moedas PPS: o mapa da frente que tem janelas positivas, como fizemos com o BCH. Lastro das janelas desde 30/10
+// (mapa de outras moedas), operação "como real", margem hora a hora, preço do hash no ano e tempo até o pagamento.
+function renderPps(){
+  var hd=$('pps_head');if(!hd)return;var st=ops.status,S=st&&st.state,cfg=(st&&st.config)||{};
+  if(!S){hd.innerHTML='<h2 style="margin:0">Moedas PPS</h2><p class="note">Conecte o backend (Ajustes) para ver o mapa.</p>';['pps_tab','pps_log','pps_auto'].forEach(function(i){$(i).innerHTML=''});return}
+  var A=(S.algoPaper&&S.algoPaper.algos)||{},since=S.algoPaper&&S.algoPaper.since,days=since?Math.max(0.1,((S.algoPaper.lastTs||Date.now())-since)/864e5):1;
+  var AM={};(S.algoMapNow||[]).concat((S.scan&&S.scan.extra)||[]).forEach(function(a){AM[a.algo]=a});
+  var OPS=Object.assign({},S.ppsOps||{});if(S.xmr)OPS.RANDOMXMONERO=Object.assign({label:'RandomX',coins:['XMR']},S.xmr);
+  var H=(S.scan&&S.scan.hist)||{},LM=S.marginLastro||{},enter=cfg.xmrEnterPct===undefined?2:cfg.xmrEnterPct,mk=function(a){return a&&a.marketUsdDay>0?Math.min(300,a.marketUsdDay*0.1):300};
+  var keys=Object.keys(AM).filter(function(k){return k!=='SHA256ASICBOOST'}).concat(Object.keys(A).filter(function(k){return !AM[k]&&k!=='SHA256ASICBOOST'}));
+  var rows=keys.map(function(k){var a=AM[k]||{},p=A[k]||{},R=p.runs||[],mins=R.map(function(r){return (r.end-r.start)/60e3}).sort(function(x,y){return x-y}),o=OPS[k]||null;
+    var hOn=p.hoursOn||0,simPct=p.spendUsd?(p.revUsd/p.spendUsd-1)*100:null,rate=mk(a),avgE=R.length?R.reduce(function(x,r){return x+r.edgePct},0)/R.length:null;
+    var payH=hOn>0?5/(rate/24*(1+(avgE||0)/100)):null,payDays=payH&&hOn?payH/(hOn/days):null;
+    return {k:k,l:a.label||p.label||k,c:(a.coins||p.coins||[]).join('+'),e:a.edgePct,thin:a.thin,mkt:a.marketUsdDay,n:R.length,perDay:R.length/days,med:mins.length?mins[mins.length>>1]:null,max:mins.length?mins[mins.length-1]:null,
+      onPct:hOn/(days*24)*100,simPct:simPct,simUsd:p.spendUsd?p.revUsd-p.spendUsd:null,op:o,h:H[k],lm:LM[k],rate:rate,payDays:payDays,avgE:avgE}}).sort(function(x,y){return (y.onPct||0)-(x.onPct||0)||((y.e||-1e9)-(x.e||-1e9))});
+  var best=rows[0],tot=rows.reduce(function(x,r){return x+(r.simUsd||0)},0),opTot=rows.reduce(function(x,r){return x+((r.op&&r.op.resultUsd)||0)},0),nowGood=rows.filter(function(r){return r.e>=enter&&!r.thin&&r.e<=100});
+  hd.innerHTML='<div class="row between" style="align-items:baseline"><h2 style="margin:0">Moedas PPS</h2><span class="chip '+(nowGood.length?'ok':'')+'">'+(nowGood.length?nowGood.length+' janela'+(nowGood.length>1?'s':'')+' aberta'+(nowGood.length>1?'s':''):'nenhuma janela aberta agora')+'</span></div>'+
+    '<p class="note" style="margin:6px 0">Aluguel de hash na NiceHash apontado para um pool que paga cada fração de trabalho (PPS): sem sorte de bloco. É a frente com janelas positivas medidas. Lastro desde '+(since?dt2(since):'—')+' ('+nf(days,1)+' dias).</p>'+
+    '<div class="kv"><div><small>Melhor frequência</small><span style="font-size:15px">'+(best?esc(best.l)+' ('+esc(best.c)+')':'—')+'</span><div class="note">'+(best&&best.n?nf(best.perDay,1)+' janelas por dia, ~'+nf(best.med,0)+' min cada, positiva '+nf(best.onPct,0)+'% do tempo':'')+'</div></div>'+
+    '<div><small>Resultado no mapa (simples)</small><span class="'+(tot>0?'good':tot<0?'bad':'')+'" style="font-size:15px">'+(tot>=0?'+':'')+usd(tot)+'</span><div class="note">US$100/dia por algoritmo, sem taxa de ordem</div></div>'+
+    '<div><small>Operação como real</small><span class="'+(opTot>0?'good':opTot<0?'bad':'')+'" style="font-size:15px">'+(opTot>=0?'+':'')+usd(opTot)+'</span><div class="note">com ordem mínima, taxa e limite de mercado</div></div></div>';
+  $('pps_tab').innerHTML='<h2 style="margin:0 0 6px">Mapa por moeda</h2><div class="scroll"><table class="note" style="width:100%"><tr><th>Moeda</th><th>Agora</th><th>Janelas (lastro)</th><th>Resultado</th><th>Aluguel × ano</th><th>Pagamento</th></tr>'+
+    rows.map(function(r){var ex=r.e>100?'dado suspeito':r.thin?'mercado pequeno ('+usd(r.mkt||0,0)+'/dia)':r.e>=enter?'<b class="good">janela aberta</b>':r.e>=0?'perto':'fechada';
+      return '<tr><td><span style="font-weight:600">'+esc(r.l)+'</span><div>'+esc(r.c)+'</div></td><td><span class="'+(r.e>=enter&&!r.thin&&r.e<=100?'good':r.e<0?'bad':'warn')+'">'+(isFinite(r.e)&&r.e<=100?pct(r.e,1):'—')+'</span><div>'+ex+'</div></td>'+
+        '<td>'+(r.n?r.n+' em '+nf(days,1)+' dias · '+nf(r.perDay,1)+'/dia<div>~'+nf(r.med,0)+' min (máx '+nf(r.max,0)+') · '+nf(r.onPct,0)+'% do tempo</div>':'nenhuma ainda')+(r.lm&&r.lm.horas>=3?'<div>hora a hora: +2% em '+nf(r.lm.acima2Pct,0)+'% de '+r.lm.horas+' h</div>':'')+'</td>'+
+        '<td>'+(r.simPct!==null?'<span class="'+(r.simPct>0?'good':'bad')+'">'+pct(r.simPct,1)+'</span> no mapa':'—')+(r.op&&(r.op.runs||r.op.resultUsd)?'<div>como real: '+(r.op.resultUsd>=0?'+':'')+usd(r.op.resultUsd||0)+'</div>':'')+'</td>'+
+        '<td>'+(r.h&&isFinite(r.h.pct)?'percentil '+nf(r.h.pct,0)+'<div>'+pct(r.h.vsMedPct,0)+' da mediana</div>':'<span>na fila</span>')+'</td>'+
+        '<td>'+(r.payDays!==null?'US$5 em ~'+(r.payDays<1?nf(r.payDays*24,0)+' h':nf(r.payDays,1)+' dias'):'—')+'<div>gasto '+usd(r.rate/24,1)+'/h na janela</div></td></tr>'}).join('')+'</table></div>'+
+    '<p class="note" style="margin:6px 0 0">Margem: quanto a moeda paga acima (+) ou abaixo (−) do aluguel, já com 3% da NiceHash, taxa do pool PPS (4%) e perdas de share e de venda (2,5%). "Mercado pequeno": o algoritmo inteiro gasta menos que o necessário para uma ordem nossa. Pagamento: tempo, no ritmo das janelas medidas, até juntar US$5 no pool (o mínimo de saque costuma ser desse tamanho).</p>';
+  var W=[];Object.keys(A).forEach(function(k){(A[k].runs||[]).forEach(function(r){W.push({k:k,l:A[k].label||k,r:r})})});W.sort(function(a,b){return b.r.start-a.r.start});
+  $('pps_log').innerHTML='<h2 style="margin:0 0 6px">Registro das janelas</h2>'+(W.length?'<div class="scroll"><table class="note" style="width:100%"><tr><th>Início</th><th>Moeda</th><th>Duração</th><th>Margem na entrada</th><th>Resultado (mapa)</th><th>Por que fechou</th></tr>'+
+    W.slice(0,25).map(function(w){var res=w.r.revUsd-w.r.spendUsd;return '<tr><td>'+dt2(w.r.start)+'</td><td>'+esc(w.l)+'</td><td>'+nf((w.r.end-w.r.start)/60e3,0)+' min</td><td>'+pct(w.r.edgePct,1)+'</td><td class="'+(res>=0?'good':'bad')+'">'+(res>=0?'+':'')+usd(res,2)+'</td><td>'+esc(w.r.reason||'')+'</td></tr>'}).join('')+'</table></div>':'<p class="note">As janelas aparecem aqui assim que abrirem.</p>');
+  var xa=cfg.xmrAddress&&cfg.xmrAddress!=='';
+  $('pps_auto').innerHTML='<h2 style="margin:0 0 6px">Automatizar de verdade</h2><p class="note" style="margin:0 0 6px">O robô pode fazer nas moedas PPS o que faz no BCH: uma ordem fica aberta na NiceHash, a potência sobe quando a janela abre e desce quando fecha, só em mercado com volume. Para cada moeda precisa de:</p>'+
+    '<ol class="note" style="margin:0;padding-left:18px"><li><b>Carteira da moeda</b> para receber'+(xa?' · Monero: <span class="good">endereço cadastrado</span>':' · Monero: cadastre em Operar → Robô → Operação Monero')+'.</li><li><b>Pool PPS cadastrado na NiceHash</b> com a carteira como usuário (Monero: Kryptex PPS+ ou Mining-Dutch).</li><li><b>Saldo na NiceHash</b>: a ordem mínima é 0,001 BTC por moeda.</li><li><b>Validação</b>: 30 janelas simuladas positivas no acumulado antes de ligar com dinheiro (regra de mercado: papel antes do real).</li></ol>'+
+    '<p class="note" style="margin:6px 0 0">Pronto para ativar primeiro: '+(best?esc(best.l)+' ('+esc(best.c)+')':'—')+', a moeda com mais janelas.</p>';
+}
 var BR=null;
 function brainPath(g,W,H){var X=function(x){return x*W},Y=function(y){return y*H};g.beginPath();
   g.moveTo(X(.08),Y(.52));g.bezierCurveTo(X(.05),Y(.30),X(.20),Y(.10),X(.40),Y(.08));g.bezierCurveTo(X(.45),Y(.04),X(.52),Y(.04),X(.535),Y(.085));
@@ -2482,11 +2519,12 @@ function tab(t,sub){
   if(settings.apiUrl&&Date.now()-(ops.at||0)>60000)loadOps();
   window.scrollTo(0,0);
 }
-var SUBS={fund:['fundSeg',['scan','journey','calc']],mine:['mineSeg',['now','journey','plan','algos','ops','net']],diary:['diarySeg',['pos','mine','robo']]};
+var SUBS={fund:['fundSeg',['scan','journey','calc']],mine:['mineSeg',['now','journey','plan','algos','pps','ops','net']],diary:['diarySeg',['pos','mine','robo']]};
 function subTab(t,sub){
   var cfg=SUBS[t];
   if(t==='mine'&&sub==='algos'){loadMarketMap();renderAlgos()}
   if(t==='mine'&&sub==='ops')loadOps();
+  if(t==='mine'&&sub==='pps'){renderPps();if(settings.apiUrl&&Date.now()-(ops.at||0)>30000)loadOps()}
   if(t==='mine'&&sub==='net'){loadBlocksLog();renderHeat();renderNext()}
   if(t==='mine'&&sub==='now'){renderWindow();renderEntry()}
   if(t==='diary'&&sub==='robo'){renderRobo();if(settings.apiUrl&&Date.now()-(ops.at||0)>60000)loadOps()}

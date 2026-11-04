@@ -5,7 +5,7 @@
 // Margem = receita por hash ÷ aluguel típico (mediana do livro + taxa da NiceHash) − 1, a mesma do mapa do painel.
 // Versão 2 (31/10): margem realista (dificuldade média de 24 h, pool PPS 4%, perdas de share e venda 2,5%). A v1 usava a
 // dificuldade do momento da WhatToMine e mostrava lucro que não existe; ao trocar de versão a simulação recomeça.
-export const ALGO_RULES = { budgetUsdDay: 100, maxGap: 20 * 60e3, keepRuns: 30, maxEdgePct: 100 }; // margem > 100%: dado suspeito
+export const ALGO_RULES = { budgetUsdDay: 100, maxGap: 20 * 60e3, keepRuns: 300, maxEdgePct: 100 }; // 300 janelas por algoritmo: lastro de frequência e duração // margem > 100%: dado suspeito
 
 export function algoPaperStep(pa, { map, now, rules = ALGO_RULES }) {
   const fresh = !(pa && pa.since && pa.v === 2);
