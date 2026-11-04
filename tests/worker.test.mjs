@@ -1817,7 +1817,7 @@ test('PPS como arbitragem: só entra se a janela paga a taxa e manda o lucro de 
   assert.equal(r.px.on, true); assert.match(r.events.join(' '), /Lucro esperado/);
   let p = r.px; for (let i = 1; i <= 4; i++) p = xmrPaperStep(p, { m: { edgePct: 6, marketUsdDay: 50000 }, now: T + i * 15 * M, btcUsd: 77000 }).px;
   r = xmrPaperStep(p, { m: { edgePct: -1, marketUsdDay: 50000 }, now: T + 5 * 15 * M, btcUsd: 77000 });
-  assert.match(r.events.join(' '), /Resultado desta operação: gasto US\$[\d,]+ \+ taxa US\$0,77, receita US\$[\d,]+, (lucro|prejuízo) .* em 75 min\. Acumulado/);
+  assert.match(r.events.join(' '), /Resultado desta janela: aluguel US\$[\d,]+, receita US\$[\d,]+, (lucro|prejuízo) [+−]?US\$[\d,]+ em 75 min .*Acumulado: janelas \+US\$[\d,]+, taxa de ordem nova −US\$0,77 = /);
 });
 
 test('lastro: preço do hash de hoje contra o último ano (percentil e mediana)', async () => {
@@ -1853,9 +1853,45 @@ test('Monero simulado: janela com a ordem já aberta não leva a taxa de ordem n
   const T = Date.UTC(2026, 10, 4, 18);
   const old = { since: T - 864e5, lastTs: T - 180e3, walletBtc: 0, startBtc: 0.002, orderBtc: 0.0019, orderOpen: true, spentBtc: 0.00008, feesBtc: 0.00001, revUsd: 6.5, poolXmr: 0, paidXmr: 0, payouts: [], runs: [], run: null, on: false, hoursOn: 0.2, days: {} };
   let r = xmrPaperStep(old, { m: { edgePct: 8.8, marketUsdDay: 4000 }, now: T, btcUsd: 80000, xmrUsd: 300 });
-  assert.equal(r.px.on, true); assert.equal(r.px.run.feeBtc, 0);
+  assert.equal(r.px.on, true); assert.equal(r.px.run.opened, false);
   r = xmrPaperStep(r.px, { m: { edgePct: 5, marketUsdDay: 4000 }, now: T + 30 * 60e3, btcUsd: 80000, xmrUsd: 300 });
   r = xmrPaperStep(r.px, { m: { edgePct: -5.9, marketUsdDay: 4000 }, now: T + 33 * 60e3, btcUsd: 80000, xmrUsd: 300 });
   const ev = r.events.join(' ');
-  assert.match(ev, /lucro US\$/); assert.doesNotMatch(ev, /\+ taxa/);
+  assert.match(ev, /Resultado desta janela: .*lucro \+US\$/); assert.match(ev, /taxa de ordem nova −US\$0,80/, 'a taxa antiga fica só no acumulado');
+});
+
+test('Monero auditado: preço do BTC mudando sem minerar não mexe no resultado; margem média no intervalo; ciclo completo com venda e nova ordem', async () => {
+  const { xmrPaperStep, xmrSummary, XMR_RULES } = await import('../worker/src/paperxmr.js');
+  const T = Date.UTC(2026, 10, 5, 0), M = 60e3;
+  let r = xmrPaperStep(null, { m: { edgePct: 8, marketUsdDay: 50000 }, now: T, btcUsd: 80000, xmrUsd: 600 });
+  r = xmrPaperStep(r.px, { m: { edgePct: 4, marketUsdDay: 50000 }, now: T + 15 * M, btcUsd: 80000, xmrUsd: 600 });
+  // receita do intervalo com a margem média (8% → 4% = 6%)
+  close(r.px.revUsd / r.px.spentUsd - 1, 0.06, 1e-9);
+  r = xmrPaperStep(r.px, { m: { edgePct: -2, marketUsdDay: 50000 }, now: T + 30 * M, btcUsd: 80000, xmrUsd: 600 });
+  const a = xmrSummary(r.px, 80000, 600), b = xmrSummary(r.px, 60000, 600);
+  close(a.resultUsd, b.resultUsd, 1e-9, 'BTC caiu 25% e nada foi minerado: o resultado não muda');
+  close(a.resultUsd, a.windowsUsd - 0.8, 1e-9); assert.equal(a.lastRuns[0].resultUsd, a.windowsUsd);
+  // ciclo: minera até a ordem acabar, saca, vende o XMR e abre ordem nova
+  const rules = Object.assign({}, XMR_RULES, { budgetUsdDay: 5000 });
+  let p = r.px, t = T + 45 * M, evs = [];
+  for (let i = 0; i < 400 && !evs.some((x) => /abriria ordem/.test(x)); i++, t += 15 * M) { const s = xmrPaperStep(p, { m: { edgePct: 6, marketUsdDay: 1e6 }, now: t, btcUsd: 80000, xmrUsd: 600, rules }); p = s.px; evs = evs.concat(s.events); }
+  const all = evs.join(' | ');
+  assert.match(all, /acabou o valor/); assert.match(all, /saque de/); assert.match(all, /venderia [\d,]+ XMR por US\$[\d,]+ e mandaria/); assert.match(all, /abriria ordem/);
+  const S = xmrSummary(p, 80000, 600);
+  assert.equal(S.orderFeesUsd.toFixed(2), '1.60', 'duas ordens = duas taxas'); assert.ok(S.convFeesUsd > 0);
+  close(S.resultUsd, S.windowsUsd - S.orderFeesUsd - S.convFeesUsd + S.fxUsd, 1e-9);
+});
+
+test('Monero auditado: estado gravado antes da auditoria vira as contas novas (caso de 04/11: janela de +US$0,32 que aparecia como −US$0,49)', async () => {
+  const { xmrPaperStep, xmrSummary } = await import('../worker/src/paperxmr.js');
+  const btc = 80360.5, T = Date.UTC(2026, 10, 4, 17, 18);
+  const old = { since: T - 3.5 * 3600e3, lastTs: T - 900e3, walletBtc: 0.00000003, startBtc: 0.002, orderBtc: 0.00178254, orderOpen: true, spentBtc: 0.00020743, feesBtc: 0.00001, revUsd: 17.0605,
+    poolXmr: 0.005933, paidXmr: 0.020923, payouts: [{}, {}], on: false, edgePct: null, hoursOn: 1.32, days: {},
+    runs: [{ start: T - 3.2 * 3600e3, end: T - 2.4 * 3600e3, edgePct: 2.44, spentBtc: 0.00012192, revUsd: 9.885, reason: 'x' }, { start: T - 33 * 60e3 - 900e3, end: T - 900e3, edgePct: 8.79, spentBtc: 0.00008551, revUsd: 7.176, feeBtc: 0.00001, reason: 'y' }] };
+  const S = xmrSummary(old, btc, 633);
+  close(S.lastRuns[0].resultUsd, 7.176 - 0.00008551 * btc, 1e-6); assert.ok(S.lastRuns[0].resultUsd > 0.3);
+  close(S.orderFeesUsd, 0.80, 0.01); close(S.resultUsd, S.windowsUsd - S.orderFeesUsd, 1e-9);
+  assert.ok(S.heldXmr > 0.026 && S.heldNowUsd > 0);
+  const r = xmrPaperStep(old, { m: { edgePct: -3 }, now: T, btcUsd: btc, xmrUsd: 633 });
+  assert.ok(r.px.migratedAt && r.px.spentUsd > 0 && r.px.runs.every((x) => x.feeBtc === undefined));
 });

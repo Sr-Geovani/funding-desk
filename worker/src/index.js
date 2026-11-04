@@ -683,7 +683,7 @@ export async function tick(env, opts = {}) {
         const r2 = xmrPaperStep(ppsOps[mm.algo], { m: mm, now, btcUsd: prices.v.btcUsd, xmrUsd: null,
           rules: Object.assign({}, XMR_RULES, cfg.xmrSimBtc > 0 ? { walletBtc: cfg.xmrSimBtc } : {}, isFinite(cfg.xmrEnterPct) ? { enterPct: cfg.xmrEnterPct } : {}) });
         ppsOps[mm.algo] = Object.assign(r2.px, { label: mm.label, coins: mm.coins });
-        for (const e of r2.events) { const t2 = e.replace(/^Monero \(simulado\)/, mm.label + ' (' + mm.coins.join('+') + ', simulado)').replace(' no RandomX', ''); log.push({ t: now, kind: 'simulado', text: t2 }); if (cfg.xmrAlerts !== false && /abriria|subiria|baixaria|acabou/.test(t2)) await notify(env, t2, fetchFn); }
+        for (const e of r2.events) { const t2 = e.replace(/^Monero \(simulado\)/, mm.label + ' (' + mm.coins.join('+') + ', simulado)').replace(' no RandomX', ''); log.push({ t: now, kind: 'simulado', text: t2 }); if (cfg.xmrAlerts !== false && /abriria|subiria|baixaria|acabou|venderia/.test(t2)) await notify(env, t2, fetchFn); }
       }
     } else errors.push('WhatToMine: ' + res[0].e);
   }
