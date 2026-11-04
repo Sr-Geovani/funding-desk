@@ -66,7 +66,8 @@ export function sanitizeConfig(input = {}, prev = DEFAULT_CONFIG, limits = limit
     const a = String(input.payoutAddress).trim().toLowerCase();
     if (a === '' || ADDR.test(a)) c.payoutAddress = a; else errors.push('endereço BCH inválido (use o formato cashaddr)');
   }
-  if (input.poolId !== undefined) c.poolId = String(input.poolId).slice(0, 64);
+  // campo vazio não apaga um pool já escolhido (a lista de pools pode não ter carregado no painel); para tirar: clearPool
+  if (input.poolId !== undefined && !(String(input.poolId).trim() === '' && c.poolId && !input.clearPool)) c.poolId = String(input.poolId).slice(0, 64);
   if (input.sniper !== undefined) c.sniper = !!input.sniper;
   if (input.sniperUseAge !== undefined) c.sniperUseAge = !!input.sniperUseAge;
   num('sniperDiffDropPct', 0.1, 50); num('sniperFeeX', 1, 100);
@@ -250,7 +251,8 @@ export function decide({ cfg, mkt, orders, state = {}, now, units, limits = limi
 
   // MODO_SNIPER (opcional): a decisão do tiro sai da idade do último bloco; sem a flag, nada muda
   const mktShot = cfg.sniper && mkt.ok ? sizeMarket(mkt, Math.min(cfg.sniperPh || 25, limits.maxLimitPh), cfg) : null; // preço e margem para a potência do tiro
-  const SN = mktShot ? sniperDecide(st.sniper, Object.assign({ now, blockT, blockId, edge: mktShot.edgeAtBidPct, cfg }, snMetrics)) : null;
+  // sem dados de mercado (fonte fora do ar) o Sniper ainda encerra o tiro pelo prazo ou pelo bloco novo; só não dá tiro novo
+  const SN = cfg.sniper ? sniperDecide(st.sniper, Object.assign({ now, blockT, blockId, edge: mktShot ? mktShot.edgeAtBidPct : -Infinity, cfg }, snMetrics)) : null;
   if (SN) st.sniper = SN.state;
   for (const o of managed) {
     if (blockEvent) {
@@ -261,7 +263,11 @@ export function decide({ cfg, mkt, orders, state = {}, now, units, limits = limi
         continue;
       }
     }
-    if (!mkt.ok) { notes.push(`ordem ${o.id}: sem dados de mercado (${mkt.reason}), nada alterado`); continue; }
+    if (!mkt.ok) {
+      const idle = Math.max(minPh, cfg.sniperIdlePh === undefined ? 1 : cfg.sniperIdlePh);
+      if (SN && !SN.shot && o.limitPH > idle + 1e-9) { actions.push({ type: 'update', id: o.id, priceEH: o.priceEH, limitPH: idle, reason: (SN.reason || 'sniper: fim do tiro') + '; sem dados de mercado: só reduz a potência' }); continue; }
+      notes.push(`ordem ${o.id}: sem dados de mercado (${mkt.reason}), nada alterado`); continue;
+    }
 
     let limit = mkt.green && !dailyHit ? target : minPh;
     let want = mkt.green ? mkt.bidEH : Math.min(o.priceEH, r4(mkt.capEH));
@@ -271,7 +277,7 @@ export function decide({ cfg, mkt, orders, state = {}, now, units, limits = limi
     if (dailyHit && mkt.green) reason = 'limite diário: pausa';
     if (SN) { // MODO_SNIPER: substitui só a regra de entrada; travas (stop-loss, limites, bloco) continuam iguais
       limit = SN.shot && !dailyHit ? Math.min(cfg.sniperPh || 25, limits.maxLimitPh) : Math.max(minPh, cfg.sniperIdlePh === undefined ? 1 : cfg.sniperIdlePh);
-      if (SN.shot && !dailyHit) { want = mktShot.bidEH; price = want; } reason = SN.reason + (dailyHit ? '; limite diário: espera' : ''); // no tiro o preço sobe na hora para o lance da potência do tiro (antes ficava o da regra de margem, abaixo do mercado, e o hash não vinha); na espera segue a regra de margem e desce aos poucos, sem pagar 1 PH/s a preço de mercado o dia todo
+      if (SN.shot && !dailyHit && mktShot) { want = mktShot.bidEH; price = want; } reason = SN.reason + (dailyHit ? '; limite diário: espera' : ''); // no tiro o preço sobe na hora para o lance da potência do tiro (antes ficava o da regra de margem, abaixo do mercado, e o hash não vinha); na espera segue a regra de margem e desce aos poucos, sem pagar 1 PH/s a preço de mercado o dia todo
     }
     if (want < o.priceEH - 1e-9) {
       // A NiceHash só aceita baixar o preço 10 min depois de QUALQUER mudança de preço (subida inclusive) e da criação da
@@ -279,7 +285,8 @@ export function decide({ cfg, mkt, orders, state = {}, now, units, limits = limi
       const last = Math.max(st.lastDecrease[o.id] || 0, st.lastPriceChange[o.id] || 0, o.createdTs || 0);
       if (now - last >= DOWN_STEP_MS + 30e3) { price = Math.max(want, r4(o.priceEH - units.priceDownStepEH)); st.lastDecrease[o.id] = now; }
       else price = o.priceEH;
-      if (price > mkt.capEH + 1e-9) { limit = minPh; reason += '; baixando o preço aos poucos (regra da NiceHash)'; }
+      // no tiro do Sniper o preço fica acima do teto de propósito (a trava é a margem do tiro): não corta a potência
+      if (price > mkt.capEH + 1e-9 && !(SN && SN.shot)) { limit = minPh; reason += '; baixando o preço aos poucos (regra da NiceHash)'; }
     }
     if (Math.abs(price - o.priceEH) >= 0.00005 || Math.abs(limit - o.limitPH) >= 0.001) {
       if (Math.abs(price - o.priceEH) >= 0.00005) st.lastPriceChange[o.id] = now;
@@ -287,7 +294,7 @@ export function decide({ cfg, mkt, orders, state = {}, now, units, limits = limi
     }
   }
 
-  if (SN && cfg.autoCreate && !managed.length && mkt.ok && !dailyHit && cfg.poolId && !blockEvent) {
+  if (SN && mktShot && cfg.autoCreate && !managed.length && mkt.ok && !dailyHit && cfg.poolId && !blockEvent) {
     const amount = Math.max(units.minOrderBtc, Math.min(cfg.orderAmountBtc, limits.maxOrderBtc));
     actions.push({ type: 'create', priceEH: mktShot.bidEH, limitPH: SN.shot ? Math.min(cfg.sniperPh || 25, limits.maxLimitPh) : Math.max(minPh, cfg.sniperIdlePh === undefined ? 1 : cfg.sniperIdlePh), amountBtc: amount, poolId: cfg.poolId,
       market: mkt.market, reason: 'sniper: ordem de espera criada. ' + SN.reason });

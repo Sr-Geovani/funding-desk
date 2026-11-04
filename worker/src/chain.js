@@ -32,20 +32,47 @@ export function normAddr(a) {
   return String(a || '').trim().toLowerCase().replace(/^bitcoincash:/, '');
 }
 
-export function createChain({ base = DEFAULT_BCH_REST, priceUrl = DEFAULT_PRICE_URL, fetchFn = fetch }) {
+export const DEFAULT_HASKOIN = 'https://api.haskoin.com/bch';
+// Dificuldade a partir do campo "bits" do cabeçalho do bloco (alvo compacto).
+export function bitsToDifficulty(bits) {
+  const exp = bits >>> 24, mant = bits & 0xffffff;
+  return (0xffff * Math.pow(256, 0x1d - 3)) / (mant * Math.pow(256, exp - 3));
+}
+export function createChain({ base = DEFAULT_BCH_REST, haskoin = null, priceUrl = DEFAULT_PRICE_URL, fetchFn = fetch }) {
   async function get(u) {
     const r = await fetchFn(u, { headers: { accept: 'application/json', 'user-agent': 'funding-desk/1.0' } });
     if (!r.ok) throw new Error('HTTP ' + r.status + ' em ' + u.replace(/\?.*/, ''));
     return r.json();
   }
   return {
+    // Altura, dificuldade e horário do último bloco. A Haskoin vem primeiro: em 04/11 ela mostrou o bloco 975877
+    // ~2,5 min antes da ActorForth (que também deu HTTP 522 por horas). Se uma falhar, usa a outra.
     info: async () => {
-      const d = await get(base + '/blockchain/getBlockchainInfo');
-      return { height: d.blocks, difficulty: d.difficulty };
+      const fails = [];
+      if (haskoin) {
+        try {
+          const b = await get(haskoin + '/block/best?notx=true');
+          if (b.height > 0 && b.bits) return { height: b.height, difficulty: bitsToDifficulty(b.bits), time: b.time * 1000, src: 'haskoin' };
+          fails.push('haskoin: sem dados');
+        } catch (e) { fails.push('haskoin: ' + (e.message || e)); }
+      }
+      try {
+        const d = await get(base + '/blockchain/getBlockchainInfo');
+        return { height: d.blocks, difficulty: d.difficulty, src: 'actorforth' };
+      } catch (e) { fails.push(e.message || String(e)); throw new Error(fails.join('; ')); }
     },
     mempool: async () => { const d = await get(base + '/blockchain/getMempoolInfo'); return { tx: d.size, bytes: d.bytes }; },
     // Quem recebeu a recompensa do bloco: saídas da transação coinbase.
     coinbase: async (height) => {
+      if (haskoin) {
+        try {
+          const a = await get(haskoin + '/block/height/' + height + '?notx=false'), b = Array.isArray(a) ? a[0] : a;
+          const tx = await get(haskoin + '/transaction/' + b.tx[0]);
+          const outs = (tx.outputs || []).map((o) => ({ value: (o.value || 0) / 1e8, addrs: o.address ? [normAddr(o.address)] : [] }));
+          return { height, hash: b.hash, time: b.time * 1000, difficulty: bitsToDifficulty(b.bits), txid: b.tx[0], outs, size: b.size, txs: (b.tx || []).length,
+            tag: tagFrom(tx.inputs && tx.inputs[0] && tx.inputs[0].sigscript) };
+        } catch (e) { /* cai para a ActorForth */ }
+      }
       const b = await get(base + '/block/detailsByHeight/' + height);
       const tx = await get(base + '/transaction/details/' + b.tx[0]);
       const outs = (tx.vout || []).map((o) => ({

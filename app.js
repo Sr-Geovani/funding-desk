@@ -696,6 +696,50 @@ function loadOps(){
 // Dados do servidor em qualquer aba: 30 s em Operar, 60 s nas outras. Ao voltar do segundo plano (iPhone deixa o app
 // congelado por horas), freshen() atualiza na hora tudo o que estiver velho.
 setInterval(function(){if(document.visibilityState==='visible')freshen()},30000);
+// Bloco ao vivo no painel: lê o fluxo público de eventos da rede BCH (Haskoin, sem chave) enquanto o app está aberto.
+// Quando nasce um bloco, mostra na hora e atualiza o resto (servidor, rede e registro de blocos) logo em seguida.
+// Se o fluxo cair, confere o último bloco a cada 20 s. Só leitura de dados públicos.
+var tipLive={h:0,t:0,seenAt:0,mode:''},tipCtl=null,tipRetry=5000,tipPollT=null;
+function tipBest(){return fetch('https://api.haskoin.com/bch/block/best?notx=true',{cache:'no-store'}).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json()})}
+function tipCheck(){
+  return tipBest().then(function(b){
+    if(!(b&&b.height>0))return;
+    var known=Math.max(tipLive.h||0,(ops.status&&ops.status.state&&ops.status.state.lastHeight)||0,(mine.blocks[0]&&mine.blocks[0].height)||0);
+    var first=!tipLive.h;tipLive.h=Math.max(tipLive.h,b.height);if(b.height>=tipLive.h)tipLive.t=b.time*1000;
+    if(!first&&b.height>known)tipNew(b);
+  }).catch(function(){});
+}
+function tipNew(b){
+  tipLive.seenAt=Date.now();
+  var lag=Math.max(0,Math.round((Date.now()-b.time*1000)/1000));
+  var el=$('tipToast');if(!el){el=document.createElement('div');el.id='tipToast';el.className='banner';el.setAttribute('role','status');el.style.cssText='position:fixed;left:12px;right:12px;top:calc(env(safe-area-inset-top,0px) + 10px);z-index:60;box-shadow:0 6px 24px rgba(0,0,0,.25);border-color:var(--ok,#2a9d5b)';el.onclick=function(){el.hidden=true};document.body.appendChild(el)}
+  el.innerHTML='<b>Bloco '+b.height+' minerado agora</b> <span class="note">(horário do bloco há '+(lag<90?lag+' s':nf(lag/60,0)+' min')+')</span><br><span class="note">Atualizando servidor, rede e Sniper…</span>';el.hidden=false;
+  clearTimeout(el._t);el._t=setTimeout(function(){el.hidden=true},12000);
+  try{renderNetCard();renderMine()}catch(e){}
+  // o servidor roda a decisão do Sniper pelo vigia dele; o painel busca de novo para mostrar o resultado
+  [6000,20000,45000].forEach(function(ms){setTimeout(function(){if(settings.apiUrl)loadOps()},ms)});
+  setTimeout(loadMining,4000);
+  setTimeout(function(){if(settings.apiUrl)loadBlocksLog()},25000);
+}
+function tipStream(){
+  if(tipCtl||document.visibilityState!=='visible'||!window.fetch||!window.TextDecoder)return;
+  var ctl=window.AbortController?new AbortController():null;tipCtl=ctl||{abort:function(){}};
+  fetch('https://api.haskoin.com/bch/events',{cache:'no-store',signal:ctl&&ctl.signal}).then(function(r){
+    if(!r.ok||!r.body||!r.body.getReader)throw new Error('sem fluxo');
+    tipLive.mode='ao vivo';tipRetry=5000;var rd=r.body.getReader(),dec=new TextDecoder(),buf='';
+    function pump(){return rd.read().then(function(x){
+      if(x.done)throw new Error('fim');
+      buf+=dec.decode(x.value,{stream:true});var ls=buf.split('\n');buf=ls.pop();
+      ls.forEach(function(l){if(l.indexOf('"block"')>=0){try{if(JSON.parse(l).type==='block')tipCheck()}catch(e){}}});
+      return pump()})}
+    return pump();
+  }).catch(function(){}).then(function(){
+    tipCtl=null;tipLive.mode='a cada 20 s';
+    if(document.visibilityState==='visible'){setTimeout(tipStream,tipRetry);tipRetry=Math.min(60000,tipRetry*2)}
+  });
+}
+function tipStart(){tipCheck();tipStream();if(!tipPollT)tipPollT=setInterval(function(){if(document.visibilityState==='visible'&&tipLive.mode!=='ao vivo')tipCheck()},20000)}
+document.addEventListener('visibilitychange',function(){if(document.visibilityState==='visible')tipStart();else if(tipCtl){tipCtl.abort();tipCtl=null}});
 function freshen(){
   var now=Date.now(),opsTab=!$('mine-ops').hidden&&!$('tab-mine').hidden;
   if(settings.apiUrl&&now-(ops.at||0)>(opsTab?25000:55000))loadOps();
@@ -1067,7 +1111,7 @@ function renderEntry(){
   var stale=(C0.minEdgeMode==='relativo')!==!!MN.relative||(C0.minEdgeMode!=='relativo'&&MN.value!==undefined&&MN.value!==C0.minEdgePct);
   var SNc=ops.status.config||{},SNs=ops.status.state.sniper||{},PS=ops.status.state.paperSniper||{},lbt=ops.status.state.lastBlockT;
   // mesma fonte do cartão da Rede: o bloco mais recente entre o Blockchair (lido pelo celular) e o servidor
-  var Lv=null;try{Lv=live()}catch(e){}var cbt=Lv&&Lv.st&&Lv.st.last?Lv.st.last.time:0,newest=Math.max(lbt||0,cbt||0)||null,sAge=newest?(Date.now()-newest)/60e3:null;
+  var Lv=null;try{Lv=live()}catch(e){}var cbt=Lv&&Lv.st&&Lv.st.last?Lv.st.last.time:0,newest=Math.max(lbt||0,cbt||0,tipLive.t||0)||null,sAge=newest?(Date.now()-newest)/60e3:null;
   var srvAge=lbt?(Date.now()-lbt)/60e3:null,lagNote=newest&&lbt&&newest>lbt+60e3?'O servidor ainda não viu o bloco mais novo: a decisão do ciclo usou o bloco de '+nf(srvAge,0)+' min atrás.':'',WT=ops.status.watch||null,watchNote=WT&&WT.firedAt?'Vigia de bloco: confere a rede a cada '+nf((WT.every||6e3)/1e3,0)+' s entre os ciclos e decide na hora em que o bloco vira (último disparo: bloco '+WT.firedH+' às '+hhmm(new Date(WT.firedAt))+'). ':'Vigia de bloco: confere a rede a cada 6 s entre os ciclos e decide na hora em que o bloco vira. ',tickAt=ops.status.state.lastTick;
   var snHTML=SNc.sniper?'<div class="box" style="margin:0 0 8px"><b>Modo Sniper '+(SNc.mode==='active'?'ligado (robô em Ativo)':'ligado (robô em Observar: só simula)')+'</b>'+
     (function(){var I=ops.status.state.snInfo||{},bch=(ops.status.state.market||{}).bchUsd||0;return '<div class="kv" style="margin-top:4px"><div><small>Dificuldade do bloco em mineração × média de 12</small><span class="'+(I.diffDropPct!==null&&I.diffDropPct>=(SNc.sniperDiffDropPct||0.5)?'warn':'')+'">'+(I.diffDropPct!==null&&I.diffDropPct!==undefined?(I.diffDropPct>=0?nf(I.diffDropPct,2)+'% abaixo':nf(-I.diffDropPct,2)+'% acima'):'—')+'</span><div class="note">gatilho: '+nf(SNc.sniperDiffDropPct||10,1)+'% abaixo</div></div><div><small>Mempool × média do dia</small><span class="'+(I.feeX>=(SNc.sniperFeeX||3)?'warn':'')+'">'+(I.feeX?nf(I.feeX,1)+' vezes':'—')+'</span><div class="note">gatilho: '+nf(SNc.sniperFeeX||3,1)+' vezes · '+(I.mpBytes!==null&&I.mpBytes!==undefined?nf(I.mpBytes/1000,1)+' KB, taxas de ~'+usd((I.feeBchMin||0)*bch,2):'—')+'</div></div></div>'})()+'<div class="kv" style="margin-top:4px"><div><small>Último bloco há</small><span class="'+(sAge!==null&&sAge>(SNc.sniperAgeMin||20)?'warn':'')+'">'+(sAge!==null?nf(sAge,0)+' min':'—')+'</span></div><div><small>Gatilho</small><span>'+nf(SNc.sniperAgeMin||20,0)+' min · margem a partir de '+pct(SNc.sniperMinEdge===undefined?-7:SNc.sniperMinEdge,1)+'</span></div><div><small>Agora</small><span>'+((SNs.shotStart||PS.shot)?'<b class="warn">tiro: '+nf(SNc.sniperPh||25,0)+' PH/s</b>':'espera: '+nf(SNc.sniperIdlePh===undefined?1:SNc.sniperIdlePh,0)+' PH/s')+'</span></div></div>'+
@@ -1136,6 +1180,7 @@ function renderNetCard(L){
   if(!st&&!(sv&&sv.lastBlockT)){el.innerHTML='<div class="note">'+(mine.err.blocks?'Sem dados da rede ('+mine.err.blocks+').':'Carregando…')+'</div>';return}
   var h=st?st.last.height:0,t=st?st.last.time:0;
   if(sv&&sv.lastHeight&&sv.lastHeight>h){h=sv.lastHeight;t=sv.lastBlockT||t}
+  if(tipLive.h>h){h=tipLive.h;t=tipLive.t||t} // bloco visto ao vivo pelo painel (eventos da rede), antes do servidor e da Blockchair
   var since=Date.now()-t,D=st?st.difficulty:(sv.market||{}).D,vs=st?st.diffVsAvgPct:null,mp=sv&&sv.mempool,b24=mine.stats?mine.stats.blocks_24h:null;
   var dNext=D?D*Math.pow(2,(600-since/1000)/172800):null;
   var avgJ=function(m,lo,hi){return m>hi?['good','↓ blocos lentos: dificuldade cai (bom)']:m<lo?['bad','↑ blocos rápidos: hash chegando (ruim)']:['neutral','→ normal (perto de 10 min)']};
@@ -1373,6 +1418,15 @@ document.addEventListener('click',function(e){
   apiCall('POST',id==='bp_go'?'/balanceplan/apply':'/balanceplan/undo',{}).then(function(){$('bp_msg').textContent='Feito. Atualizando…';loadOps()},function(er){b.disabled=false;$('bp_msg').textContent='Não deu: '+er.message});
 });
 // Teste do robô: modo Ativo com limites mínimos, para ver na NiceHash real o robô criar, ajustar, parar no stop-loss e esperar.
+// Cartões dos testes (robô e calibração) podem ser ocultados: viram uma linha com o resumo. Fica salvo neste aparelho.
+function hideGet(k){try{return localStorage.getItem('fd_hide_'+k)==='1'}catch(e){return false}}
+function hideSet(k,v){try{if(v)localStorage.setItem('fd_hide_'+k,'1');else localStorage.removeItem('fd_hide_'+k)}catch(e){}}
+function hideWrap(k,title,sum,html){
+  if(hideGet(k))return '<div class="row" style="justify-content:space-between;align-items:center;gap:8px"><span class="note"><b>'+esc(title)+'</b> (oculto)'+(sum?' · '+esc(sum):'')+'</span><button class="sm" data-unhide="'+k+'">Mostrar</button></div>';
+  return '<div style="float:right;margin:0 0 4px 8px"><button class="sm" data-hide="'+k+'">Ocultar</button></div>'+html;
+}
+document.addEventListener('click',function(e){var b=e.target.closest&&e.target.closest('[data-hide],[data-unhide]');if(!b)return;
+  var k=b.getAttribute('data-hide')||b.getAttribute('data-unhide');hideSet(k,!!b.getAttribute('data-hide'));renderRTest();renderExec()});
 function renderRTest(){
   var el=$('o_rtest');if(!el)return;var st=ops.status,S=st&&st.state,cfg=(st&&st.config)||{};if(!S){el.innerHTML='';return}
   var T=S.robotTest,C=S.calib,h='<h2 style="margin:0 0 4px">Teste do robô (modo Ativo, limites mínimos)</h2>';
@@ -1395,7 +1449,8 @@ function renderRTest(){
       '<p class="note" style="margin:6px 0 0">'+(all?'<b class="good">Todos os mecanismos funcionaram na NiceHash real.</b> O robô está pronto; falta só a fase de observação mostrar uma faixa de entrada comprovada.':'<b class="warn">Nem tudo foi exercitado.</b> Os itens sem ✓ não aconteceram no tempo do teste (por exemplo, o stop-loss não chegou a US$15 ou o preço não precisou de ajuste). Me mande este resultado: dá para repetir com outro prazo.')+'</p></div>'+
       '<button id="rt_again">Fazer outro teste</button>';
   }
-  el.innerHTML=h;
+  var sumR=!T?'não iniciado':!T.done?'em andamento':'concluído em '+dt2(T.start)+(CK.every(function(c){return T.checks&&T.checks[c[0]]})?', todos os mecanismos ok':'');
+  el.innerHTML=hideWrap('rtest','Teste do robô',sumR,h);
 }
 document.addEventListener('click',function(e){
   var id=e.target.id;if(['rt_go','rt_stop','rt_again','rt_fast'].indexOf(id)<0)return;
@@ -1432,7 +1487,8 @@ function renderExec(){
       '<button id="cal_again">Fazer outro teste</button>';
   }
   if(X&&X.orders&&X.orders.length)h+='<details style="margin-top:8px"><summary>Ordens registradas</summary><div class="stack" style="gap:4px;margin-top:4px">'+X.orders.map(function(o){return '<div class="note">'+dt2(o.created)+' · '+nf(o.limitPH,1)+' PH/s a '+o.priceEH.toFixed(4).replace('.',',')+(o.alive?' · ativa':'')+' · hash em '+(o.toHashMin!==null?nf(o.toHashMin,0)+' min':'—')+' · entrega '+(o.delivered!==null?pctp(o.delivered*100,0):'—')+'</div>'}).join('')+'</div></details>';
-  el.innerHTML=h;
+  var sumC=!C?'não iniciado':!C.done?'em andamento':'concluído em '+dt2(C.start)+(C.result&&C.result.paidUsd!==undefined?', gasto real '+usd(C.result.paidUsd||0):'');
+  el.innerHTML=hideWrap('calib','Teste de calibração',sumC,h);
 }
 document.addEventListener('click',function(e){
   var id=e.target.id;if(['cal_go','cal_stop','cal_again'].indexOf(id)<0)return;
@@ -1483,7 +1539,8 @@ function renderOps(){
   }).join(''):'<p class="note">'+esc(ops.err.orders||'Nenhuma ordem ativa.')+'</p>';
   // Só pools do mesmo algoritmo do robô servem para as ordens dele (a NiceHash recusa pool de outro algoritmo).
   var algo=(st&&st.algo)||'SHA256ASICBOOST',okPools=ops.pools.filter(function(p){return !p.algorithm||p.algorithm===algo});
-  var popts='<option value="">—</option>'+okPools.map(function(p){return '<option value="'+esc(p.id)+'">'+esc(p.name)+' ('+esc(p.stratumHostname)+')</option>'}).join('');
+  var popts='<option value="">—</option>'+okPools.map(function(p){return '<option value="'+esc(p.id)+'">'+esc(p.name)+' ('+esc(p.stratumHostname)+')</option>'}).join('')+
+    (cfg.poolId&&!okPools.some(function(p){return p.id===cfg.poolId})?'<option value="'+esc(cfg.poolId)+'">pool atual ('+esc(String(cfg.poolId).slice(0,8))+'; lista de pools não carregou)</option>':''); // sem isso, salvar com a lista vazia apagava o pool
   $('b_poolId').innerHTML=popts;$('n_pool').innerHTML=popts;
   if(!ops.dirty)BOT_FIELDS.forEach(function(k){var el=$('b_'+k);if(el){var v=cfg[k];el.value=v===undefined||v===null?'':(typeof v==='number'?String(v).replace('.',','):v)}});
   relCalcUI();
@@ -2453,6 +2510,7 @@ tickClock();setInterval(tickClock,20000);
   // a posição da barra agora é feita por um único mecanismo (mais abaixo); aqui fica só a atualização dos dados ao voltar
   nav.style.transform='';
   document.addEventListener('visibilitychange',function(){if(document.visibilityState==='visible')freshen()});
+  tipStart(); window.FD_tip={state:function(){return tipLive},simulate:tipNew}; // bloco ao vivo (e gancho para conferir)
   window.addEventListener('pageshow',function(){freshen()});window.addEventListener('focus',function(){freshen()});
 })();
 load();loadMining();if(settings.apiUrl)loadOps();
