@@ -45,15 +45,16 @@ export function xmrPaperStep(px, { m, now, btcUsd, xmrUsd, rules = XMR_RULES }) 
         if (!p.skipAt || now - p.skipAt > 3600e3) { p.skipAt = now; events.push(`Monero (simulado): margem de ${e.toFixed(1).replace('.', ',')}%, mas não entra: numa janela típica de ~${Math.round(winMin)} min renderia ~${usd2(expUsd + feeUsd)} (mínimo para valer: ${usd2(rules.minExpUsd + feeUsd)})`); }
       } else {
       p.expect = { usd: expUsd, winMin, beMin };
+      let feeNow = 0; // taxa de ordem nova paga nesta entrada (0 quando a ordem já estava aberta)
       if (!p.orderOpen) {
         const amt = Math.floor((p.walletBtc - rules.newOrderFeeBtc) * 1e8) / 1e8;
         if (amt >= rules.minOrderBtc) {
-          p.walletBtc -= amt + rules.newOrderFeeBtc; p.feesBtc += rules.newOrderFeeBtc; p.orderBtc = amt; p.orderOpen = true;
+          p.walletBtc -= amt + rules.newOrderFeeBtc; p.feesBtc += rules.newOrderFeeBtc; p.orderBtc = amt; p.orderOpen = true; feeNow = rules.newOrderFeeBtc;
           events.push(`Monero (simulado): abriria ordem de ${amt.toFixed(6).replace('.', ',')} BTC no RandomX com margem de ${e.toFixed(1).replace('.', ',')}% (taxa de ordem nova paga uma vez)`);
         } else if (!p.noFunds) { p.noFunds = now; events.push('Monero (simulado): margem boa, mas a carteira virtual não tem o mínimo de 0,001 BTC'); }
       } else events.push(`Monero (simulado): subiria a potência no RandomX com margem de ${e.toFixed(1).replace('.', ',')}% (ordem já aberta, sem taxa nova)`);
       if (p.orderOpen) {
-        const fee = p.feesBtc - (p.feesPrev || 0); p.feesPrev = p.feesBtc;
+        const fee = feeNow; p.feesPrev = p.feesBtc;
         p.on = true; p.edgePct = e; p.run = { start: now, edgePct: e, spentBtc: 0, revUsd: 0, feeBtc: fee, orderBtc: p.orderBtc, rateUsdDay: p.rateUsdDay };
         events[events.length - 1] += `. Lucro esperado ~${usd2(expUsd)} se a janela durar ~${Math.round(winMin)} min${beMin ? `; a taxa de ordem nova (${usd2(feeAll)}) se paga em ~${Math.round(beMin)} min de mineração e serve para as próximas janelas` : ''}; gasto de até ${usd2(p.rateUsdDay / 24)} por hora`;
       }

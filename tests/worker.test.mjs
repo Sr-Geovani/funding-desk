@@ -1847,3 +1847,15 @@ test('laboratório: rota que recebe o Pendle da tarefa do GitHub exige o token c
   const raw = await env.FD_KV.get('pendleFeed');
   assert.ok(raw && !/xxxxx/.test(raw), 'campos extras não são guardados');
 });
+
+test('Monero simulado: janela com a ordem já aberta não leva a taxa de ordem nova paga lá atrás (estado antigo sem feesPrev)', async () => {
+  const { xmrPaperStep } = await import('../worker/src/paperxmr.js');
+  const T = Date.UTC(2026, 10, 4, 18);
+  const old = { since: T - 864e5, lastTs: T - 180e3, walletBtc: 0, startBtc: 0.002, orderBtc: 0.0019, orderOpen: true, spentBtc: 0.00008, feesBtc: 0.00001, revUsd: 6.5, poolXmr: 0, paidXmr: 0, payouts: [], runs: [], run: null, on: false, hoursOn: 0.2, days: {} };
+  let r = xmrPaperStep(old, { m: { edgePct: 8.8, marketUsdDay: 4000 }, now: T, btcUsd: 80000, xmrUsd: 300 });
+  assert.equal(r.px.on, true); assert.equal(r.px.run.feeBtc, 0);
+  r = xmrPaperStep(r.px, { m: { edgePct: 5, marketUsdDay: 4000 }, now: T + 30 * 60e3, btcUsd: 80000, xmrUsd: 300 });
+  r = xmrPaperStep(r.px, { m: { edgePct: -5.9, marketUsdDay: 4000 }, now: T + 33 * 60e3, btcUsd: 80000, xmrUsd: 300 });
+  const ev = r.events.join(' ');
+  assert.match(ev, /lucro US\$/); assert.doesNotMatch(ev, /\+ taxa/);
+});
