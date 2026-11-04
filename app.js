@@ -1854,134 +1854,75 @@ function renderBrain(){
     (acts.length?'<details style="margin-top:8px" open><summary>Atividade agora</summary><div class="stack" style="gap:2px;margin-top:4px">'+acts.map(function(x){return '<div class="note">'+hhmm(new Date(x.t))+' · '+esc(x.text)+'</div>'}).join('')+'</div></details>':'')+
     '<p class="note" style="margin:6px 0 0">Converse com o Jarbas no Telegram: /status, /monero, /bch, /funding, /saldo, /copiloto, /relatorio.</p>';
 }
-// Motor do cérebro: silhueta de cérebro humano feita de rede neural (nós e fibras brilhando em azul), com o fundo de
-// "sala de servidores". A camada fixa (fundo, fibras, contorno) é desenhada uma vez numa imagem; a cada quadro só os
-// brilhos e os pulsos mudam. Cada frente é uma região; frente ativa dispara mais pulsos, na cor do estado.
-// Placar das frentes com lastro: resultado real/simulado, histórico e veredito (como um relatório de mesa).
-function placarHTML(S,cfg){
-  var m=S.market||{},mm=S.mktMargin||{},ps=S.paperSniper||{},fp=S.fundPaper&&S.fundPaper.summary,X=S.xmr,P=S.ppsOps||{},H=(S.scan&&S.scan.hist)||{},LM=S.marginLastro||{};
-  var real=Object.values((S.real&&S.real.days)||{}).reduce(function(a,d){return a+(d.spendUsd||0)},0),pps=Object.keys(P).map(function(k){return P[k]}).concat(X?[X]:[]);
-  var ppsRes=pps.reduce(function(a,x){return a+(x.resultUsd||0)},0),ppsSp=pps.reduce(function(a,x){return a+(x.spentUsd||0)},0);
-  var FR=(S.frontsPaper&&S.frontsPaper.f)||{},YL=(S.market2&&S.market2.yields)||{},ys=Object.keys(FR).map(function(k){return FR[k].rate}).concat(Object.keys(YL).map(function(k){return YL[k]&&YL[k].apy})).filter(isFinite).sort(function(a,b){return b-a}),cdi=(S.fronts&&S.fronts.cdi)||13.65;
-  var sh=H.SHA256ASICBOOST,lk=Object.keys(LM).filter(function(k){return LM[k].horas>=6}).sort(function(a,b){return LM[b].acima2Pct-LM[a].acima2Pct})[0];
-  var row=function(nome,tipo,res,lastro,ver,cls){return '<tr><td><span style="font-weight:600">'+nome+'</span><div class="note">'+tipo+'</div></td><td class="'+(cls||'')+'">'+res+'</td><td class="note">'+lastro+'</td><td><span class="chip '+(cls==='good'?'ok':cls==='bad'?'bad':'')+'">'+ver+'</span></td></tr>'};
-  return '<div class="eyebrow" style="margin:10px 0 4px">Placar das frentes (com lastro)</div><div class="scroll"><table class="note" style="width:100%"><tr><th>Frente</th><th>Resultado</th><th>Lastro</th><th>Veredito</th></tr>'+
-    row('BCH solo','real · desde 31/10','−'+usd(real,0)+' · '+((S.myBlocks||[]).length)+' blocos',(mm.d7?'7 dias: margem média '+pct(mm.d7.avg,1)+', positiva '+nf(mm.d7.pctPos,0)+'% do tempo':'')+(sh&&isFinite(sh.pct)?' · hash no percentil '+nf(sh.pct,0)+' do ano':''),'sem vantagem','bad')+
-    row('Sniper','simulado',ps.spendUsd?'esperado '+pct((ps.evUsd/ps.spendUsd-1)*100,1):'—',(ps.lambda?nf(ps.lambda,2)+' bloco esperado em '+usd(ps.spendUsd||0,0):''),'loteria','bad')+
-    row('Moedas PPS','como real · '+pps.length+' algoritmos',(ppsRes>=0?'+':'')+usd(ppsRes)+(ppsSp?' ('+pct(ppsRes/ppsSp*100,1)+')':''),lk?esc(lk)+' acima de +2% em '+nf(LM[lk].acima2Pct,0)+'% das '+LM[lk].horas+' h gravadas':'lastro sendo gravado hora a hora','em teste',ppsRes>0?'good':'')+
-    row('Funding','simulado + reteste de 90 dias',fp?usd(fp.netUsd)+' em '+fp.closed+' operações':'—','reteste 03/08–01/11: 27% de acerto, −US$0,34 por operação; spread some em ~11 h','descartado em altcoin','bad')+
-    row('Rendimentos','dólar',ys.length?'até '+pct(ys[0],1)+' a.a.':'—','CDI em reais: '+pct(cdi,2)+' a.a.','CDI vence',ys[0]>=cdi?'good':'')+
-    '</table></div>'}
-// Moedas PPS: o mapa da frente que tem janelas positivas, como fizemos com o BCH. Lastro das janelas desde 30/10
-// (mapa de outras moedas), operação "como real", margem hora a hora, preço do hash no ano e tempo até o pagamento.
-function renderPps(){
-  var hd=$('pps_head');if(!hd)return;var st=ops.status,S=st&&st.state,cfg=(st&&st.config)||{};
-  if(!S){hd.innerHTML='<h2 style="margin:0">Moedas PPS</h2><p class="note">Conecte o backend (Ajustes) para ver o mapa.</p>';['pps_tab','pps_log','pps_auto'].forEach(function(i){$(i).innerHTML=''});return}
-  var A=(S.algoPaper&&S.algoPaper.algos)||{},since=S.algoPaper&&S.algoPaper.since,days=since?Math.max(0.1,((S.algoPaper.lastTs||Date.now())-since)/864e5):1;
-  var AM={};(S.algoMapNow||[]).concat((S.scan&&S.scan.extra)||[]).forEach(function(a){AM[a.algo]=a});
-  var OPS=Object.assign({},S.ppsOps||{});if(S.xmr)OPS.RANDOMXMONERO=Object.assign({label:'RandomX',coins:['XMR']},S.xmr);
-  var H=(S.scan&&S.scan.hist)||{},LM=S.marginLastro||{},enter=cfg.xmrEnterPct===undefined?2:cfg.xmrEnterPct,mk=function(a){return a&&a.marketUsdDay>0?Math.min(300,a.marketUsdDay*0.1):300};
-  var keys=Object.keys(AM).filter(function(k){return k!=='SHA256ASICBOOST'}).concat(Object.keys(A).filter(function(k){return !AM[k]&&k!=='SHA256ASICBOOST'}));
-  var rows=keys.map(function(k){var a=AM[k]||{},p=A[k]||{},R=p.runs||[],mins=R.map(function(r){return (r.end-r.start)/60e3}).sort(function(x,y){return x-y}),o=OPS[k]||null;
-    var hOn=p.hoursOn||0,simPct=p.spendUsd?(p.revUsd/p.spendUsd-1)*100:null,rate=mk(a),avgE=R.length?R.reduce(function(x,r){return x+r.edgePct},0)/R.length:null;
-    var payH=hOn>0?5/(rate/24*(1+(avgE||0)/100)):null,payDays=payH&&hOn?payH/(hOn/days):null;
-    return {k:k,l:a.label||p.label||k,c:(a.coins||p.coins||[]).join('+'),e:a.edgePct,thin:a.thin,mkt:a.marketUsdDay,n:R.length,perDay:R.length/days,med:mins.length?mins[mins.length>>1]:null,max:mins.length?mins[mins.length-1]:null,
-      onPct:hOn/(days*24)*100,simPct:simPct,simUsd:p.spendUsd?p.revUsd-p.spendUsd:null,op:o,h:H[k],lm:LM[k],rate:rate,payDays:payDays,avgE:avgE}}).sort(function(x,y){return (y.onPct||0)-(x.onPct||0)||((y.e||-1e9)-(x.e||-1e9))});
-  var best=rows[0],tot=rows.reduce(function(x,r){return x+(r.simUsd||0)},0),opTot=rows.reduce(function(x,r){return x+((r.op&&r.op.resultUsd)||0)},0),nowGood=rows.filter(function(r){return r.e>=enter&&!r.thin&&r.e<=100});
-  hd.innerHTML='<div class="row between" style="align-items:baseline"><h2 style="margin:0">Moedas PPS</h2><span class="chip '+(nowGood.length?'ok':'')+'">'+(nowGood.length?nowGood.length+' janela'+(nowGood.length>1?'s':'')+' aberta'+(nowGood.length>1?'s':''):'nenhuma janela aberta agora')+'</span></div>'+
-    '<p class="note" style="margin:6px 0">Aluguel de hash na NiceHash apontado para um pool que paga cada fração de trabalho (PPS): sem sorte de bloco. É a frente com janelas positivas medidas. Lastro desde '+(since?dt2(since):'—')+' ('+nf(days,1)+' dias).</p>'+
-    '<div class="kv"><div><small>Melhor frequência</small><span style="font-size:15px">'+(best?esc(best.l)+' ('+esc(best.c)+')':'—')+'</span><div class="note">'+(best&&best.n?nf(best.perDay,1)+' janelas por dia, ~'+nf(best.med,0)+' min cada, positiva '+nf(best.onPct,0)+'% do tempo':'')+'</div></div>'+
-    '<div><small>Resultado no mapa (simples)</small><span class="'+(tot>0?'good':tot<0?'bad':'')+'" style="font-size:15px">'+(tot>=0?'+':'')+usd(tot)+'</span><div class="note">US$100/dia por algoritmo, sem taxa de ordem</div></div>'+
-    '<div><small>Operação como real</small><span class="'+(opTot>0?'good':opTot<0?'bad':'')+'" style="font-size:15px">'+(opTot>=0?'+':'')+usd(opTot)+'</span><div class="note">com ordem mínima, taxa e limite de mercado</div></div></div>';
-  $('pps_tab').innerHTML='<h2 style="margin:0 0 6px">Mapa por moeda</h2><div class="scroll"><table class="note" style="width:100%"><tr><th>Moeda</th><th>Agora</th><th>Janelas (lastro)</th><th>Resultado</th><th>Aluguel × ano</th><th>Pagamento</th></tr>'+
-    rows.map(function(r){var ex=r.e>100?'dado suspeito':r.thin?'mercado pequeno ('+usd(r.mkt||0,0)+'/dia)':r.e>=enter?'<b class="good">janela aberta</b>':r.e>=0?'perto':'fechada';
-      return '<tr><td><span style="font-weight:600">'+esc(r.l)+'</span><div>'+esc(r.c)+'</div></td><td><span class="'+(r.e>=enter&&!r.thin&&r.e<=100?'good':r.e<0?'bad':'warn')+'">'+(isFinite(r.e)&&r.e<=100?pct(r.e,1):'—')+'</span><div>'+ex+'</div></td>'+
-        '<td>'+(r.n?r.n+' em '+nf(days,1)+' dias · '+nf(r.perDay,1)+'/dia<div>~'+nf(r.med,0)+' min (máx '+nf(r.max,0)+') · '+nf(r.onPct,0)+'% do tempo</div>':'nenhuma ainda')+(r.lm&&r.lm.horas>=3?'<div>hora a hora: +2% em '+nf(r.lm.acima2Pct,0)+'% de '+r.lm.horas+' h</div>':'')+'</td>'+
-        '<td>'+(r.simPct!==null?'<span class="'+(r.simPct>0?'good':'bad')+'">'+pct(r.simPct,1)+'</span> no mapa':'—')+(r.op&&(r.op.runs||r.op.resultUsd)?'<div>como real: '+(r.op.resultUsd>=0?'+':'')+usd(r.op.resultUsd||0)+'</div>':'')+'</td>'+
-        '<td>'+(r.h&&isFinite(r.h.pct)?'percentil '+nf(r.h.pct,0)+'<div>'+pct(r.h.vsMedPct,0)+' da mediana</div>':'<span>na fila</span>')+'</td>'+
-        '<td>'+(r.payDays!==null?'US$5 em ~'+(r.payDays<1?nf(r.payDays*24,0)+' h':nf(r.payDays,1)+' dias'):'—')+'<div>gasto '+usd(r.rate/24,1)+'/h na janela</div></td></tr>'}).join('')+'</table></div>'+
-    '<p class="note" style="margin:6px 0 0">Margem: quanto a moeda paga acima (+) ou abaixo (−) do aluguel, já com 3% da NiceHash, taxa do pool PPS (4%) e perdas de share e de venda (2,5%). "Mercado pequeno": o algoritmo inteiro gasta menos que o necessário para uma ordem nossa. Pagamento: tempo, no ritmo das janelas medidas, até juntar US$5 no pool (o mínimo de saque costuma ser desse tamanho).</p>';
-  var W=[];Object.keys(A).forEach(function(k){(A[k].runs||[]).forEach(function(r){W.push({k:k,l:A[k].label||k,r:r})})});W.sort(function(a,b){return b.r.start-a.r.start});
-  $('pps_log').innerHTML='<h2 style="margin:0 0 6px">Registro das janelas</h2>'+(W.length?'<div class="scroll"><table class="note" style="width:100%"><tr><th>Início</th><th>Moeda</th><th>Duração</th><th>Margem na entrada</th><th>Resultado (mapa)</th><th>Por que fechou</th></tr>'+
-    W.slice(0,25).map(function(w){var res=w.r.revUsd-w.r.spendUsd;return '<tr><td>'+dt2(w.r.start)+'</td><td>'+esc(w.l)+'</td><td>'+nf((w.r.end-w.r.start)/60e3,0)+' min</td><td>'+pct(w.r.edgePct,1)+'</td><td class="'+(res>=0?'good':'bad')+'">'+(res>=0?'+':'')+usd(res,2)+'</td><td>'+esc(w.r.reason||'')+'</td></tr>'}).join('')+'</table></div>':'<p class="note">As janelas aparecem aqui assim que abrirem.</p>');
-  var xa=cfg.xmrAddress&&cfg.xmrAddress!=='';
-  $('pps_auto').innerHTML='<h2 style="margin:0 0 6px">Automatizar de verdade</h2><p class="note" style="margin:0 0 6px">O robô pode fazer nas moedas PPS o que faz no BCH: uma ordem fica aberta na NiceHash, a potência sobe quando a janela abre e desce quando fecha, só em mercado com volume. Para cada moeda precisa de:</p>'+
-    '<ol class="note" style="margin:0;padding-left:18px"><li><b>Carteira da moeda</b> para receber'+(xa?' · Monero: <span class="good">endereço cadastrado</span>':' · Monero: cadastre em Operar → Robô → Operação Monero')+'.</li><li><b>Pool PPS cadastrado na NiceHash</b> com a carteira como usuário (Monero: Kryptex PPS+ ou Mining-Dutch).</li><li><b>Saldo na NiceHash</b>: a ordem mínima é 0,001 BTC por moeda.</li><li><b>Validação</b>: 30 janelas simuladas positivas no acumulado antes de ligar com dinheiro (regra de mercado: papel antes do real).</li></ol>'+
-    '<p class="note" style="margin:6px 0 0">Pronto para ativar primeiro: '+(best?esc(best.l)+' ('+esc(best.c)+')':'—')+', a moeda com mais janelas.</p>';
-}
+// Motor do cérebro 3D (conceito dos cérebros virtuais de conectoma, como o da mosca, num cérebro humano): ~1.500
+// neurônios na superfície e no interior de dois hemisférios, lobos temporais, cerebelo e tronco; ligações aos vizinhos
+// mais próximos; o cérebro gira devagar e os disparos correm pelas ligações. Cada frente é uma região (frontal, parietal,
+// occipital, temporal, cerebelo, hemisférios) e dispara mais quando está ativa, na cor do estado.
 var BR=null;
-function brainPath(g,W,H){var X=function(x){return x*W},Y=function(y){return y*H};g.beginPath();
-  g.moveTo(X(.08),Y(.52));g.bezierCurveTo(X(.05),Y(.30),X(.20),Y(.10),X(.40),Y(.08));g.bezierCurveTo(X(.45),Y(.04),X(.52),Y(.04),X(.535),Y(.085));
-  g.bezierCurveTo(X(.60),Y(.03),X(.80),Y(.06),X(.90),Y(.22));g.bezierCurveTo(X(.97),Y(.33),X(.97),Y(.50),X(.92),Y(.60));
-  g.bezierCurveTo(X(.90),Y(.68),X(.84),Y(.72),X(.78),Y(.70));g.bezierCurveTo(X(.86),Y(.74),X(.86),Y(.86),X(.74),Y(.88));
-  g.bezierCurveTo(X(.68),Y(.90),X(.64),Y(.86),X(.63),Y(.82));g.bezierCurveTo(X(.62),Y(.90),X(.63),Y(.95),X(.64),Y(1));g.lineTo(X(.60),Y(1));
-  g.bezierCurveTo(X(.58),Y(.92),X(.57),Y(.84),X(.55),Y(.76));g.bezierCurveTo(X(.48),Y(.80),X(.36),Y(.80),X(.30),Y(.72));
-  g.bezierCurveTo(X(.20),Y(.74),X(.10),Y(.66),X(.08),Y(.52));g.closePath()}
-function brainBuild(W,H){
-  var off=document.createElement('canvas');off.width=W;off.height=H;var g=off.getContext('2d'),bw=W*0.84,bh=H*0.86,ox=W*0.08,oy=H*0.05;
-  g.save();g.translate(ox,oy);brainPath(g,bw,bh);g.restore();
-  var P=[],tries=0;while(P.length<950&&tries<60000){tries++;var x=ox+Math.random()*bw,y=oy+Math.random()*bh;if(g.isPointInPath(x,y))P.push({x:x,y:y})}
-  // contorno com mais nós (é onde a imagem brilha mais)
-  var edge=[];for(var t=0;t<300;t++){for(var k=0;k<60;k++){var a=Math.random()*6.283,r=Math.random(),x2=ox+bw/2+Math.cos(a)*bw*0.55,y2=oy+bh/2+Math.sin(a)*bh*0.55;if(g.isPointInPath(x2,y2)){var x3=x2,y3=y2;for(var s=0;s<30;s++){var nx=x3+Math.cos(a)*3,ny=y3+Math.sin(a)*3;if(!g.isPointInPath(nx,ny))break;x3=nx;y3=ny}edge.push({x:x3,y:y3,rim:1});break}}}
-  P=P.concat(edge);
-  P.forEach(function(q){var u=(q.x-ox)/bw,v=(q.y-oy)/bh;q.reg=u<.3?0:u>.7?1:v>.6?3:u<.5?(v<.35?2:4):(v<.35?5:4)});
-  var L=[];P.forEach(function(q,i){var d=[];for(var j=0;j<P.length;j++)if(j!==i){var o=P[j],dd=(o.x-q.x)*(o.x-q.x)+(o.y-q.y)*(o.y-q.y);if(dd<(W*0.075)*(W*0.075))d.push([dd,j])}
-    d.sort(function(a,b){return a[0]-b[0]});q.nb=d.slice(0,q.rim?3:5).map(function(x){return x[1]});q.nb.forEach(function(j){if(i<j)L.push([i,j])})});
-  // fundo: azul profundo, colunas de servidores e brilho no chão
-  var bg=g.createRadialGradient(W/2,H*0.45,10,W/2,H*0.5,W*0.75);bg.addColorStop(0,'#0b2d5c');bg.addColorStop(0.55,'#061632');bg.addColorStop(1,'#020812');
-  g.fillStyle=bg;g.fillRect(0,0,W,H);
-  for(var c=0;c<2;c++){var x0=c?W*0.9:0,w0=W*0.1;g.fillStyle='rgba(20,50,90,0.55)';g.fillRect(x0,0,w0,H);
-    for(var r2=0;r2<46;r2++){var yy=(r2/46)*H;g.fillStyle='rgba(90,170,255,'+(0.08+Math.random()*0.25).toFixed(2)+')';g.fillRect(x0+w0*0.15+Math.random()*w0*0.5,yy,2+Math.random()*6,1.2)}}
-  var fl=g.createRadialGradient(W*0.6,H*0.98,2,W*0.6,H*0.98,W*0.35);fl.addColorStop(0,'rgba(150,210,255,0.55)');fl.addColorStop(1,'rgba(150,210,255,0)');g.fillStyle=fl;g.fillRect(0,H*0.6,W,H*0.4);
-  var halo=g.createRadialGradient(W/2,H*0.42,W*0.1,W/2,H*0.42,W*0.55);halo.addColorStop(0,'rgba(90,170,255,0.18)');halo.addColorStop(1,'rgba(90,170,255,0)');g.fillStyle=halo;g.fillRect(0,0,W,H);
-  g.globalCompositeOperation='lighter';
-  // fibras
-  g.shadowColor='rgba(90,180,255,0.9)';g.shadowBlur=4;g.lineWidth=0.7;
-  L.forEach(function(e){var a=P[e[0]],b=P[e[1]];g.strokeStyle='rgba(140,205,255,'+(a.rim&&b.rim?0.6:0.3)+')';g.beginPath();g.moveTo(a.x,a.y);g.lineTo(b.x,b.y);g.stroke()});
-  // contorno e sulcos
-  g.save();g.translate(ox,oy);g.shadowBlur=12;g.strokeStyle='rgba(170,225,255,0.55)';g.lineWidth=1.6;brainPath(g,bw,bh);g.stroke();
-  g.lineWidth=1.1;g.strokeStyle='rgba(170,225,255,0.4)';g.beginPath();g.moveTo(.535*bw,.085*bh);g.bezierCurveTo(.51*bw,.25*bh,.53*bw,.42*bh,.49*bw,.58*bh);g.stroke();
-  g.beginPath();g.moveTo(.30*bw,.64*bh);g.bezierCurveTo(.42*bw,.54*bh,.56*bw,.57*bh,.70*bw,.63*bh);g.stroke();
-  for(var st=0;st<4;st++){g.beginPath();g.moveTo(.64*bw,(.76+st*.03)*bh);g.bezierCurveTo(.72*bw,(.73+st*.03)*bh,.80*bw,(.75+st*.03)*bh,.84*bw,(.78+st*.025)*bh);g.stroke()}
-  g.restore();
-  // nós
-  g.shadowBlur=6;P.forEach(function(q){g.fillStyle='rgba(225,245,255,'+(q.rim?0.95:0.75)+')';g.beginPath();g.arc(q.x,q.y,q.rim?1.3:1.05,0,6.283);g.fill()});
-  g.shadowBlur=0;g.globalCompositeOperation='source-over';
-  // brilho (sprite) para os nós que acendem
-  var sp=document.createElement('canvas');sp.width=sp.height=48;var sg=sp.getContext('2d'),gr=sg.createRadialGradient(24,24,0,24,24,24);
-  gr.addColorStop(0,'rgba(255,255,255,1)');gr.addColorStop(0.18,'rgba(200,235,255,0.85)');gr.addColorStop(0.5,'rgba(90,170,255,0.25)');gr.addColorStop(1,'rgba(90,170,255,0)');sg.fillStyle=gr;sg.fillRect(0,0,48,48);
-  var hubs=P.map(function(_,i){return i}).filter(function(){return Math.random()<0.07}).map(function(i){return {i:i,ph:Math.random()*6.283,sp:0.6+Math.random()*1.4}});
-  return {W:W,H:H,off:off,P:P,L:L,hubs:hubs,sprite:sp,pulses:[],last:0,raf:0,ox:ox,oy:oy,bw:bw,bh:bh}
+function brainBuild(){
+  var P=[],R=Math.random;
+  var add=function(cx,cy,cz,rx,ry,rz,n,reg,surf,clip){for(var k=0;k<n;k++){var u=R()*6.2832,v=Math.acos(2*R()-1),s=surf?1:Math.cbrt(R())*0.92,
+    gy=1+0.05*Math.sin(u*9+v*7)*Math.sin(v*11);var x=Math.sin(v)*Math.cos(u),y=Math.cos(v),z=Math.sin(v)*Math.sin(u);
+    var p={x:cx+x*rx*s*gy,y:cy+y*ry*s*gy,z:cz+z*rz*s*gy,e:0,reg:reg};if(clip&&!clip(p)){k--;continue}P.push(p)}};
+  var hemi=function(sx){var c=function(p){return p.y>-0.32&&sx*(p.x)>0.03};
+    add(sx*0.34,0.06,0,0.36,0.44,0.78,520,-1,true,c);add(sx*0.34,0.06,0,0.36,0.44,0.78,90,-1,false,c);
+    add(sx*0.40,-0.22,0.12,0.22,0.17,0.40,110,3,true,null)};
+  hemi(-1);hemi(1);
+  add(0,-0.42,-0.58,0.40,0.18,0.26,170,4,true,null);
+  for(var k=0;k<60;k++){var t=R();P.push({x:(R()-0.5)*0.16,y:-0.32-t*0.5,z:-0.22+(R()-0.5)*0.14,e:0,reg:4})}
+  // regiões: 0 BCH (hemisfério esquerdo) · 1 PPS (direito) · 2 Sniper (parietal, alto) · 3 Funding (temporal) · 4 Rendimentos (cerebelo) · 5 Copiloto (frontal)
+  P.forEach(function(p){if(p.reg>=0)return;p.reg=p.z>0.38?5:p.y>0.34?2:p.x<0?0:1});
+  var n=P.length,L=[];
+  P.forEach(function(p,i){var b=[];for(var j=0;j<n;j++){if(j===i)continue;var q=P[j],d=(q.x-p.x)*(q.x-p.x)+(q.y-p.y)*(q.y-p.y)+(q.z-p.z)*(q.z-p.z);if(d<0.024)b.push([d,j])}
+    b.sort(function(a,c){return a[0]-c[0]});p.nb=b.slice(0,4).map(function(x){return x[1]});p.nb.forEach(function(j){if(i<j)L.push([i,j])})});
+  var sp=document.createElement('canvas');sp.width=sp.height=64;var sg=sp.getContext('2d'),gr=sg.createRadialGradient(32,32,0,32,32,32);
+  gr.addColorStop(0,'rgba(255,255,255,1)');gr.addColorStop(0.15,'rgba(210,240,255,0.9)');gr.addColorStop(0.45,'rgba(80,170,255,0.28)');gr.addColorStop(1,'rgba(60,140,255,0)');sg.fillStyle=gr;sg.fillRect(0,0,64,64);
+  var hubs=P.map(function(_,i){return i}).filter(function(){return R()<0.06});
+  return {P:P,L:L,sprite:sp,hubs:hubs,pulses:[],ang:0,last:0,W:0,H:0,bg:null}
 }
 function brainStart(){
-  var cv=$('brainCv');if(!cv)return;var reduce=window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches;
-  var tint={g:[120,255,190],w:[255,210,120],b:[255,150,90],n:[200,230,255]};
+  var cv=$('brainCv');if(!cv)return;if(!BR)BR=brainBuild();if(window.FD_brainLoop)return;window.FD_brainLoop=1;
+  var reduce=window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var tint={g:[110,255,180],w:[255,205,110],b:[255,140,90],n:[190,225,255]};
   var step=function(t){
     if(!cv.isConnected){window.FD_brainLoop=0;return}var home=$('tab-home');
     if(document.visibilityState!=='visible'||(home&&home.hidden)){setTimeout(function(){requestAnimationFrame(step)},500);return}
     var dpr=Math.min(2,window.devicePixelRatio||1),W=Math.round(cv.clientWidth*dpr),H=Math.round(cv.clientHeight*dpr);
-    if(!BR||BR.W!==W||BR.H!==H){var keep=BR;BR=brainBuild(W,H);cv.width=W;cv.height=H}
-    var g=cv.getContext('2d'),dt=Math.min(64,t-(BR.last||t));BR.last=t;BR.tt=(BR.tt||0)+dt;
-    var S=(window.FD_brainState||{}).regions||[],br=1+Math.sin(BR.tt*0.0012)*0.006;
-    g.setTransform(1,0,0,1,0,0);g.drawImage(BR.off,0,0);
-    g.save();g.translate(W/2,H/2);g.scale(br,br);g.translate(-W/2,-H/2);g.globalCompositeOperation='lighter';
-    // nós que piscam (como as estrelas da rede)
-    BR.hubs.forEach(function(h){var q=BR.P[h.i],st=S[q.reg]||{},c=tint[st.c]||tint.n,a=0.35+0.65*Math.max(0,Math.sin(BR.tt*0.001*h.sp+h.ph));
-      var z=(8+a*16)*dpr;g.globalAlpha=a;g.drawImage(BR.sprite,q.x-z/2,q.y-z/2,z,z);if(st.c&&st.c!=='n'&&a>0.8){g.globalAlpha=(a-0.8)*2;g.fillStyle='rgba('+c[0]+','+c[1]+','+c[2]+',1)';g.beginPath();g.arc(q.x,q.y,2.2*dpr,0,6.283);g.fill()}});
-    g.globalAlpha=1;
-    // pulsos correndo pelas fibras: nascem mais nas frentes ativas
-    if(!reduce)for(var r=0;r<6;r++){var st=S[r]||{},rate=(st.on?0.22:0.06)*(st.c==='g'?1.5:st.c==='w'?1.1:0.8);if(Math.random()<rate*dt/16){
-      var cand=BR.L.filter(function(e){return BR.P[e[0]].reg===r});var e=cand[(Math.random()*cand.length)|0];if(e)BR.pulses.push({a:e[0],b:e[1],t:0,c:tint[st.c]||tint.n,hop:0})}}
-    BR.pulses=BR.pulses.filter(function(p){p.t+=dt/520;var a=BR.P[p.a],b=BR.P[p.b];
-      if(p.t>=1){if(p.hop<4&&Math.random()<0.7&&BR.pulses.length<160){var nb=b.nb[(Math.random()*b.nb.length)|0];if(nb!==undefined&&nb!==p.a)BR.pulses.push({a:p.b,b:nb,t:0,c:p.c,hop:p.hop+1})}return false}
-      var x=a.x+(b.x-a.x)*p.t,y=a.y+(b.y-a.y)*p.t,z=9*dpr;g.globalAlpha=0.9;g.drawImage(BR.sprite,x-z/2,y-z/2,z,z);
-      g.fillStyle='rgba('+p.c[0]+','+p.c[1]+','+p.c[2]+',0.9)';g.beginPath();g.arc(x,y,1.3*dpr,0,6.283);g.fill();return true});
-    g.globalAlpha=1;g.restore();g.globalCompositeOperation='source-over';
-    // nome das regiões
-    var cen=[[.16,.42],[.84,.30],[.38,.22],[.50,.70],[.40,.48],[.66,.20]];g.font='600 '+(10*dpr)+'px system-ui,sans-serif';g.textAlign='center';g.shadowColor='rgba(0,0,0,0.9)';g.shadowBlur=6*dpr;
-    cen.forEach(function(cc,r){var st=S[r];if(!st)return;var c=tint[st.c]||tint.n;g.fillStyle='rgba('+c[0]+','+c[1]+','+c[2]+',0.95)';g.fillText(st.k,BR.ox+cc[0]*BR.bw,BR.oy+cc[1]*BR.bh)});g.shadowBlur=0;
+    if(BR.W!==W||BR.H!==H){cv.width=W;cv.height=H;BR.W=W;BR.H=H;var b=document.createElement('canvas');b.width=W;b.height=H;var bgx=b.getContext('2d'),gg=bgx.createRadialGradient(W/2,H*0.48,4,W/2,H*0.5,Math.max(W,H)*0.7);
+      gg.addColorStop(0,'#0d3570');gg.addColorStop(0.5,'#06173a');gg.addColorStop(1,'#01060f');bgx.fillStyle=gg;bgx.fillRect(0,0,W,H);
+      for(var c=0;c<90;c++){bgx.fillStyle='rgba(120,190,255,'+(Math.random()*0.25).toFixed(2)+')';bgx.fillRect(Math.random()*W,Math.random()*H,1.2*dpr,1.2*dpr)}BR.bg=b}
+    var g=cv.getContext('2d'),dt=Math.min(64,t-(BR.last||t));BR.last=t;if(!reduce)BR.ang+=dt*0.00035;
+    g.globalCompositeOperation='source-over';g.drawImage(BR.bg,0,0);
+    var S=(window.FD_brainState||{}).regions||[],ca=Math.cos(BR.ang),sa=Math.sin(BR.ang),tx=0.32,ct=Math.cos(tx),st2=Math.sin(tx),sc=Math.min(W,H*1.25)*0.52;
+    // projeção: gira em torno do eixo vertical, inclina um pouco para ver o alto, perspectiva
+    var Q=BR.P.map(function(p){var x=p.x*ca+p.z*sa,z=-p.x*sa+p.z*ca,y=p.y*ct-z*st2,z2=p.y*st2+z*ct,f=2.6/(2.6-z2);return {x:W/2+x*sc*f,y:H*0.5-y*sc*f,z:z2,f:f}});
+    g.globalCompositeOperation='lighter';
+    // ligações (duas camadas: atrás mais fraca, na frente mais forte)
+    for(var layer=0;layer<2;layer++){g.beginPath();for(var k=0;k<BR.L.length;k++){var e=BR.L[k],a=Q[e[0]],bq=Q[e[1]];if((a.z+bq.z>0)!==(layer===1))continue;g.moveTo(a.x,a.y);g.lineTo(bq.x,bq.y)}
+      g.strokeStyle=layer?'rgba(120,195,255,0.22)':'rgba(90,150,255,0.08)';g.lineWidth=0.7*dpr;g.stroke()}
+    // disparos espontâneos por região (frente ativa e verde dispara mais)
+    if(!reduce)for(var r=0;r<6;r++){var rs=S[r]||{},rate=(rs.on?0.3:0.08)*(rs.c==='g'?1.5:rs.c==='w'?1.1:0.8);if(Math.random()<rate*dt/16){var cand=[];for(var i2=0;i2<BR.P.length;i2+=3)if(BR.P[i2].reg===r)cand.push(i2);var pick=cand[(Math.random()*cand.length)|0];if(pick!==undefined){BR.P[pick].e=1;BR.P[pick].c=tint[rs.c]||tint.n}}}
+    // neurônios
+    for(var i=0;i<Q.length;i++){var q=Q[i],p=BR.P[i],dep=(q.z+1)/2,base=0.18+0.55*dep,z=(2.2+p.e*4.5)*q.f*dpr;
+      g.globalAlpha=Math.min(1,base+p.e*0.8);g.drawImage(BR.sprite,q.x-z,q.y-z,z*2,z*2);
+      if(p.e>0.97&&BR.pulses.length<220)p.nb.forEach(function(j){BR.pulses.push({a:i,b:j,t:0,c:p.c||tint.n,hop:0})});
+      if(p.e>0)p.e=Math.max(0,p.e-dt/700)}
+    // estrelas fixas (nós que piscam)
+    BR.hubs.forEach(function(h,k){var q=Q[h],a=0.5+0.5*Math.sin(t*0.0012+k*1.7);if(a<0.6)return;var z=(5+a*7)*q.f*dpr;g.globalAlpha=(a-0.5)*((q.z+1)/2);g.drawImage(BR.sprite,q.x-z,q.y-z,z*2,z*2)});
+    // pulsos correndo pelas ligações (propagam para os vizinhos)
+    BR.pulses=BR.pulses.filter(function(pu){pu.t+=dt/450;var a=Q[pu.a],bq=Q[pu.b];
+      if(pu.t>=1){var nb=BR.P[pu.b];if(pu.hop<4&&Math.random()<0.6){nb.e=Math.max(nb.e,0.98);nb.c=pu.c;}return false}
+      var x=a.x+(bq.x-a.x)*pu.t,y=a.y+(bq.y-a.y)*pu.t,z=2.6*dpr;g.globalAlpha=0.8;g.drawImage(BR.sprite,x-z,y-z,z*2,z*2);
+      g.fillStyle='rgb('+pu.c[0]+','+pu.c[1]+','+pu.c[2]+')';g.beginPath();g.arc(x,y,1.2*dpr,0,6.283);g.fill();return true});
+    g.globalAlpha=1;g.globalCompositeOperation='source-over';
+    // nome da região quando ela está de frente
+    var cen=[[-0.45,0.1,0],[0.45,0.1,0],[0,0.55,-0.1],[0.5,-0.25,0.2],[0,-0.5,-0.6],[0,0.15,0.75]];
+    g.font='600 '+(11*dpr)+'px system-ui,sans-serif';g.textAlign='center';g.shadowColor='rgba(0,0,0,0.9)';g.shadowBlur=6*dpr;
+    cen.forEach(function(cc,r){var rs=S[r];if(!rs)return;var x=cc[0]*ca+cc[2]*sa,z=-cc[0]*sa+cc[2]*ca,y=cc[1]*ct-z*st2,z2=cc[1]*st2+z*ct;if(z2<-0.15&&r!==2)return;var f=2.6/(2.6-z2),c=tint[rs.c]||tint.n;
+      g.globalAlpha=Math.min(1,0.45+z2);g.fillStyle='rgb('+c[0]+','+c[1]+','+c[2]+')';g.fillText(rs.k,W/2+x*sc*f,H*0.5-y*sc*f-14*dpr)});
+    g.globalAlpha=1;g.shadowBlur=0;
     if(!reduce)requestAnimationFrame(step);else window.FD_brainLoop=0};
-  if(window.FD_brainLoop)return;window.FD_brainLoop=1;requestAnimationFrame(step);
+  requestAnimationFrame(step);
 }
 var thinkI=0,thinkT=null;
 function thinkStart(){if(thinkT)return;thinkT=setInterval(function(){var el=$('brainThink'),T=window.FD_think||[];if(!el||!T.length||document.visibilityState!=='visible'||$('tab-home').hidden)return;
