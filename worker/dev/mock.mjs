@@ -95,6 +95,11 @@ export function createMock() {
         if (m[2] === '/updatePriceAndLimit') {
           const b = JSON.parse(body);
           if (b.price !== undefined && +b.price < +o.price - 0.01 - 1e-9) return send(400, { errors: [{ message: 'price decrease too large' }] });
+          // regra real da NiceHash (opcional no mock): baixar o preço só 10 min depois da última mudança ou da criação
+          const lastCh = o.priceTs || o.created;
+          if (s.strict5061 && b.price !== undefined && +b.price < +o.price - 1e-12 && Date.now() - lastCh < 600e3)
+            return send(400, { error_id: 'x', errors: [{ code: 5061, message: 'Order price decreased not allowed within 10 minutes of last price change. Seconds till available: ' + Math.ceil((600e3 - (Date.now() - lastCh)) / 1000) }] });
+          if (b.price !== undefined && +b.price !== +o.price) o.priceTs = Date.now();
           if (b.price !== undefined) o.price = b.price; if (b.limit !== undefined) o.limit = b.limit;
           o.updates.push(b); return send(200, ord(o));
         }

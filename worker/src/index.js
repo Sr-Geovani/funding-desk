@@ -368,11 +368,27 @@ export async function tick(env, opts = {}) {
     if (cfg.mode !== 'active' || !hasKeys(env)) { results.push(Object.assign({ executed: false }, a)); continue; }
     try {
       if (a.type === 'cancel') await nh.cancelOrder(a.id);
-      if (a.type === 'update') await nh.updateOrder(a.id, { priceEH: a.priceEH, limitPH: a.limitPH });
+      if (a.type === 'update') {
+        try { await nh.updateOrder(a.id, { priceEH: a.priceEH, limitPH: a.limitPH }); }
+        catch (e) {
+          // 5061: a NiceHash só deixa baixar o preço 10 min depois da última mudança (a dela pode não bater com a nossa:
+          // criação da ordem, ciclo em outro datacenter). Aplica a potência com o preço atual e agenda a baixa para quando ela libera.
+          const m = /Seconds till available: (\d+)/.exec(String(e.message || ''));
+          const cur = orders.find((o) => o.id === a.id);
+          if (!/5061/.test(String(e.message || '')) || !cur) throw e;
+          const secs = m ? +m[1] : 600;
+          dec.state.lastPriceChange = dec.state.lastPriceChange || {}; dec.state.lastDecrease = dec.state.lastDecrease || {};
+          dec.state.lastPriceChange[a.id] = now - Math.max(0, 600 - secs) * 1000; dec.state.lastDecrease[a.id] = 0;
+          if (Math.abs(cur.limitPH - a.limitPH) >= 0.001) await nh.updateOrder(a.id, { priceEH: cur.priceEH, limitPH: a.limitPH });
+          a.priceEH = cur.priceEH; a.reason += `; preço só baixa em ${Math.round(secs / 60)} min (regra da NiceHash)`;
+          log.push({ t: now, kind: 'acao', text: `NiceHash ainda não deixa baixar o preço da ordem ${a.id.slice(0, 8)} (faltam ${secs} s): potência ajustada para ${a.limitPH} PH/s com o preço atual` });
+        }
+      }
       if (a.type === 'refill') await nh.refillOrder(a.id, a.amountBtc);
       if (a.type === 'create') {
         const o = await nh.createOrder(a);
         a.id = o.id;
+        dec.state.lastPriceChange = dec.state.lastPriceChange || {}; dec.state.lastPriceChange[o.id] = now; // criar conta como mudança de preço na NiceHash
         cfg.managed = (cfg.managed || []).concat(o.id);
         await kvPut(env, 'config', saveCfg());
       }

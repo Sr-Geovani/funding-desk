@@ -1621,3 +1621,26 @@ test('integração: vigia dispara o tiro por atraso na hora e o registro do tiro
     assert.ok(b.state.snLog.length >= 1);
   } finally { t.server.close(); }
 });
+
+test('integração: NiceHash recusa baixar o preço (5061): a potência desce mesmo assim e a baixa fica agendada', async () => {
+  const t = await setup();
+  try {
+    t.state.strict5061 = true;
+    const o = await t.call('POST', '/api/orders', { priceEH: 0.60, limitPH: 75, amountBtc: 0.005, poolId: 'pool-1', managed: true });
+    assert.equal(o.status, 200, JSON.stringify(o.body));
+    await tick(t.env);
+    await t.call('PUT', '/api/config', { mode: 'active', payoutAddress: 'bitcoincash:q' + 'a'.repeat(41), sniper: true, sniperUseAge: false, sniperShotMin: 7, sniperIdlePh: 1 });
+    const st = JSON.parse(await t.env.FD_KV.get('state'));
+    st.sniper = { shotStart: Date.now() - 8 * 60e3, shotBlockId: st.lastHeight, shots: 1, endsBlock: 0, endsTime: 0 }; st.lastPriceChange = {}; st.lastDecrease = {};
+    await t.env.FD_KV.put('state', JSON.stringify(st));
+    const id = o.body.id || Object.keys(t.state.orders)[0], lim0 = +t.state.orders[id].limit;
+    t.state.orders[id].created = Date.now() - 20 * 60e3; t.state.orders[id].priceTs = Date.now() - 120e3; // mudança de preço que o robô não viu
+    await tick(t.env); // prazo do tiro: recua para 1 PH/s e tenta baixar o preço logo depois da criação
+    const mo = t.state.orders[id];
+    assert.ok(+mo.limit < lim0, JSON.stringify(mo)); // potência de espera aplicada mesmo com a recusa do preço
+    assert.equal(+mo.price, 0.6);                                    // preço mantido
+    const s2 = JSON.parse(await t.env.FD_KV.get('state'));
+    assert.ok(!(s2.errors || []).some((e) => /5061/.test(e)), JSON.stringify(s2.errors));
+    assert.ok(s2.lastPriceChange[id] > Date.now() - 200e3, JSON.stringify(s2.lastPriceChange)); // baixa agendada pelo tempo que a NiceHash informou
+  } finally { t.server.close(); }
+});
