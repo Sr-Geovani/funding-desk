@@ -60,6 +60,12 @@ main>section{min-width:0}
 section[hidden],[hidden]{display:none!important}
 .stack{display:grid;gap:12px}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px;min-width:0}
+.brain svg{width:100%;height:auto;display:block}.brain .ring{transform-origin:160px 110px;animation:bspin 18s linear infinite}.brain .ring2{transform-origin:160px 110px;animation:bspin 30s linear infinite reverse}
+.brain .flow{stroke-dasharray:4 6;animation:bflow 1.4s linear infinite}.brain .idle{stroke-dasharray:2 8;opacity:.35}.brain .pulse{transform-box:fill-box;transform-origin:center;animation:bpulse 2.2s ease-in-out infinite}
+.brain .core{transform-box:fill-box;transform-origin:center;animation:bpulse 3.5s ease-in-out infinite}
+@keyframes bspin{to{transform:rotate(360deg)}}@keyframes bflow{to{stroke-dashoffset:-20}}@keyframes bpulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.12);opacity:.8}}
+@media (prefers-reduced-motion:reduce){.brain .ring,.brain .ring2,.brain .flow,.brain .pulse,.brain .core{animation:none}}
+.opp-row{display:grid;grid-template-columns:1fr auto;gap:2px 8px;align-items:baseline}
 .banner{background:var(--panel2);border:1px solid var(--warn);color:var(--fg);border-radius:10px;padding:10px 12px;font-size:13px}
 .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
@@ -199,7 +205,7 @@ details.card>summary{color:var(--fg);font-size:15px}
 
   <!-- INÍCIO -->
   <section id="tab-home" class="stack">
-    <div class="card" id="h_brain" hidden></div>
+    <div class="card brain" id="h_brain" hidden></div>
     <div class="card" id="h_fin"></div>
     <div class="card sig" id="h_act" hidden></div>
     <div class="card" id="h_ai" hidden></div>

@@ -1799,23 +1799,47 @@ function renderLink(){
   $('h_link').hidden=!need;
   if(need)$('h_link_txt').textContent=(STANDALONE?'Este atalho do iPhone tem memória separada do Safari. ':'')+(settings.apiUrl?'A conexão com o backend falhou. ':'')+'Copie o link de conexão (o que o Claude mandou) e toque no botão: fica salvo neste aparelho.';
 }
-// Cérebro: cada frente que o Jarbas acompanha, o que está vendo, o que decidiu e quanto rendeu (real e simulado).
+// Cérebro: um núcleo (Jarbas) ligado às frentes. Cada frente acende conforme o estado (verde dá lucro, amarelo perto,
+// vermelho não compensa) e a linha "corre" quando a frente está ativa (operando, em tiro ou com oportunidade aberta).
+// Embaixo: oportunidades agora, em ordem de margem, e as últimas atividades do servidor.
 function renderBrain(){
   var el=$('h_brain');if(!el)return;var st=ops.status,S=st&&st.state,cfg=(st&&st.config)||{};if(!S){el.hidden=true;return}el.hidden=false;
-  var m=S.market||{},X=S.xmr,ps=S.paperSniper||{},fp=S.fundPaper&&S.fundPaper.summary,ai=S.ai||{},J=S.jarbas||{},A=(S.algoPaper&&S.algoPaper.algos)||{};
-  var realSpent=Object.values((S.real&&S.real.days)||{}).reduce(function(a,d){return a+(d.spendUsd||0)},0);
-  var dot=function(c){return '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;background:var(--'+(c==='g'?'good':c==='w'?'warn':c==='b'?'bad':'mut')+',#888)"></span>'};
-  var row=function(c,name,now,res,next){return '<div class="box" style="margin:0"><div class="row between" style="align-items:baseline"><span style="font-weight:600">'+dot(c)+esc(name)+'</span><span class="note">'+res+'</span></div><div class="note" style="margin-top:2px">'+now+'</div>'+(next?'<div class="note">Próximo passo: '+next+'</div>':'')+'</div>'};
-  var others=Object.keys(A).map(function(k){var a=A[k];return {l:a.label||k,r:a.spendUsd>0?(a.revUsd/a.spendUsd-1)*100:null}}).filter(function(x){return x.r!==null}).sort(function(a,b){return b.r-a.r});
+  var m=S.market||{},X=S.xmr,ps=S.paperSniper||{},fp=S.fundPaper&&S.fundPaper.summary,ai=S.ai||{},J=S.jarbas||{},P=S.ppsOps||{},AM=S.algoMapNow||[],FR=(S.frontsPaper&&S.frontsPaper.f)||{};
+  var enter=cfg.xmrEnterPct===undefined?2:cfg.xmrEnterPct,realSpent=Object.values((S.real&&S.real.days)||{}).reduce(function(a,d){return a+(d.spendUsd||0)},0);
+  var ppsAll=Object.keys(P).map(function(k){return P[k]}).concat(X?[X]:[]),ppsRes=ppsAll.reduce(function(a,x){return a+(x.resultUsd||0)},0),ppsOn=ppsAll.some(function(x){return x.on});
+  var ppsBest=AM.filter(function(a){return a.algo!=='SHA256ASICBOOST'&&isFinite(a.edgePct)}).sort(function(a,b){return b.edgePct-a.edgePct})[0];
   var weak=Object.keys(ai.stats||{}).filter(function(k){var x=ai.stats[k];return x.n>=8&&x.hits/x.n<0.4}).length;
-  el.innerHTML='<div class="row between" style="align-items:baseline"><h2 style="margin:0">Cérebro</h2><span class="note">Jarbas '+(J.telegram?'<span class="chip ok">no Telegram</span>':'<span class="chip">Telegram: conecte em Ajustes</span>')+'</span></div><div class="stack" style="gap:6px;margin-top:8px">'+
-    row(isFinite(m.edgeAtBidPct)&&m.edgeAtBidPct>=0?'g':'b','Mineração BCH (solo)','Margem agora '+pct(m.edgeAtBidPct,1)+' · robô '+(MODE_TXT[cfg.mode]||cfg.mode)+(cfg.sniper?' · Sniper ligado':''),'real: gasto '+usd(realSpent,0)+' · '+((S.myBlocks||[]).length)+' blocos',isFinite(m.edgeAtBidPct)&&m.edgeAtBidPct>=0?'janela positiva rara: avaliar tiro':'sem vantagem: manter em Observar')+
-    row(X&&X.resultUsd>0?'g':X?'w':'n','Monero (PPS)',X?((X.on?'minerando':'parado')+' · margem '+pct(X.edgeNow,1)+' · '+nf(X.hoursOn||0,1)+' h ligado'):'aguardando o mapa de moedas','simulado: '+(X?((X.resultUsd>=0?'+':'')+usd(X.resultUsd||0)+(X.retPct!==null?' ('+pct(X.retPct,1)+')':'')):'—'),X&&X.resultUsd>0?'teste real pequeno quando houver saldo':'acompanhar')+
-    row(ps.spendUsd&&ps.evUsd>=ps.spendUsd?'g':'w','Sniper (simulado)',(ps.shot?'em tiro':'em espera')+(ps.lambda?' · '+nf(ps.lambda,2)+' bloco esperado':''),'gasto '+usd(ps.spendUsd||0,0)+' · esperado '+usd(ps.evUsd||0,0),'só vale com margem positiva no tiro')+
-    row(fp&&fp.netUsd>0?'g':'b','Funding (simulado)',fp?(fp.closed+' operações, '+fp.wins+' positivas, '+nf(fp.avgHours||0,0)+' h em média'):'sem operações',fp?usd(fp.netUsd):'—','spread de altcoin some em horas: só como sinal')+
-    row(others[0]&&others[0].r>0?'g':'n','Outras moedas (PPS)',others.slice(0,3).map(function(x){return esc(x.l)+' '+pct(x.r,1)}).join(' · ')||'—','simulado',others[0]&&others[0].r>0?esc(others[0].l)+' é o destaque':'')+
-    row(weak?'w':'g','Copiloto',(ai.level&&ai.level.name||'')+' · acerto geral '+(ai.rate?pctp(ai.rate*100,0):'—'),weak?weak+' tipos em revisão':'ok',weak?'tipos que erram não viram sugestão':'')+
-    '</div><p class="note" style="margin:6px 0 0">Converse com o Jarbas no Telegram: /status, /monero, /bch, /funding, /saldo, /copiloto, /relatorio, /modo observar, /sniper desligar.</p>';
+  var cdi=S.frontsPaper&&S.frontsPaper.cdiPct,yBest=Object.keys(FR).map(function(k){return FR[k].rate}).filter(isFinite).sort(function(a,b){return b-a})[0];
+  var C=function(c){return c==='g'?'var(--good,#2a9d5b)':c==='w'?'var(--warn,#c9a227)':c==='b'?'var(--bad,#d1495b)':'var(--mut,#888)'};
+  var N=[
+    {k:'BCH solo',c:isFinite(m.edgeAtBidPct)&&m.edgeAtBidPct>=0?'g':'b',on:!!(S.sniper&&S.sniper.shotStart),v:pct(m.edgeAtBidPct,1)},
+    {k:'Moedas PPS',c:ppsBest&&ppsBest.edgePct>=enter?'g':ppsBest&&ppsBest.edgePct>=0?'w':'b',on:ppsOn,v:ppsBest?esc(ppsBest.label)+' '+pct(ppsBest.edgePct,1):'—'},
+    {k:'Sniper',c:ps.evUsd>=ps.spendUsd?'g':'w',on:!!ps.shot,v:ps.shot?'tiro (sim.)':'espera'},
+    {k:'Funding',c:fp&&fp.netUsd>0?'g':'b',on:!!(S.fundPaper&&S.fundPaper.open&&S.fundPaper.open.length),v:fp?usd(fp.netUsd):'—'},
+    {k:'Rendimentos',c:yBest>=12?'g':yBest>0?'w':'n',on:true,v:yBest?pct(yBest,1)+' a.a.':'—'},
+    {k:'Copiloto',c:weak?'w':'g',on:true,v:ai.rate?pctp(ai.rate*100,0)+' acerto':'—'}];
+  var cx=160,cy=110,R=82,svg='<svg viewBox="0 -4 320 240" role="img" aria-label="Cérebro do Jarbas: estado de cada frente">'+
+    '<circle class="ring" cx="160" cy="110" r="38" fill="none" stroke="var(--line,#9994)" stroke-width="1.5" stroke-dasharray="3 7"/>'+
+    '<circle class="ring2" cx="160" cy="110" r="48" fill="none" stroke="var(--line,#9993)" stroke-width="1" stroke-dasharray="1 9"/>';
+  N.forEach(function(n,i){var a=-Math.PI/2+i*2*Math.PI/N.length,x=cx+R*1.55*Math.cos(a),y=cy+R*Math.sin(a);n.x=x;n.y=y;
+    svg+='<line x1="'+cx+'" y1="'+cy+'" x2="'+x.toFixed(1)+'" y2="'+y.toFixed(1)+'" stroke="'+C(n.c)+'" stroke-width="1.6" class="'+(n.on?'flow':'idle')+'"/>'});
+  svg+='<g class="core"><circle cx="160" cy="110" r="26" fill="var(--panel2,#2224)" stroke="var(--acc,#b5e655)" stroke-width="2"/><text x="160" y="114" text-anchor="middle" font-size="11" font-weight="700" fill="currentColor">Jarbas</text></g>';
+  N.forEach(function(n){svg+='<g'+(n.on?' class="pulse"':'')+'><circle cx="'+n.x.toFixed(1)+'" cy="'+n.y.toFixed(1)+'" r="9" fill="'+C(n.c)+'"/></g>'+
+    '<text x="'+n.x.toFixed(1)+'" y="'+(n.y+(n.y<cy?-14:22)).toFixed(1)+'" text-anchor="middle" font-size="9.5" fill="currentColor">'+n.k+'</text>'+
+    '<text x="'+n.x.toFixed(1)+'" y="'+(n.y+(n.y<cy?-4:32)).toFixed(1)+'" text-anchor="middle" font-size="8.5" fill="currentColor" opacity=".7">'+n.v+'</text>'});
+  svg+='</svg>';
+  // oportunidades agora (todas as frentes, em ordem)
+  var opp=AM.filter(function(a){return isFinite(a.edgePct)}).map(function(a){var pp=a.algo==='RANDOMXMONERO'?X:P[a.algo];var solo=a.algo==='SHA256ASICBOOST';
+    return {n:a.label+' ('+(a.coins||[]).join('+')+')'+(solo?' · solo':' · PPS'),e:solo?m.edgeAtBidPct:a.edgePct,act:solo?((m.edgeAtBidPct>=0)?'compensa (loteria)':'não compensa'):(a.edgePct>=enter?'ENTRAR':a.edgePct>=0?'perto: entra a partir de '+pct(enter,0):'não compensa'),res:pp?pp.resultUsd:null,on:pp&&pp.on}}).sort(function(a,b){return b.e-a.e});
+  var oppH=opp.map(function(o){var cl=o.act==='ENTRAR'?'good':/perto/.test(o.act)?'warn':'';return '<div class="opp-row"><span>'+esc(o.n)+(o.on?' <span class="chip ok">operando (sim.)</span>':'')+'</span><span class="'+cl+'" style="font-weight:600">'+pct(o.e,1)+'</span><span class="note '+cl+'">'+esc(o.act)+'</span><span class="note">'+(o.res!==null&&o.res!==undefined?'resultado '+(o.res>=0?'+':'')+usd(o.res):'')+'</span></div>'}).join('');
+  var yH=Object.keys(FR).map(function(k){return {k:{bfx:'Empréstimo Bitfinex',basis:'Base BTC',ethena:'Ethena',hlp:'Hyperliquid HLP'}[k]||k,r:FR[k].rate}}).filter(function(x){return isFinite(x.r)}).sort(function(a,b){return b.r-a.r}).map(function(x){return esc(x.k)+' '+pct(x.r,1)}).join(' · ');
+  var acts=(ops.log||[]).slice(-40).reverse().filter(function(x){return /simulado|acao|ia|bloco/.test(x.kind)}).slice(0,6);
+  el.innerHTML='<div class="row between" style="align-items:baseline"><h2 style="margin:0">Cérebro</h2><span class="note">'+(J.telegram?'<span class="chip ok">Jarbas no Telegram</span>':'<span class="chip">Telegram: Ajustes</span>')+'</span></div>'+svg+
+    '<div class="kv" style="margin-top:2px"><div><small>Dinheiro real</small><span style="font-size:15px">gasto '+usd(realSpent,0)+'</span><div class="note">'+((S.myBlocks||[]).length)+' blocos</div></div><div><small>Moedas PPS (como real)</small><span class="'+(ppsRes>0?'good':ppsRes<0?'bad':'')+'" style="font-size:15px">'+(ppsRes>=0?'+':'')+usd(ppsRes)+'</span><div class="note">'+ppsAll.length+' algoritmos acompanhados</div></div></div>'+
+    '<div class="eyebrow" style="margin:10px 0 4px">Oportunidades agora</div><div class="stack" style="gap:6px">'+(oppH||'<p class="note">O mapa de moedas atualiza a cada 15 min.</p>')+'</div>'+
+    (yH?'<p class="note" style="margin:6px 0 0">Rendimentos em dólar: '+yH+(cdi?' · CDI em reais ~'+pct(13.65,1)+' a.a.':'')+'.</p>':'')+
+    (acts.length?'<details style="margin-top:8px" open><summary>Atividade agora</summary><div class="stack" style="gap:2px;margin-top:4px">'+acts.map(function(x){return '<div class="note">'+hhmm(new Date(x.t))+' · '+esc(x.text)+'</div>'}).join('')+'</div></details>':'')+
+    '<p class="note" style="margin:6px 0 0">Converse com o Jarbas no Telegram: /status, /monero, /bch, /funding, /saldo, /copiloto, /relatorio.</p>';
 }
 function renderHome(){
   try{renderBrain()}catch(e){}

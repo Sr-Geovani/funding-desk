@@ -26,6 +26,8 @@ export function brainContext(state, cfg, now) {
       saldoCarteiraBtc: s.acct ? s.acct.balanceBtc : null, ultimoFimDeOrdem: (s.orderEnds || []).slice(-1)[0] ? s.orderEnds.slice(-1)[0].text : null },
     simulacoes: {
       sniper: ps.spendUsd ? { gastoUsd: +ps.spendUsd.toFixed(2), valorEsperadoUsd: +(ps.evUsd || 0).toFixed(2), blocosEsperados: ps.lambda ? +ps.lambda.toFixed(2) : null } : null,
+      oportunidades: (s.algoMap || []).filter((a) => isFinite(a.edgePct)).sort((a, b) => b.edgePct - a.edgePct).map((a) => ({ algo: a.label, moedas: a.coins, margemPct: +a.edgePct.toFixed(1), tipo: a.algo === 'SHA256ASICBOOST' ? 'solo' : 'PPS' })),
+      ppsComoReal: (s.ppsSum || []).map((x) => ({ algo: x.label, resultadoUsd: +(x.resultUsd || 0).toFixed(2), horasLigado: +(x.hoursOn || 0).toFixed(1), ligado: x.on })),
       monero: X ? { resultadoUsd: +X.resultUsd.toFixed(2), retornoPct: X.retPct !== null ? +X.retPct.toFixed(1) : null, horasLigado: +X.hoursOn.toFixed(1), ligadoAgora: X.on, margemAgoraPct: X.edgeNow, xmrRecebido: +X.paidXmr.toFixed(4) } : null,
       funding: fp ? { operacoes: fp.closed, positivas: fp.wins, resultadoUsd: +(fp.netUsd || 0).toFixed(2), taxasUsd: fp.feesUsd, fundingRecebidoUsd: fp.fundingUsd, horasMedias: fp.avgHours } : null,
       placarSinaisFunding: sc ? { sinais: sc.scored, acertos: sc.hits, projetadoUsd: +(sc.projUsd || 0).toFixed(2), realUsd: +(sc.realUsd || 0).toFixed(2) } : null,
@@ -37,7 +39,7 @@ export function brainContext(state, cfg, now) {
 }
 
 const HELP = 'Sou o Jarbas, o sócio que acompanha a operação. Pergunte do jeito que quiser ou use:\n' +
-  '/status – resumo de tudo\n/bch – mineração BCH e Sniper\n/monero – operação Monero (PPS)\n/funding – funding e placar dos sinais\n/saldo – dinheiro real e carteira\n/copiloto – onde a IA acerta e erra\n/relatorio – relatório do dia\n' +
+  '/status – resumo de tudo\n/oportunidades – onde entrar agora\n/bch – mineração BCH e Sniper\n/monero – operação Monero (PPS)\n/funding – funding e placar dos sinais\n/saldo – dinheiro real e carteira\n/copiloto – onde a IA acerta e erra\n/relatorio – relatório do dia\n' +
   '/modo observar | ativo | desligado – muda o modo do robô\n/sniper ligar | desligar';
 
 function reportText(c) {
@@ -49,6 +51,10 @@ function reportText(c) {
   if (S.monero) L.push(`Monero (simulado como real): ${money(S.monero.resultadoUsd)} (${pc(S.monero.retornoPct)}) em ${S.monero.horasLigado} h ligado; ${S.monero.ligadoAgora ? 'minerando agora' : 'parado agora'}.`);
   if (S.sniper) L.push(`Sniper simulado: gasto ${money(S.sniper.gastoUsd)}, valor esperado ${money(S.sniper.valorEsperadoUsd)} (${S.sniper.blocosEsperados} bloco esperado).`);
   if (S.funding) L.push(`Funding simulado: ${S.funding.operacoes} operações, ${S.funding.positivas} positivas, ${money(S.funding.resultadoUsd)}.`);
+  const pr = (S.ppsComoReal || []).reduce((a, x) => a + x.resultadoUsd, 0) + (S.monero ? S.monero.resultadoUsd : 0);
+  L.push(`Moedas PPS como se fosse real (todas): ${money(pr)}.`);
+  const top = (S.oportunidades || []).filter((o) => o.tipo === 'PPS' && o.margemPct >= 2);
+  if (top.length) L.push(`Oportunidade agora: ${top.map((o) => `${o.algo} ${pc(o.margemPct)}`).join(', ')}.`);
   const good = (S.outrasMoedas || []).filter((a) => a.retornoPct > 0).sort((a, b) => b.retornoPct - a.retornoPct);
   if (good.length) L.push(`Outras moedas positivas no acumulado: ${good.slice(0, 3).map((a) => `${a.algo} ${pc(a.retornoPct)}`).join(', ')}.`);
   const weak = (c.copiloto.porTipo || []).filter((t) => t.conferidas >= 8 && t.acertoPct < 40);
@@ -69,6 +75,7 @@ export function ruleReply(text, c) {
   if (snp) { const on = /ligar|ligado|on/.test(snp[1]) && !/desl/.test(snp[1]); return { text: `Feito: Sniper ${on ? 'ligado' : 'desligado'}.`, action: { sniper: on } }; }
   if (/^\/(start|ajuda|help)|^ajuda/.test(t)) return { text: HELP };
   if (/relat/.test(t) || /^\/status|como estamos|resumo|status/.test(t)) return { text: reportText(c) };
+  if (/oportunidad|onde entrar|o que fazer/.test(t)) { const O = c.simulacoes.oportunidades || []; return { text: O.length ? 'Oportunidades agora (margem já com taxas):\n' + O.map((o) => `• ${o.algo} (${o.moedas.join('+')}, ${o.tipo}): ${pc(o.margemPct)}${o.tipo === 'PPS' ? (o.margemPct >= 2 ? ' → ENTRAR' : o.margemPct >= 0 ? ' → perto' : '') : ''}`).join('\n') : 'O mapa de moedas atualiza a cada 15 min.' }; }
   if (/monero|xmr|pps|randomx/.test(t)) { const X = c.simulacoes.monero; return { text: X ? `Monero (simulado como real): ${money(X.resultadoUsd)} (${pc(X.retornoPct)}), ${X.horasLigado} h ligado, ${X.ligadoAgora ? 'minerando agora' : 'parado'} (margem agora ${pc(X.margemAgoraPct)}). Recebido: ${X.xmrRecebido} XMR.` : 'A operação Monero começa no próximo cálculo do mapa de moedas (até 15 min).' }; }
   if (/funding/.test(t)) { const F = c.simulacoes.funding, P = c.simulacoes.placarSinaisFunding; return { text: `Funding simulado: ${F ? `${F.operacoes} operações, ${F.positivas} positivas, ${money(F.resultadoUsd)} (taxas ${money(F.taxasUsd)}, funding recebido ${money(F.fundingRecebidoUsd)}, ${(+F.horasMedias || 0).toFixed(0)} h em média)` : 'sem operações'}. ${P ? `Placar dos sinais: ${P.acertos} acertos em ${P.sinais}; projetado ${money(P.projetadoUsd)}, real ${money(P.realUsd)}.` : ''} O spread de altcoin some em horas: não vale entrar contando 3 dias.` }; }
   if (/saldo|carteira|dinheiro|gast/.test(t)) { const D = c.dinheiroReal; return { text: `Dinheiro real: gasto total ${money(D.gastoTotalUsd)}, hoje ${money(D.gastoHojeUsd)}, ${D.blocos} blocos. Saldo livre na NiceHash: ${D.saldoCarteiraBtc === null ? '—' : D.saldoCarteiraBtc.toFixed(6).replace('.', ',') + ' BTC'}.${D.ultimoFimDeOrdem ? ' Última ordem: ' + D.ultimoFimDeOrdem : ''}` }; }

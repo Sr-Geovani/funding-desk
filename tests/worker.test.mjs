@@ -1774,3 +1774,10 @@ test('Jarbas com IA: chama a API de mensagens com o resumo e devolve o texto; tr
   assert.match(await aiReply(env, 'x', {}, bad), /chave da IA foi recusada/);
   assert.equal(await aiReply({}, 'x', {}, ok), null);
 });
+
+test('Jarbas: /oportunidades lista todas as frentes em ordem e marca ENTRAR acima de 2% no PPS', async () => {
+  const { ruleReply, brainContext } = await import('../worker/src/jarbas.js');
+  const c = brainContext({ algoMap: [{ algo: 'EQUIHASH', label: 'Equihash', coins: ['ZEC'], edgePct: 4.2 }, { algo: 'SHA256ASICBOOST', label: 'SHA-256', coins: ['BCH'], edgePct: -3 }, { algo: 'SCRYPT', label: 'Scrypt', coins: ['LTC', 'DOGE'], edgePct: 1 }] }, Object.assign({}, DEFAULT_CONFIG), Date.now());
+  const r = ruleReply('/oportunidades', c).text;
+  assert.match(r, /Equihash \(ZEC, PPS\): \+4,2% → ENTRAR/); assert.match(r, /Scrypt.*→ perto/); assert.ok(r.indexOf('Equihash') < r.indexOf('SHA-256'));
+});
