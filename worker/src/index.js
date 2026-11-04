@@ -232,6 +232,8 @@ export async function tick(env, opts = {}) {
   // saldo da carteira a cada ciclo (para criar a ordem com o máximo disponível e reabastecer quando entra saldo)
   const balR = hasKeys(env) ? await settle(nh.balance()) : null, walletBtc = balR && balR.ok ? +(balR.v.available || 0) : null;
   const dec = decide({ cfg, mkt, orders, state, now, units, limits, blockEvent, weekLossUsd, blockT: lastNetBlockT, blockId: lastNetHeight, snMetrics, walletBtc });
+  // Fora do modo Ativo o robô real não atira: o Sniper real fica parado (o simulado continua no cenário Sniper).
+  if (cfg.mode !== 'active' && dec.state.sniper) dec.state.sniper = Object.assign({}, state.sniper || {}, { shotStart: null });
   if (dec.state.weekStop && !state.weekStop) await notify(env, `limite de perda semanal atingido (perda real de US$${weekLossUsd.toFixed(2).replace('.', ',')} em 7 dias; limite US$${cfg.weeklyLossUsd}). Robô encerrou as ordens e não cria novas até a perda da semana baixar.`, fetchFn);
 
   // Simulação (só no modo Observar) e resultado real (ordens gerenciadas + blocos).
@@ -249,17 +251,18 @@ export async function tick(env, opts = {}) {
     state.paper = null; state.paperBurst = null; state.paperPlan = null; state.paperAlways = null; state.paperPriceV = 2;
   }
   let paper = state.paper || null;
-  if (cfg.mode === 'observe') {
+  // As simulações rodam sempre, em qualquer modo (antes paravam no Ativo e o lastro dos cenários ficava com buraco).
+  {
     const ps = paperStep(paper, { cfg, mkt, now, units, limits, blocks: newBlocks });
     paper = ps.paper;
     for (const e of ps.events) log.push({ t: now, kind: 'simulado', text: e });
-  } else if (paper) paper.lastTs = now; // fora do Observar a simulação fica parada
+  }
   // Registro dos blocos da rede com o contexto do momento (padrões e coincidências). Grava no KV a cada 20 min.
   let blockBuf = state.blockBuf || [], blockFlush = state.blockFlush || 0, lastBlockT = state.lastBlockT || null;
   {
     const won = new Set(((paper && paper.wins) || []).map((w) => w.height)), sp = state.paper;
     for (const b of newBlocks) {
-      const on = cfg.mode === 'observe' && !!(sp && sp.on && sp.ph > 0);
+      const on = !!(sp && sp.on && sp.ph > 0);
       const prob = on && b.difficulty ? Math.min(1, sp.ph * 1e15 / (b.difficulty * 4294967296 / 600)) : 0; // mesma conta da simulação
       const realPH = orders.filter((o) => o.alive && (cfg.managed || []).includes(o.id)).reduce((x, o) => x + (o.speedPH || 0), 0);
       blockBuf.push(blockRecord(b, { prevT: lastBlockT, mkt, book, sim: { ph: on ? sp.ph : 0, prob, won: won.has(b.height), priceEH: on ? sp.priceEH : null }, mineBch: b.mine, realPH }));
@@ -295,19 +298,17 @@ export async function tick(env, opts = {}) {
 
   // Variante "rajada" (método do vídeo): 50 PH/s, para no bloco; mesmos blocos reais, mesmo sorteio, mesmos limites.
   let paperBurst = state.paperBurst || null;
-  if (cfg.mode === 'observe') paperBurst = paperStep(paperBurst, { cfg: Object.assign({}, cfg, { targetPh: 50, onBlock: 'cancel' }), mkt: sizeMarket(mkt, 50, cfg), now, units, limits, blocks: newBlocks }).paper;
-  else if (paperBurst) paperBurst.lastTs = now;
+  paperBurst = paperStep(paperBurst, { cfg: Object.assign({}, cfg, { targetPh: 50, onBlock: 'cancel' }), mkt: sizeMarket(mkt, 50, cfg), now, units, limits, blocks: newBlocks }).paper;
   // Cenário "sugestão do copiloto": potência e orçamento do plano, mesmos blocos e sorteio (compara com a sua configuração).
   let paperPlan = state.paperPlan || null;
   const pmS = state.plan && state.plan.mining;
-  if (cfg.mode === 'observe' && pmS) paperPlan = paperStep(paperPlan, { cfg: Object.assign({}, cfg, { targetPh: pmS.ph, sessionBudgetUsd: pmS.budgetUsd, onBlock: 'cancel' }), mkt: sizeMarket(mkt, pmS.ph, cfg), now, units, limits, blocks: newBlocks }).paper;
+  if (pmS) paperPlan = paperStep(paperPlan, { cfg: Object.assign({}, cfg, { targetPh: pmS.ph, sessionBudgetUsd: pmS.budgetUsd, onBlock: 'cancel' }), mkt: sizeMarket(mkt, pmS.ph, cfg), now, units, limits, blocks: newBlocks }).paper;
   else if (paperPlan) paperPlan.lastTs = now;
   // Cenário "sempre ligado": sua potência sem pausar pelo preço e sem stop-loss, mesmos blocos e sorteio. Responde
   // "se ficasse ligado direto teria mais bloco?": mais chance, mas paga também as horas com aluguel acima do teto.
   let paperAlways = state.paperAlways || null;
-  if (cfg.mode === 'observe') paperAlways = paperStep(paperAlways, { cfg: Object.assign({}, cfg, { sessionBudgetUsd: 0, dailyBudgetUsd: 0, onBlock: 'continue' }),
+  paperAlways = paperStep(paperAlways, { cfg: Object.assign({}, cfg, { sessionBudgetUsd: 0, dailyBudgetUsd: 0, onBlock: 'continue' }),
     mkt: mkt.ok ? Object.assign({}, mkt, { green: true }) : mkt, now, units, limits, blocks: newBlocks }).paper;
-  else if (paperAlways) paperAlways.lastTs = now;
   // Cenário Sniper (simulado, sempre ligado para comparar): mesma regra do robô (sniperDecide), mesmos blocos e sorteio.
   let paperSniper = state.paperSniper || null;
   if (mkt.ok) {
@@ -533,7 +534,7 @@ export async function tick(env, opts = {}) {
   // com a meia-vida pagando as taxas).
   const verified = state.verified || {}, stableNow = Object.assign({}, state.stable24 || {});
   for (const [k, x] of Object.entries(verified)) if (now - x.at <= 6 * 3600e3 && x.stable24 && !(x.expNet !== null && x.expNet <= 0)) stableNow[k] = true;
-  const funding = predR.ok ? fundingSnapshot(predR.v, cfg, now, cfg.fundStable24 !== false ? stableNow : null) : null;
+  const funding = predR.ok ? fundingSnapshot(predR.v, cfg, now, cfg.fundStable24 !== false ? stableNow : null, state.alertScore ? alertScoreSummary(state.alertScore) : null) : null;
   if (!predR.ok) errors.push('funding (Hyperliquid): ' + predR.e);
   // Operações simuladas de funding: rodam sempre (o funding ainda é manual; isto mostra o que um robô com regras fixas faria).
   let fundPaper = state.fundPaper || null;

@@ -862,7 +862,7 @@ function dayRows(days,cols){
 function renderPaper(st){
   var s=st.state||{},p=s.paper,cfg=st.config,el=$('o_paper');
   var head='<div class="row" style="justify-content:space-between"><h2 style="margin:0">Simulação</h2><span class="chip">o que o robô teria feito</span></div>';
-  if(!p){el.innerHTML=head+'<p class="note">'+(cfg.mode==='observe'?'Começa no próximo ciclo do robô (até 3 min).':'Só roda com o robô em Observar.')+'</p>';return}
+  if(!p){el.innerHTML=head+'<p class="note">'+(cfg.mode==='observe'?'Começa no próximo ciclo do robô (até 3 min).':'Começa no próximo ciclo do robô (até 3 min); roda em qualquer modo.')+'</p>';return}
   el.innerHTML=head+
     '<p class="note" style="margin:6px 0">Desde '+new Date(p.since).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})+'. '+
     (cfg.mode!=='observe'?'<b>Parada</b>: o robô não está em Observar.':(p.on?'Agora: <b class="good">compraria</b> '+nf(p.ph,0)+' PH/s a '+(+p.priceEH).toFixed(4).replace('.',',')+'.':'Agora: <b>pausado</b> (aluguel acima do teto ou limite do dia).'))+'</p>'+
@@ -918,7 +918,7 @@ function renderRobo(){
   renderScore(s.alertScore);
   // mineração
   var mh='<div class="row between"><h2 style="margin:0">Mineração (BCH solo)</h2>'+(mp?'<span class="note">desde '+dt2(mp.since)+'</span>':'')+'</div>';
-  if(!mp)mh+='<p class="note">'+(st.config.mode==='observe'?'Começa no próximo ciclo (até 3 min).':'Só roda com o robô em Observar (Mineração → Operar).')+'</p>';
+  if(!mp)mh+='<p class="note">'+'Começa no próximo ciclo (até 3 min); roda em qualquer modo.'+'</p>';
   else{
     mh+=cur?'<div class="box" style="margin:10px 0 0"><b>Comprando agora (simulado)</b>Desde '+dt2(cur.start)+' ('+ago(cur.start)+'): '+nf(cur.ph,0)+' PH/s a '+cur.priceEH.toFixed(4).replace('.',',')+' (margem '+pct(cur.edgePct,1)+'). Gasto até agora '+usd(cur.spendUsd)+'. Blocos da rede nesse tempo: '+(cur.draws||0)+'; seus: '+(cur.blocks||0)+'.</div>'
       :'<p class="note" style="margin:10px 0 0">Agora: pausado (aluguel acima do teto, limite do dia ou sem dados).</p>';
@@ -1305,13 +1305,18 @@ function renderLive(){
   var I=S.snInfo||{},SN=S.sniper||{},L0=(S.snLog||[])[0],shot=!!SN.shotStart,mine=(ops.orders||[]).filter(function(o){return o.managed&&o.alive!==false});
   var got=mine.reduce(function(a,o){return a+(+o.speedPH||0)},0),lim=mine.reduce(function(a,o){return a+(+o.limitPH||0)},0),avail=mine.reduce(function(a,o){return a+(+o.availableBtc||0)},0);
   var bal=ops.bal?+ops.bal.available:(S.wallet?S.wallet.btc:null),bu=(S.market||{}).btcUsd||0,E=(S.orderEnds||[])[0],m=S.market||{};
-  var stTxt=!cfg.sniper?(cfg.mode==='active'?'Robô ativo (regra de margem)':'Robô em '+(MODE_TXT[cfg.mode]||cfg.mode)):
+  var PSn=S.paperSniper||{},simMode=cfg.mode!=='active';
+  if(cfg.sniper&&simMode){SN=PSn.sn||{};shot=!!PSn.shot}
+  var stTxt=cfg.sniper&&simMode?'<span class="chip">simulado</span> '+(shot?'tiro simulado de '+nf(Math.min(cfg.sniperPh||25,(st.limits||{}).maxLimitPh||100),0)+' PH/s mirando o bloco '+((SN.shotBlockId||h)+1):'espera (simulado)')+' · o robô real não atira fora do Ativo':!cfg.sniper?(cfg.mode==='active'?'Robô ativo (regra de margem)':'Robô em '+(MODE_TXT[cfg.mode]||cfg.mode)):
     shot?'<span class="warn" style="font-weight:600">Tiro: '+nf(Math.min(cfg.sniperPh||25,(st.limits||{}).maxLimitPh||100),0)+' PH/s</span> mirando o bloco '+((SN.shotBlockId||h)+1)+' · há '+FDI.dur(Date.now()-SN.shotStart)+' de '+nf(cfg.sniperShotMin||7,0)+' min':
     'Espera: '+nf(cfg.sniperIdlePh===undefined?1:cfg.sniperIdlePh,0)+' PH/s'+(SN.shotBlockId===h||SN.usedBlockId===h?' · já atirou mirando o bloco '+(h+1):'');
   var gate=cfg.sniper?[(I.diffDropPct!==null&&I.diffDropPct!==undefined?'dificuldade '+(I.diffDropPct>=0?nf(I.diffDropPct,2)+'% abaixo':nf(-I.diffDropPct,2)+'% acima')+' (gatilho '+nf(cfg.sniperDiffDropPct,1)+'%)':''),(I.feeX?'mempool '+nf(I.feeX,1)+'× (gatilho '+nf(cfg.sniperFeeX,1)+'×)':''),(cfg.sniperUseAge&&ageMin!==null?'atraso '+nf(ageMin,0)+' de '+nf(cfg.sniperAgeMin,0)+' min':''),(isFinite(m.edgeAtBidPct)?'margem '+pct(m.edgeAtBidPct,1)+' (trava '+pct(cfg.sniperMinEdge,1)+')':'')].filter(Boolean).join(' · '):'';
   var ordTxt=mine.length?'<span style="font-weight:600">'+nf(got,1)+'</span> de '+nf(lim,0)+' PH/s chegando · saldo da ordem '+avail.toFixed(6).replace('.',',')+' BTC'+(bu?' ('+usd(avail*bu)+')':''):'<span class="bad" style="font-weight:600">sem ordem aberta</span>';
   var balTxt=bal===null||bal===undefined?'—':bal.toFixed(6).replace('.',',')+' BTC'+(bu?' ('+usd(bal*bu)+')':'');
   var warn=!mine.length&&cfg.mode==='active'?(bal!==null&&bal<0.00101?'Sem saldo para abrir ordem: deposite pelo menos 0,00101 BTC na NiceHash.':!cfg.poolId?'Escolha o pool no Robô para o robô abrir ordem.':!cfg.autoCreate?'"Criar ordem sozinho" está desligado.':'O robô abre a ordem no próximo ciclo.'):'';
+  var btn=function(k,v,lab,on){return '<button class="sm'+(on?' pri':'')+'" data-qcfg="'+k+'" data-qv="'+v+'"'+(on?' aria-pressed="true"':'')+'>'+lab+'</button>'};
+  var ctl='<div class="row" style="gap:6px;margin-top:8px;flex-wrap:wrap"><span class="note">Robô:</span>'+btn('mode','off','Desligado',cfg.mode==='off')+btn('mode','observe','Observar',cfg.mode==='observe')+btn('mode','active','Ativo',cfg.mode==='active')+
+    '<span class="note" style="margin-left:6px">Sniper:</span>'+btn('sniper','1','Ligado',!!cfg.sniper)+btn('sniper','0','Desligado',!cfg.sniper)+'</div>';
   el.innerHTML='<div class="row between" style="align-items:baseline"><h2 style="margin:0">Agora</h2><span class="note">'+(tipLive.mode==='ao vivo'?'<span class="chip ok">rede ao vivo</span>':'rede a cada 10 s')+'</span></div>'+
     '<div class="kv" style="margin-top:6px"><div><small>Último bloco</small><span class="mono">#'+nf(h,0)+'</span><div class="note">há <span data-ago="'+(t||'')+'">'+(t?ago(t):'—')+'</span></div></div>'+
     '<div><small>Saldo livre</small><span class="mono" style="font-size:15px">'+balTxt.replace(' (','</span><div class="note">').replace(/\)$/,'')+(balTxt.indexOf(' (')>=0?'</div>':'</span>')+'</div></div>'+
@@ -1319,8 +1324,14 @@ function renderLive(){
     '<div class="box" style="margin:0"><small class="eyebrow">Ordem do robô</small><div>'+ordTxt+'</div></div></div>'+
     (warn?'<p class="note" style="margin:6px 0 0"><b class="warn">'+esc(warn)+'</b></p>':'')+
     (E&&Date.now()-E.t<6*3600e3?'<p class="note" style="margin:6px 0 0">'+hhmm(new Date(E.t))+' · '+esc(E.text)+'</p>':'')+
-    (L0?'<p class="note" style="margin:4px 0 0">Último tiro: '+hhmm(new Date(L0.start))+' mirando o bloco '+(L0.h+1)+' · '+esc(L0.order||'')+' · recebeu até '+nf(L0.maxPH||0,1)+' de '+nf(L0.ph||0,0)+' PH/s · '+(L0.end?(L0.endWhy==='bloco'?'terminou com bloco novo':'terminou pelo prazo')+' em '+nf(L0.mins,1)+' min':'em andamento')+'</p>':'');
+    ctl+(L0?'<p class="note" style="margin:4px 0 0">Último tiro real: '+hhmm(new Date(L0.start))+' mirando o bloco '+(L0.h+1)+' · '+esc(L0.order||'')+' · recebeu até '+nf(L0.maxPH||0,1)+' de '+nf(L0.ph||0,0)+' PH/s · '+(L0.end?(L0.endWhy==='bloco'?'terminou com bloco novo':'terminou pelo prazo')+' em '+nf(L0.mins,1)+' min':'em andamento')+'</p>':'');
 }
+document.addEventListener('click',function(e){var b=e.target.closest&&e.target.closest('[data-qcfg]');if(!b)return;
+  var k=b.getAttribute('data-qcfg'),v=b.getAttribute('data-qv'),body={};body[k]=k==='sniper'?v==='1':v;
+  var lab=k==='mode'?{off:'Desligar o robô (não mexe em ordens; as abertas continuam)',observe:'Robô em Observar: só simula, não executa',active:'Robô em Ativo: executa na NiceHash real'}[v]:(v==='1'?'Ligar o Sniper':'Desligar o Sniper (volta a regra de margem)');
+  if(!confirm(lab+'?'))return;b.disabled=true;
+  apiCall('PUT','/config',body).then(function(){loadOps()},function(er){b.disabled=false;alert('Não deu: '+er.message)});
+});
 function snLogHTML(L){
   if(!L||!L.length)return '<p class="note" style="margin:6px 0 0">Registro dos tiros: começa no próximo tiro (hora, gatilho, atraso, potência recebida e como terminou).</p>';
   var W={dif:'dificuldade',fee:'mempool',age:'atraso'},row=function(x){
