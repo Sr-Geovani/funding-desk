@@ -657,7 +657,7 @@ export async function tick(env, opts = {}) {
       algos.forEach((a, i) => { if (res[i + 1].ok) books[a] = res[i + 1].v; });
       const map = FDR.miningMap(res[0].v, books, { btcUsd: prices.v.btcUsd, minEdgePct: cfg.minEdgeRel ? cfg.minEdgeBase : cfg.minEdgePct, // outras moedas seguem a meta fixa (a regra relativa é só do robô de BCH)
       rentFeePct: cfg.rentFeePct, poolFeePct: cfg.poolFeePct });
-      algoMap = map.map((m) => ({ algo: m.algo, label: m.label, coins: m.coins, edgePct: m.edgePct, level: m.level, capBtcPerUnit: m.capBtcPerUnit, unit: m.unit, rentBtcPerH: m.rentBtcPerH }));
+      algoMap = map.map((m) => ({ algo: m.algo, label: m.label, coins: m.coins, edgePct: m.edgePct, level: m.level, capBtcPerUnit: m.capBtcPerUnit, unit: m.unit, rentBtcPerH: m.rentBtcPerH, thin: !!m.thin, marketUsdDay: m.marketUsdDay }));
       algoRan = true;
       const ap = algoPaperStep(algoPaper, { map, now });
       algoPaper = ap.pa; algoTs = now;

@@ -25,14 +25,15 @@ export function xmrPaperStep(px, { m, now, btcUsd, xmrUsd, rules = XMR_RULES }) 
   // 2) decisão de agora
   const e = m && isFinite(m.edgePct) && m.edgePct <= 100 ? m.edgePct : null;
   if (e !== null) {
-    if (!p.on && e >= rules.enterPct) {
+    if (!p.on && e >= rules.enterPct && m && m.thin) { if (!p.thinAt || now - p.thinAt > 6 * 3600e3) { p.thinAt = now; events.push(`Monero (simulado): margem de ${e.toFixed(1).replace('.', ',')}%, mas o livro é raso (pouca ordem recebendo hash): não daria para comprar de verdade`); } }
+    else if (!p.on && e >= rules.enterPct) {
       const amt = Math.floor((p.walletBtc - rules.newOrderFeeBtc) * 1e8) / 1e8;
       if (amt >= rules.minOrderBtc) {
         p.walletBtc -= amt + rules.newOrderFeeBtc; p.feesBtc += rules.newOrderFeeBtc; p.orderBtc = amt; p.on = true; p.edgePct = e;
         p.run = { start: now, edgePct: e, spentBtc: 0, revUsd: 0, orderBtc: amt };
         events.push(`Monero (simulado): abriria ordem de ${amt.toFixed(6).replace('.', ',')} BTC no RandomX com margem de ${e.toFixed(1).replace('.', ',')}%`);
       } else if (!p.noFunds) { p.noFunds = now; events.push('Monero (simulado): margem boa, mas a carteira virtual não tem o mínimo de 0,001 BTC'); }
-    } else if (p.on && e < rules.exitPct) {
+    } else if (p.on && (e < rules.exitPct || (m && m.thin))) {
       close(`margem caiu para ${e.toFixed(1).replace('.', ',')}%`);
       events.push(`Monero (simulado): encerraria a ordem (margem ${e.toFixed(1).replace('.', ',')}%); o que sobrou volta para a carteira`);
     } else if (p.on) p.edgePct = e;

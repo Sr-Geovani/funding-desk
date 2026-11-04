@@ -1781,3 +1781,12 @@ test('Jarbas: /oportunidades lista todas as frentes em ordem e marca ENTRAR acim
   const r = ruleReply('/oportunidades', c).text;
   assert.match(r, /Equihash \(ZEC, PPS\): \+4,2% → ENTRAR/); assert.match(r, /Scrypt.*→ perto/); assert.ok(r.indexOf('Equihash') < r.indexOf('SHA-256'));
 });
+
+test('operação PPS não entra em livro raso e sai se o livro ficar raso', async () => {
+  const { xmrPaperStep } = await import('../worker/src/paperxmr.js');
+  const T = Date.UTC(2026, 10, 4, 14);
+  let r = xmrPaperStep(null, { m: { edgePct: 9, thin: true }, now: T, btcUsd: 77000 });
+  assert.equal(r.px.on, false); assert.match(r.events.join(' '), /livro é raso/);
+  r = xmrPaperStep(r.px, { m: { edgePct: 9 }, now: T + 900e3, btcUsd: 77000 }); assert.equal(r.px.on, true);
+  r = xmrPaperStep(r.px, { m: { edgePct: 9, thin: true }, now: T + 1800e3, btcUsd: 77000 }); assert.equal(r.px.on, false);
+});
