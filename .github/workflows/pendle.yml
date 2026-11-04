@@ -22,7 +22,11 @@ jobs:
           echo "::add-mask::$PANEL_TOKEN"
           if [ -z "$PANEL_TOKEN" ] || [ -z "$CLOUDFLARE_API_TOKEN" ]; then echo "::warning::segredos ausentes; pulando"; exit 0; fi
           T=$(printf '%s' "$CLOUDFLARE_API_TOKEN" | tr -d '[:space:]'); echo "::add-mask::$T"
-          A=$(printf '%s' "$CLOUDFLARE_ACCOUNT_ID" | tr -d '[:space:]'); echo "::add-mask::$A"
+          A=$(printf '%s' "$CLOUDFLARE_ACCOUNT_ID" | tr -d '[:space:]')
+          # mesmo critério do deploy: Account ID inválido → descobre a conta pelo token
+          [[ "$A" =~ ^[0-9a-f]{32}$ ]] || A=$(curl -sS -H "Authorization: Bearer $T" "https://api.cloudflare.com/client/v4/accounts?per_page=50" | jq -r 'if (.result|length)==1 then .result[0].id else empty end')
+          [ -n "$A" ] || { echo "::warning::conta do Cloudflare não encontrada"; exit 0; }
+          echo "::add-mask::$A"
           SUB=$(curl -sS -H "Authorization: Bearer $T" "https://api.cloudflare.com/client/v4/accounts/$A/workers/subdomain" | jq -r '.result.subdomain // empty')
           [ -n "$SUB" ] || { echo "::warning::subdomínio não encontrado"; exit 0; }
           echo "::add-mask::$SUB"
