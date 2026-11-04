@@ -1718,7 +1718,7 @@ test('Monero simulado como real: abre com margem ≥ 2%, paga taxa de ordem, acu
   let p = r.px; for (let i = 2; i <= 40; i++) p = xmrPaperStep(p, { m: { edgePct: 6 }, now: T + i * 15 * M, btcUsd: btc, xmrUsd: xmr }).px;
   assert.ok(p.revUsd > 0 && p.spentBtc > 0); assert.ok(p.payouts.length >= 1, 'sacou ao passar de 0,01 XMR');
   r = xmrPaperStep(p, { m: { edgePct: -1 }, now: T + 41 * 15 * M, btcUsd: btc, xmrUsd: xmr });
-  assert.equal(r.px.on, false); assert.match(r.events.join(' '), /baixaria a potência/); assert.equal(r.px.orderOpen, true);
+  assert.equal(r.px.on, false); assert.match(r.events.join(' '), /Baixaria a potência/); assert.equal(r.px.orderOpen, true);
   // nova janela: sobe a potência na mesma ordem, sem taxa nova
   const f0 = r.px.feesBtc, r2 = xmrPaperStep(r.px, { m: { edgePct: 5 }, now: T + 42 * 15 * M, btcUsd: btc, xmrUsd: xmr });
   assert.equal(r2.px.on, true); assert.equal(r2.px.feesBtc, f0); assert.match(r2.events.join(' '), /sem taxa nova/);
@@ -1817,7 +1817,7 @@ test('PPS como arbitragem: só entra se a janela paga a taxa e manda o lucro de 
   assert.equal(r.px.on, true); assert.match(r.events.join(' '), /Lucro esperado/);
   let p = r.px; for (let i = 1; i <= 4; i++) p = xmrPaperStep(p, { m: { edgePct: 6, marketUsdDay: 50000 }, now: T + i * 15 * M, btcUsd: 77000 }).px;
   r = xmrPaperStep(p, { m: { edgePct: -1, marketUsdDay: 50000 }, now: T + 5 * 15 * M, btcUsd: 77000 });
-  assert.match(r.events.join(' '), /Resultado desta janela: aluguel US\$[\d,]+, receita US\$[\d,]+, (lucro|prejuízo) [+−]?US\$[\d,]+ em 75 min .*Acumulado: janelas \+US\$[\d,]+, taxa de ordem nova −US\$0,77 = /);
+  assert.match(r.events.join(' '), /Esta janela: gastou US\$[\d,]+ de aluguel e recebeu US\$[\d,]+ em moeda do pool → lucro de \+US\$[\d,]+ em 75 min\.\nA margem foi \+6,0% → −1,0% \(lida a cada 15 min\); na média, rendeu \+5,3%\.\nDesde o início: 1 janela soma \+US\$[\d,]+; abrir a ordem custou US\$0,77 \(paga uma vez por ordem\)\. Saldo: /);
 });
 
 test('lastro: preço do hash de hoje contra o último ano (percentil e mediana)', async () => {
@@ -1857,7 +1857,7 @@ test('Monero simulado: janela com a ordem já aberta não leva a taxa de ordem n
   r = xmrPaperStep(r.px, { m: { edgePct: 5, marketUsdDay: 4000 }, now: T + 30 * 60e3, btcUsd: 80000, xmrUsd: 300 });
   r = xmrPaperStep(r.px, { m: { edgePct: -5.9, marketUsdDay: 4000 }, now: T + 33 * 60e3, btcUsd: 80000, xmrUsd: 300 });
   const ev = r.events.join(' ');
-  assert.match(ev, /Resultado desta janela: .*lucro \+US\$/); assert.match(ev, /taxa de ordem nova −US\$0,80/, 'a taxa antiga fica só no acumulado');
+  assert.match(ev, /Esta janela: .*lucro de \+US\$/); assert.match(ev, /abrir a ordem custou US\$0,80/, 'a taxa antiga fica só no acumulado'); assert.match(ev, /faltam US\$[\d,]+ de lucro nas próximas janelas/);
 });
 
 test('Monero auditado: preço do BTC mudando sem minerar não mexe no resultado; margem média no intervalo; ciclo completo com venda e nova ordem', async () => {

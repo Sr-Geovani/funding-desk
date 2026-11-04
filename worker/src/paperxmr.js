@@ -24,7 +24,7 @@ export const XMR_RULES = { walletBtc: 0.002, enterPct: 2, exitPct: 0, budgetUsdD
   sellFeePct: 0.4, btcSendFeeBtc: 0.00001 };
 const usd2 = (x) => (x < 0 ? '−' : '') + 'US$' + Math.abs(x).toFixed(2).replace('.', ',');
 const sgn = (x) => (x >= 0 ? '+' : '') + usd2(x);
-const pc1 = (x) => (x >= 0 ? '+' : '') + x.toFixed(1).replace('.', ',') + '%';
+const pc1 = (x) => (x >= 0 ? '+' : '−') + Math.abs(x).toFixed(1).replace('.', ',') + '%';
 
 // Estado antigo (antes de 04/11) → contas novas. Os valores em dólar do que já foi gasto usam o BTC desta conversão.
 function migrate(p, btcUsd, now, isXmr) {
@@ -52,7 +52,7 @@ export function xmrPaperStep(px, { m, now, btcUsd, xmrUsd, rules = XMR_RULES }) 
     if (px2) p.poolXmr += revUsd / px2; else p.coinUsd += revUsd;
     if (p.run) { p.run.spentBtc += spend; p.run.spentUsd += spendUsd; p.run.revUsd += revUsd; }
     const d = p.days[day] || (p.days[day] = { spentUsd: 0, revUsd: 0 }); d.spentUsd += spendUsd; d.revUsd += revUsd;
-    if (p.orderBtc < 1e-8) { p.orderBtc = 0; const R0 = p.run; close('acabou o valor da ordem'); p.orderOpen = false; events.push(`${tag}: a ordem acabou o valor e foi encerrada. ${runText(R0)}. ${totText()}`); }
+    if (p.orderBtc < 1e-8) { p.orderBtc = 0; const R0 = p.run; close('acabou o valor da ordem'); p.orderOpen = false; events.push(`${tag}: a ordem acabou o valor e foi encerrada.\n${runText(R0)}\n${totText()}`); }
   }
   // 2) saque do pool para a carteira (Kraken) quando passa do mínimo
   if (px2 && p.poolXmr >= rules.payoutXmr) {
@@ -98,15 +98,15 @@ export function xmrPaperStep(px, { m, now, btcUsd, xmrUsd, rules = XMR_RULES }) 
         } else events.push(`${tag}: subiria a potência no RandomX com margem de ${e.toFixed(1).replace('.', ',')}% (ordem já aberta, sem taxa nova)`);
         if (p.orderOpen) {
           p.on = true; p.edgePct = e;
-          p.run = { start: now, edgePct: e, spentBtc: 0, spentUsd: 0, revUsd: 0, opened, orderFeeUsd: opened ? rules.newOrderFeeBtc * btcUsd : 0, orderBtc: p.orderBtc, rateUsdDay: p.rateUsdDay };
+          p.run = { start: now, edgePct: e, path: [+e.toFixed(1)], spentBtc: 0, spentUsd: 0, revUsd: 0, opened, orderFeeUsd: opened ? rules.newOrderFeeBtc * btcUsd : 0, orderBtc: p.orderBtc, rateUsdDay: p.rateUsdDay };
           events[events.length - 1] += `. Lucro esperado ~${usd2(expUsd)} se a janela durar ~${Math.round(winMin)} min${beMin ? `; a taxa de ordem nova se paga em ~${Math.round(beMin)} min de mineração` : ''}; gasto de até ${usd2(p.rateUsdDay / 24)} por hora`;
         }
       }
     } else if (p.on && (e < rules.exitPct || (m && m.thin))) {
       const why = m && m.thin ? 'mercado ficou raso (pouca ordem recebendo hash)' : `margem caiu para ${e.toFixed(1).replace('.', ',')}%`;
-      const R0 = p.run; close(why);
-      events.push(`${tag}: baixaria a potência para o mínimo (${why}); a ordem fica aberta para a próxima janela. ${runText(R0)}. ${totText()}`);
-    } else if (p.on) p.edgePct = e;
+      const R0 = p.run; if (R0 && R0.path) R0.path.push(+e.toFixed(1)); close(why);
+      events.push(`${tag}: janela encerrada. Baixaria a potência para o mínimo porque a ${m && m.thin ? 'o mercado ficou raso (pouca ordem recebendo hash)' : `margem caiu para ${e.toFixed(1).replace('.', ',')}%`}; a ordem continua aberta, sem taxa nova na próxima janela.\n${runText(R0)}\n${totText()}`.replace('porque a o mercado', 'porque o mercado'));
+    } else if (p.on) { p.edgePct = e; if (p.run) (p.run.path || (p.run.path = [])).push(+e.toFixed(1)); }
   }
   for (const k of Object.keys(p.days).sort().slice(0, -30)) delete p.days[k];
   p.lastTs = now; p.edgeNow = e;
@@ -117,13 +117,20 @@ export function xmrPaperStep(px, { m, now, btcUsd, xmrUsd, rules = XMR_RULES }) 
     p.run = null; p.on = false;
   }
   function runText(R) {
-    if (!R) return 'Resultado desta janela: —';
+    if (!R) return 'Esta janela: —';
     const res = R.revUsd - R.spentUsd, mins = Math.round((now - R.start) / 60e3), eff = R.spentUsd > 0 ? (R.revUsd / R.spentUsd - 1) * 100 : 0;
-    return `Resultado desta janela: aluguel ${usd2(R.spentUsd)}, receita ${usd2(R.revUsd)}, ${res >= 0 ? 'lucro' : 'prejuízo'} ${sgn(res)} em ${mins} min (margem média ${pc1(eff)}; na entrada era ${pc1(R.edgePct)})`;
+    // caminho da margem: leituras repetidas juntas e, em janela longa, só o começo e o fim
+    let P = (R.path && R.path.length > 1 ? R.path : [R.edgePct]).filter((x, i, a) => i === 0 || x !== a[i - 1]).map((x) => pc1(x));
+    if (P.length > 6) P = P.slice(0, 3).concat(['…'], P.slice(-2));
+    const path = P.join(' → ');
+    return `Esta janela: gastou ${usd2(R.spentUsd)} de aluguel e recebeu ${usd2(R.revUsd)} em moeda do pool → ${res >= 0 ? 'lucro' : 'prejuízo'} de ${sgn(res)} em ${mins} min.\n` +
+      `A margem foi ${path} (lida a cada 15 min); na média, rendeu ${pc1(eff)}.`;
   }
   function totText() {
-    const T = totals(p);
-    return `Acumulado: janelas ${sgn(T.windowsUsd)}, taxa de ordem nova ${sgn(-T.orderFeesUsd)}${T.convFeesUsd ? `, venda e envio ${sgn(-T.convFeesUsd)}` : ''}${T.fxUsd ? `, variação do XMR vendido ${sgn(T.fxUsd)}` : ''} = ${sgn(T.resultUsd)}`;
+    const T = totals(p), n = p.runs.length, fee = T.orderFeesUsd + T.convFeesUsd - T.fxUsd;
+    const extra = (T.convFeesUsd ? `; venda e envio custaram ${usd2(T.convFeesUsd)}` : '') + (T.fxUsd ? `; a variação do XMR vendido deu ${sgn(T.fxUsd)}` : '');
+    return `Desde o início: ${n} ${n === 1 ? 'janela soma' : 'janelas somam'} ${sgn(T.windowsUsd)}; abrir a ordem custou ${usd2(T.orderFeesUsd)} (paga uma vez por ordem)${extra}. ` +
+      `Saldo: ${sgn(T.resultUsd)}${T.resultUsd < 0 && T.windowsUsd > 0 ? ` (faltam ${usd2(-T.resultUsd)} de lucro nas próximas janelas para pagar a abertura)` : T.resultUsd >= 0 && fee > 0 ? ' (a abertura já se pagou)' : ''}.`;
   }
 }
 
