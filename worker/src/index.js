@@ -4,7 +4,7 @@
 //   e guardadas cifradas no KV (ENC_KEY), ou como segredos do Worker. Nunca voltam para o painel.
 // - Agendamento (cron): robô de mineração. Começa em modo "observe" (só registra o que faria).
 import { createClient, NH_HOSTS, DEFAULT_ALGO } from './nicehash.js';
-import { createChain, paidTo, DEFAULT_BCH_REST, DEFAULT_PRICE_URL } from './chain.js';
+import { createChain, paidTo, DEFAULT_BCH_REST, DEFAULT_BCH_BACKUP, DEFAULT_PRICE_URL } from './chain.js';
 import { DEFAULT_CONFIG, sanitizeConfig, parseBook, computeMarket, sizeMarket, decide, limitsFromEnv, sniperDecide } from './bot.js';
 import { fundingSnapshot, runAlerts } from './alerts.js';
 import { paperStep, realStep, execStep, execSummary } from './paper.js';
@@ -100,7 +100,7 @@ function nhClient(env, fetchFn) {
   return createClient({ base, key: env.NH_API_KEY, secret: env.NH_API_SECRET, org: env.NH_ORG_ID, algorithm: env.NH_ALGO || DEFAULT_ALGO, fetchFn: fetchFn || fetch });
 }
 function chainClient(env, fetchFn) {
-  return createChain({ base: env.BCH_REST || DEFAULT_BCH_REST, priceUrl: env.PRICE_URL || DEFAULT_PRICE_URL, fetchFn: fetchFn || fetch });
+  return createChain({ base: env.BCH_REST || DEFAULT_BCH_REST, backup: env.BCH_BACKUP === 'off' ? null : (env.BCH_BACKUP || (env.BCH_REST ? null : DEFAULT_BCH_BACKUP)), priceUrl: env.PRICE_URL || DEFAULT_PRICE_URL, fetchFn: fetchFn || fetch });
 }
 function hasKeys(env) { return !!(env.NH_API_KEY && env.NH_API_SECRET && env.NH_ORG_ID); }
 
@@ -160,6 +160,16 @@ export async function tick(env, opts = {}) {
     }
   }
 
+  // Pool apagado ao salvar a configuração com a lista de pools sem carregar (04/11): volta o último pool escolhido, uma vez.
+  if (!cfg.poolId && !state.poolFix1) {
+    const ch = (state.opLog || []).map((x) => (x.changes || []).find((c) => c.k === 'poolId')).filter(Boolean).pop();
+    if (ch && ch.from && !ch.to) {
+      cfg.poolId = ch.from;
+      await kvPut(env, 'config', Object.assign(await kvGet(env, 'config', {}), { poolId: ch.from }));
+      log.push({ t: now, kind: 'config', text: 'Pool das ordens do robô restaurado (tinha sido apagado ao salvar a configuração com a lista de pools sem carregar)' });
+    }
+    state.poolFix1 = true;
+  }
   // Calibração do Sniper v3 (03/11): aplica uma vez os parâmetros pedidos à configuração salva (o usuário pode mudar depois).
   // v4 (03/11): gatilho de dificuldade em 0,5% (com a dificuldade do próximo bloco, 1% disparava em 2,4% das viradas; 0,5% em ~14%).
   if (cfg.sniperCalV === 3) {
@@ -193,8 +203,9 @@ export async function tick(env, opts = {}) {
   const weekLossUsd = (() => { const d = (state.real && state.real.days) || {}, from = new Date(now - 6 * 864e5).toISOString().slice(0, 10);
     return Object.entries(d).filter(([k]) => k >= from).reduce((a, [, x]) => a + (x.spendUsd || 0) - (x.revenueUsd || 0), 0); })();
   // horário do último bloco da rede (para o MODO_SNIPER): o mais novo entre o registro e os blocos deste ciclo
-  const lastNetBlockT = Math.max(state.lastBlockT || 0, ...newBlocks.map((b) => b.time || 0)) || null;
-  const lastNetHeight = Math.max(state.lastHeight || 0, ...newBlocks.map((b) => b.height || 0)) || null; // ID do último bloco (altura)
+  const tipInfo = info.ok && info.v.time && info.v.height > (state.lastHeight || 0) ? [info.v.time] : []; // bloco que a reserva viu e o detalhe ainda não
+  const lastNetBlockT = Math.max(state.lastBlockT || 0, ...newBlocks.map((b) => b.time || 0), ...tipInfo) || null;
+  const lastNetHeight = Math.max(state.lastHeight || 0, ...newBlocks.map((b) => b.height || 0), info.ok ? info.v.height || 0 : 0) || null; // ID do último bloco (altura)
   // MODO_SNIPER: sinais de dificuldade (DAA) e de mempool.
   // dHist: dificuldade dos últimos 12 blocos; queda = dificuldade de agora abaixo da média deles.
   let dHist = Array.isArray(state.dHist) ? state.dHist.slice() : (await kvGet(env, 'blocks', [])).slice(-12).map((b) => b.D).filter((x) => x > 0);
@@ -373,8 +384,11 @@ export async function tick(env, opts = {}) {
   if (cfg.sniper && cfg.mode === 'active' && hasKeys(env)) {
     const a0 = state.sniper || {}, a1 = dec.state.sniper || {}, executed = results.some((r) => r.executed && r.type !== 'cancel'), fx = (x) => String(x).replace('.', ',');
     const shotPh = Math.min(cfg.sniperPh || 25, limits.maxLimitPh), idlePh = cfg.sniperIdlePh === undefined ? 1 : cfg.sniperIdlePh;
-    if (!a0.shotStart && a1.shotStart) await notify(env, plain(`Sniper: tiro de ${shotPh} PH/s${executed ? '' : ' (ordem ainda sem ajuste confirmado)'}. ${(results.find((r) => /sniper/.test(r.reason || '')) || {}).reason || ''}. Recua no bloco novo ou em ${cfg.sniperShotMin || 4} min. Tiro nº ${a1.shots || 1}.`), fetchFn);
-    else if (a0.shotStart && !a1.shotStart) {
+    const hasOrder = orders.some((o) => o.alive && (cfg.managed || []).includes(o.id)) || results.some((r) => r.executed && r.type === 'create');
+    const whyNo = !cfg.poolId ? 'nenhum pool escolhido (Mineração → Robô → Pool para ordens novas)' : !cfg.autoCreate ? '"criar ordem sozinho" desligado' : (results.find((r) => r.type === 'create' && r.error) || {}).error || 'a ordem anterior acabou e a nova ainda não foi criada';
+    if (!a0.shotStart && a1.shotStart && !hasOrder) await notify(env, plain(`Sniper: gatilho de tiro no bloco ${a1.shotBlockId}, mas sem ordem aberta: nada foi comprado. Motivo: ${whyNo}.`), fetchFn);
+    else if (!a0.shotStart && a1.shotStart) await notify(env, plain(`Sniper: tiro de ${shotPh} PH/s${executed ? '' : ' (ordem ainda sem ajuste confirmado)'}. ${(results.find((r) => /sniper/.test(r.reason || '')) || {}).reason || ''}. Recua no bloco novo ou em ${cfg.sniperShotMin || 4} min. Tiro nº ${a1.shots || 1}.`), fetchFn);
+    else if (a0.shotStart && !a1.shotStart && hasOrder) {
       const min = Math.round((now - a0.shotStart) / 60e3), why = (a1.endsBlock || 0) > (a0.endsBlock || 0) ? 'saiu bloco novo na rede' : `${cfg.sniperShotMin || 4} min sem bloco (kill switch)`;
       await notify(env, `Sniper: recuo para ${fx(idlePh)} PH/s depois de ${min} min de tiro: ${why}. Tiros até agora: ${a1.shots || 0} (por bloco ${a1.endsBlock || 0}, por prazo ${a1.endsTime || 0}).`, fetchFn);
     }
@@ -646,7 +660,7 @@ export async function tick(env, opts = {}) {
     sniper: paperSniper ? { shot: paperSniper.shot, reason: paperSniper.reason } : null, fund: { passing: ((funding && funding.best) || []).length, sim: fundPaper ? fundPaperSummary(fundPaper, FD.DEFAULT_FEES) : null } });
 
   const next = Object.assign({}, dec.state, alertState, {
-    lastTick: now, verified: Object.fromEntries(Object.entries(verified).filter(([, x]) => now - x.at <= 6 * 3600e3)), ai: br.ai, aiAnalysis, plan, acct, algoMap, mempool, stable24, pairStats, msig, darr, recentBlocks, nhWeek, paper, paperBurst, paperPlan, paperAlways, paperSniper, dHist, tHist, mpHist, snInfo, hashMkts, fronts, frontsPaper, ltStreak, fundPaperLT, market2, aiPanorama, entryCheck, calib, robotTest, luck24, balPlan, minEdgeNow: { value: cfg.minEdgePct, relative: !!cfg.minEdgeRel, base: cfg.minEdgeRel ? cfg.minEdgeBase : cfg.minEdgePct, sniper: !!cfg.sniper }, aiReport: aiRep, mktMargin, asertF, execLog, bestScen, paperArchive, paperPriceV: 2, blockBuf, blockFlush, lastBlockT, real, fundPaper, alertScore, algoPaper, algoTs, aiScores, fundPaperAI, fhistHour, lastHeight: state.lastHeight, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig, errNotified,
+    lastTick: now, verified: Object.fromEntries(Object.entries(verified).filter(([, x]) => now - x.at <= 6 * 3600e3)), ai: br.ai, aiAnalysis, plan, acct, algoMap, mempool, stable24, pairStats, msig, darr, recentBlocks, nhWeek, paper, paperBurst, paperPlan, paperAlways, paperSniper, dHist, tHist, mpHist, snInfo, hashMkts, fronts, frontsPaper, ltStreak, fundPaperLT, market2, aiPanorama, entryCheck, calib, robotTest, luck24, balPlan, minEdgeNow: { value: cfg.minEdgePct, relative: !!cfg.minEdgeRel, base: cfg.minEdgeRel ? cfg.minEdgeBase : cfg.minEdgePct, sniper: !!cfg.sniper }, aiReport: aiRep, mktMargin, asertF, execLog, bestScen, paperArchive, paperPriceV: 2, blockBuf, blockFlush, lastBlockT, real, fundPaper, alertScore, algoPaper, algoTs, aiScores, fundPaperAI, fhistHour, lastHeight: state.lastHeight, poolFix1: state.poolFix1, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig, errNotified,
     market: mkt.ok ? { breakEvenEH: mkt.breakEvenEH, capEH: mkt.capEH, fillEH: mkt.fillEH, medianEH: mkt.medianEH, bidEH: mkt.bidEH,
       edgeAtBidPct: mkt.edgeAtBidPct, green: mkt.green, D: mkt.D, bookTotalPH: book ? book.totalPH : 0, bchUsd: mkt.bchUsd, btcUsd: mkt.btcUsd, costPerBlockUsd: mkt.costPerBlockUsd,
       hashpriceNet: mkt.hashpriceNet, blockNetUsd: mkt.blockNetUsd, phDaysPerBlock: mkt.phDaysPerBlock, market: mkt.market } : { ok: false, reason: mkt.reason },

@@ -32,16 +32,31 @@ export function normAddr(a) {
   return String(a || '').trim().toLowerCase().replace(/^bitcoincash:/, '');
 }
 
-export function createChain({ base = DEFAULT_BCH_REST, priceUrl = DEFAULT_PRICE_URL, fetchFn = fetch }) {
+export const DEFAULT_BCH_BACKUP = 'https://api.haskoin.com/bch';
+// Dificuldade a partir do campo "bits" do cabeçalho do bloco (alvo compacto).
+export function bitsToDifficulty(bits) {
+  const exp = bits >>> 24, mant = bits & 0xffffff;
+  return (0xffff * Math.pow(256, 0x1d - 3)) / (mant * Math.pow(256, exp - 3));
+}
+export function createChain({ base = DEFAULT_BCH_REST, backup = null, priceUrl = DEFAULT_PRICE_URL, fetchFn = fetch }) {
   async function get(u) {
     const r = await fetchFn(u, { headers: { accept: 'application/json', 'user-agent': 'funding-desk/1.0' } });
     if (!r.ok) throw new Error('HTTP ' + r.status + ' em ' + u.replace(/\?.*/, ''));
     return r.json();
   }
   return {
+    // Altura e dificuldade da rede. Se a fonte principal cair (HTTP 522 visto em 04/11), usa a Haskoin de reserva,
+    // que também traz o horário do último bloco.
     info: async () => {
-      const d = await get(base + '/blockchain/getBlockchainInfo');
-      return { height: d.blocks, difficulty: d.difficulty };
+      try {
+        const d = await get(base + '/blockchain/getBlockchainInfo');
+        return { height: d.blocks, difficulty: d.difficulty, src: 'principal' };
+      } catch (e) {
+        if (!backup) throw e;
+        const b = await get(backup + '/block/best?notx=true');
+        if (!(b.height > 0) || !b.bits) throw new Error('fonte principal: ' + (e.message || e) + '; reserva sem dados');
+        return { height: b.height, difficulty: bitsToDifficulty(b.bits), time: b.time * 1000, src: 'reserva' };
+      }
     },
     mempool: async () => { const d = await get(base + '/blockchain/getMempoolInfo'); return { tx: d.size, bytes: d.bytes }; },
     // Quem recebeu a recompensa do bloco: saídas da transação coinbase.

@@ -1483,7 +1483,8 @@ function renderOps(){
   }).join(''):'<p class="note">'+esc(ops.err.orders||'Nenhuma ordem ativa.')+'</p>';
   // Só pools do mesmo algoritmo do robô servem para as ordens dele (a NiceHash recusa pool de outro algoritmo).
   var algo=(st&&st.algo)||'SHA256ASICBOOST',okPools=ops.pools.filter(function(p){return !p.algorithm||p.algorithm===algo});
-  var popts='<option value="">—</option>'+okPools.map(function(p){return '<option value="'+esc(p.id)+'">'+esc(p.name)+' ('+esc(p.stratumHostname)+')</option>'}).join('');
+  var popts='<option value="">—</option>'+okPools.map(function(p){return '<option value="'+esc(p.id)+'">'+esc(p.name)+' ('+esc(p.stratumHostname)+')</option>'}).join('')+
+    (cfg.poolId&&!okPools.some(function(p){return p.id===cfg.poolId})?'<option value="'+esc(cfg.poolId)+'">pool atual ('+esc(String(cfg.poolId).slice(0,8))+'; lista de pools não carregou)</option>':''); // sem isso, salvar com a lista vazia apagava o pool
   $('b_poolId').innerHTML=popts;$('n_pool').innerHTML=popts;
   if(!ops.dirty)BOT_FIELDS.forEach(function(k){var el=$('b_'+k);if(el){var v=cfg[k];el.value=v===undefined||v===null?'':(typeof v==='number'?String(v).replace('.',','):v)}});
   relCalcUI();

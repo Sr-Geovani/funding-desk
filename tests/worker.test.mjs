@@ -1534,3 +1534,43 @@ test('integração: Sniper v4 migra o gatilho para 0,5% e a aba Blocos traz a di
     assert.ok(b.blocks.some((x) => typeof x.dd === 'number'));
   } finally { t.server.close(); }
 });
+
+test('04/11: fonte de reserva da rede, pool não some ao salvar vazio e Sniper sem dados de mercado encerra o tiro', async () => {
+  const { bitsToDifficulty } = await import('../worker/src/chain.js');
+  // bits do bloco 975876 (Haskoin) = dificuldade 505.326.272.678 (fonte principal)
+  assert.ok(Math.abs(bitsToDifficulty(402795778) / 505326272678.3747 - 1) < 1e-6);
+  const fetchFn = async (u) => (String(u).startsWith('https://p/') ? new Response('erro', { status: 522 }) : new Response(JSON.stringify({ height: 975876, bits: 402795778, time: 1793785448 })));
+  const ch = createChain({ base: 'https://p', backup: 'https://r', fetchFn });
+  const i = await ch.info();
+  assert.equal(i.height, 975876); assert.equal(i.src, 'reserva'); assert.equal(i.time, 1793785448000);
+  await assert.rejects(createChain({ base: 'https://p', fetchFn }).info()); // sem reserva: erro como antes
+  // pool: campo vazio não apaga; clearPool apaga
+  const cur = Object.assign({}, DEFAULT_CONFIG, { poolId: 'pool-1' });
+  assert.equal(sanitizeConfig({ poolId: '' }, cur).config.poolId, 'pool-1');
+  assert.equal(sanitizeConfig({ poolId: '', clearPool: true }, cur).config.poolId, '');
+  assert.equal(sanitizeConfig({ poolId: 'pool-2' }, cur).config.poolId, 'pool-2');
+  // Sniper: tiro de 75 PH/s aberto e a fonte da rede cai; passado o prazo, recua mesmo sem dados de mercado
+  const T = Date.UTC(2026, 10, 4, 4), cfg = Object.assign({}, DEFAULT_CONFIG, { sniper: true, sniperPh: 75, managed: ['o1'] });
+  const d = decide({ cfg, mkt: { ok: false, reason: 'sem dificuldade' }, orders: [{ id: 'o1', alive: true, priceEH: 0.4272, limitPH: 75, paidBtc: 0 }], now: T, units: { minLimitPH: 1, priceDownStepEH: 0.002, minOrderBtc: 0.001 },
+    limits: { maxLimitPh: 100, maxOrderBtc: 0.01 }, state: { sniper: { shotStart: T - 300 * 60e3, shotBlockId: 975870, shots: 1 } }, blockT: T - 320 * 60e3, blockId: 975870 });
+  assert.equal(d.state.sniper.shotStart, null);
+  assert.deepEqual(d.actions.map((a) => [a.type, a.limitPH, a.priceEH]), [['update', 1, 0.4272]]);
+  // e sem dados não dá tiro novo
+  const d2 = decide({ cfg, mkt: { ok: false }, orders: [], now: T, units: { minLimitPH: 1 }, limits: { maxLimitPh: 100, maxOrderBtc: 0.01 }, state: {}, blockT: T - 60 * 60e3, blockId: 975871, snMetrics: { diffDropPct: 3 } });
+  assert.equal(d2.state.sniper.shotStart, null); assert.equal(d2.actions.length, 0);
+});
+
+test('integração: Sniper sem ordem aberta avisa que nada foi comprado e por quê (sem pool)', async () => {
+  const t = await setup();
+  try {
+    const sent = [];
+    const env = Object.assign({}, t.env, { TELEGRAM_BOT_TOKEN: 'tg', TELEGRAM_CHAT_ID: '1' });
+    const fetchFn = (u, o) => { if (String(u).includes('api.telegram.org')) { sent.push(JSON.parse(o.body).text); return Promise.resolve(new Response('{}')); } return fetch(u, o); };
+    await tick(env, { fetchFn });
+    await t.call('PUT', '/api/config', { mode: 'active', payoutAddress: 'bitcoincash:q' + 'a'.repeat(41), sniper: true, sniperUseAge: true, sniperAgeMin: 5, sniperMinEdge: -20, autoCreate: true, poolId: '' });
+    const st0 = JSON.parse((await t.env.FD_KV.get('state')) || '{}'); st0.lastBlockT = Date.now() - 10 * 60e3; await t.env.FD_KV.put('state', JSON.stringify(st0));
+    await tick(env, { fetchFn, now: Date.now() + 30 * 60e3 });
+    assert.ok(sent.some((x) => /sem ordem aberta: nada foi comprado/.test(x) && /pool/.test(x)), JSON.stringify(sent));
+    assert.ok(!sent.some((x) => /Sniper: tiro de/.test(x)), JSON.stringify(sent));
+  } finally { t.server.close(); }
+});
