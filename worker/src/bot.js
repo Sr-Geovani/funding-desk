@@ -221,7 +221,9 @@ export function decide({ cfg, mkt, orders, state = {}, now, units, limits = limi
     if (st.dayStart[o.id] === undefined) st.dayStart[o.id] = o.createdTs && utcDay(o.createdTs) === today ? 0 : o.paidBtc;
     dailyBtc += Math.max(0, o.paidBtc - st.dayStart[o.id]);
   }
-  const dailyUsd = mkt.btcUsd ? dailyBtc * mkt.btcUsd : 0;
+  // gasto do dia: o das ordens abertas e o registro real do dia (que inclui ordens que já acabaram); vale o maior
+  const realDay = st.real && st.real.days && st.real.days[today] ? +st.real.days[today].spendUsd || 0 : 0;
+  const dailyUsd = Math.max(mkt.btcUsd ? dailyBtc * mkt.btcUsd : 0, realDay);
   st.dailyUsd = dailyUsd;
   const dailyHit = cfg.dailyBudgetUsd > 0 && dailyUsd >= cfg.dailyBudgetUsd;
   if (dailyHit) notes.push(`limite diário atingido (US$${dailyUsd.toFixed(2).replace('.', ',')})`);

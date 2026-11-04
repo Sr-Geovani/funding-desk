@@ -24,7 +24,7 @@ export function createMock() {
     const skew = Math.abs(Date.now() - Number(req.headers['x-time']));
     return key === MOCK_KEYS.key && req.headers['x-organization-id'] === MOCK_KEYS.org && sig === want && skew < 300000;
   }
-  const ord = (o) => ({ id: o.id, alive: o.alive, status: { code: o.alive ? 'ACTIVE' : 'CANCELLED' }, market: 'BTC', type: { code: 'STANDARD' },
+  const ord = (o) => ({ id: o.id, alive: o.alive, status: { code: o.alive ? 'ACTIVE' : (o.endStatus || 'CANCELLED') }, market: 'BTC', type: { code: 'STANDARD' },
     price: o.price, limit: o.limit, acceptedCurrentSpeed: o.alive ? o.limit : '0', amount: o.amount, payedAmount: String(o.paid),
     availableAmount: String(Math.max(0, +o.amount - o.paid)), pool: { id: o.poolId, name: 'pool' }, creationTs: new Date(o.created).toISOString() });
 

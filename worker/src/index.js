@@ -194,10 +194,10 @@ export async function tick(env, opts = {}) {
     feesBch: state.feesBch || 0, book, cfg
   });
 
-  let orders = [];
+  let orders = [], ordersOk = false;
   if (hasKeys(env) && book) {
     const r = await settle(nh.myOrders(book.market));
-    if (r.ok) orders = r.v; else errors.push('ordens: ' + r.e);
+    if (r.ok) { orders = r.v; ordersOk = true; } else errors.push('ordens: ' + r.e);
   }
   // perda real dos últimos 7 dias (UTC): gasto − recebido das ordens gerenciadas e blocos pagos
   const weekLossUsd = (() => { const d = (state.real && state.real.days) || {}, from = new Date(now - 6 * 864e5).toISOString().slice(0, 10);
@@ -400,6 +400,39 @@ export async function tick(env, opts = {}) {
     }
   }
 
+  // Fim de ordem, sem ambiguidade: a NiceHash tira da lista as ordens que acabaram. Para cada ordem gerenciada que sumiu,
+  // pergunta o status final e diz o motivo (acabou o saldo da ordem, encerrada pelo robô, encerrada fora do robô), o que
+  // acontece agora (nova ordem com o saldo da carteira ou falta saldo) e tira a ordem da lista do robô.
+  let ordSeen = Object.assign({}, state.ordSeen || {}), orderEnds = Array.isArray(state.orderEnds) ? state.orderEnds.slice(-19) : [];
+  if (ordersOk) {
+    const aliveIds = new Set(orders.filter((o) => o.alive).map((o) => o.id)), cancelledNow = new Set(results.filter((r) => r.type === 'cancel' && r.executed).map((r) => r.id));
+    for (const o of orders) if (o.alive && (cfg.managed || []).includes(o.id)) ordSeen[o.id] = { amount: o.amountBtc, paid: o.paidBtc, avail: o.availableBtc, at: now, by: (ordSeen[o.id] || {}).by || null };
+    for (const id of cancelledNow) if (ordSeen[id]) ordSeen[id].by = 'robo';
+    const gone = Object.keys(ordSeen).filter((id) => !aliveIds.has(id));
+    for (const id of gone.slice(0, 3)) {
+      const was = ordSeen[id], fin = await settle(nh.getOrder(id)), f = fin.ok ? fin.v : null;
+      const paid = f ? f.paidBtc : was.paid, amount = f ? f.amountBtc : was.amount, st = f ? String(f.status || '') : '';
+      const why = was.by === 'robo' || /CANCEL/i.test(st) && was.by === 'robo' ? 'robo' : (/COMPLET|EXPIRED/i.test(st) || (amount > 0 && amount - paid < 0.00005)) ? 'saldo' : 'fora';
+      const nextAmt = orderAmount(cfg, units, limits, walletBtc), btc = mkt.btcUsd || 0, f6 = (x) => (x || 0).toFixed(6).replace('.', ',');
+      const after = why === 'robo' ? '' : nextAmt !== null && cfg.autoCreate && cfg.poolId ? ` O robô cria a próxima ordem com ${f6(nextAmt)} BTC do saldo da carteira.` : ` Saldo livre na carteira: ${f6(walletBtc)} BTC; não dá para abrir outra ordem (mínimo 0,00101 BTC). Deposite na NiceHash para o robô continuar.`;
+      const text = why === 'saldo' ? `Ordem ${id.slice(0, 8)} encerrada: acabou o saldo da ordem (gastou ${f6(paid)} de ${f6(amount)} BTC${btc ? ', US$' + (paid * btc).toFixed(2).replace('.', ',') : ''}).${after}`
+        : why === 'robo' ? `Ordem ${id.slice(0, 8)} encerrada pelo robô (gastou ${f6(paid)} BTC).` : `Ordem ${id.slice(0, 8)} encerrada fora do robô${st ? ' (status na NiceHash: ' + st + ')' : ''}; gastou ${f6(paid)} de ${f6(amount)} BTC.${after}`;
+      orderEnds.push({ t: now, id, why, paid, amount, status: st, text });
+      log.push({ t: now, kind: 'acao', text });
+      if (why !== 'robo') await notify(env, text, fetchFn);
+      delete ordSeen[id];
+      if ((cfg.managed || []).includes(id)) { cfg.managed = cfg.managed.filter((x) => x !== id); await kvPut(env, 'config', Object.assign(await kvGet(env, 'config', {}), { managed: cfg.managed })); }
+    }
+    // saldo da ordem acabando: avisa uma vez por ordem quando não cobre o próximo tiro e a carteira não tem como reabastecer
+    if (cfg.sniper) for (const o of orders.filter((x) => x.alive && (cfg.managed || []).includes(x.id))) {
+      const shotBtc = Math.min(cfg.sniperPh || 25, limits.maxLimitPh) / 1000 * (o.priceEH || 0) * (cfg.sniperShotMin || 7) / 1440 * 1.03;
+      if (shotBtc > 0 && o.availableBtc < shotBtc && !(walletBtc > 0.0002) && !(ordSeen[o.id] || {}).lowWarn) {
+        ordSeen[o.id].lowWarn = now;
+        const t2 = `Ordem ${o.id.slice(0, 8)} com pouco saldo: restam ${o.availableBtc.toFixed(6).replace('.', ',')} BTC, menos que um tiro de ${Math.min(cfg.sniperPh || 25, limits.maxLimitPh)} PH/s por ${cfg.sniperShotMin || 7} min (~${shotBtc.toFixed(6).replace('.', ',')} BTC). Quando acabar a ordem encerra; deposite para o robô reabastecer.`;
+        log.push({ t: now, kind: 'acao', text: t2 }); await notify(env, t2, fetchFn);
+      }
+    }
+  }
   // Registro de cada tiro (para conferir atraso e entrega): gatilho, horário do bloco, atraso, potência recebida, fim.
   let snLog = Array.isArray(state.snLog) ? state.snLog.slice(-99) : [];
   if (cfg.sniper) {
@@ -414,10 +447,18 @@ export async function tick(env, opts = {}) {
         order: mine.length || (cr && cr.executed) ? (up && up.error) || (cr && cr.error) ? 'erro: ' + ((up && up.error) || cr.error).slice(0, 80) : (up || cr) ? 'ajustada' : 'sem ajuste' : 'sem ordem',
         priceEH: up ? up.priceEH : cr ? cr.priceEH : null, gotPH: got, maxPH: got });
     }
+    for (const E of snLog) if (!E.end && E.start !== a1.shotStart && E.start !== snLog[snLog.length - 1].start) { E.end = E.endT || now; E.endWhy = E.endWhy || 'bloco'; E.mins = +((E.end - E.start) / 60e3).toFixed(1); } // tiros seguidos: fecha o anterior
     const L = snLog[snLog.length - 1];
     if (L && !L.end && L.start === (a1.shotStart || a0.shotStart)) {
       L.maxPH = Math.max(L.maxPH || 0, got);
-      if (!a1.shotStart) { L.end = now; L.endWhy = (a1.endsBlock || 0) > (a0.endsBlock || 0) ? 'bloco' : 'prazo'; L.mins = +((now - L.start) / 60e3).toFixed(1); }
+      if (!a1.shotStart) {
+        L.end = now; L.endWhy = (a1.endsBlock || 0) > (a0.endsBlock || 0) ? 'bloco' : 'prazo'; L.mins = +((now - L.start) / 60e3).toFixed(1);
+        // tiro que pagou e não recebeu hash: avisa (pool fora, dificuldade do pool baixa demais, preço fora do mercado)
+        if (L.order === 'ajustada' && L.mins >= 4 && (L.maxPH || 0) < 0.2 * (L.ph || 1)) {
+          const t3 = `Sniper: o tiro mirando o bloco ${L.h + 1} terminou recebendo só ${(L.maxPH || 0).toFixed(1).replace('.', ',')} de ${L.ph} PH/s em ${String(L.mins).replace('.', ',')} min. Confira o pool (conexão e dificuldade na senha, mínimo d=500000 na NiceHash) e o preço da ordem.`;
+          log.push({ t: now, kind: 'acao', text: t3 }); await notify(env, t3, fetchFn);
+        }
+      }
     }
   }
   // MODO_SNIPER: avisa no Telegram cada tiro e cada recuo (são ajustes da ordem, que não geram o aviso de criar/encerrar)
@@ -701,7 +742,7 @@ export async function tick(env, opts = {}) {
     sniper: paperSniper ? { shot: paperSniper.shot, reason: paperSniper.reason } : null, fund: { passing: ((funding && funding.best) || []).length, sim: fundPaper ? fundPaperSummary(fundPaper, FD.DEFAULT_FEES) : null } });
 
   const next = Object.assign({}, dec.state, alertState, {
-    lastTick: now, verified: Object.fromEntries(Object.entries(verified).filter(([, x]) => now - x.at <= 6 * 3600e3)), ai: br.ai, aiAnalysis, plan, acct, algoMap, mempool, stable24, pairStats, msig, darr, recentBlocks, nhWeek, paper, paperBurst, paperPlan, paperAlways, paperSniper, dHist, tHist, mpHist, snInfo, snLog, tipSeen, hashMkts, fronts, frontsPaper, ltStreak, fundPaperLT, market2, aiPanorama, entryCheck, calib, robotTest, luck24, balPlan, minEdgeNow: { value: cfg.minEdgePct, relative: !!cfg.minEdgeRel, base: cfg.minEdgeRel ? cfg.minEdgeBase : cfg.minEdgePct, sniper: !!cfg.sniper }, aiReport: aiRep, mktMargin, asertF, execLog, bestScen, paperArchive, paperPriceV: 2, blockBuf, blockFlush, lastBlockT, real, fundPaper, alertScore, algoPaper, algoTs, aiScores, fundPaperAI, fhistHour, lastHeight: state.lastHeight, poolFix1: state.poolFix1, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig, errNotified,
+    lastTick: now, verified: Object.fromEntries(Object.entries(verified).filter(([, x]) => now - x.at <= 6 * 3600e3)), ai: br.ai, aiAnalysis, plan, acct, algoMap, mempool, stable24, pairStats, msig, darr, recentBlocks, nhWeek, paper, paperBurst, paperPlan, paperAlways, paperSniper, dHist, tHist, mpHist, snInfo, snLog, tipSeen, ordSeen, orderEnds, hashMkts, fronts, frontsPaper, ltStreak, fundPaperLT, market2, aiPanorama, entryCheck, calib, robotTest, luck24, balPlan, minEdgeNow: { value: cfg.minEdgePct, relative: !!cfg.minEdgeRel, base: cfg.minEdgeRel ? cfg.minEdgeBase : cfg.minEdgePct, sniper: !!cfg.sniper }, aiReport: aiRep, mktMargin, asertF, execLog, bestScen, paperArchive, paperPriceV: 2, blockBuf, blockFlush, lastBlockT, real, fundPaper, alertScore, algoPaper, algoTs, aiScores, fundPaperAI, fhistHour, lastHeight: state.lastHeight, poolFix1: state.poolFix1, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig, errNotified,
     market: mkt.ok ? { breakEvenEH: mkt.breakEvenEH, capEH: mkt.capEH, fillEH: mkt.fillEH, medianEH: mkt.medianEH, bidEH: mkt.bidEH,
       edgeAtBidPct: mkt.edgeAtBidPct, green: mkt.green, D: mkt.D, bookTotalPH: book ? book.totalPH : 0, bchUsd: mkt.bchUsd, btcUsd: mkt.btcUsd, costPerBlockUsd: mkt.costPerBlockUsd,
       hashpriceNet: mkt.hashpriceNet, blockNetUsd: mkt.blockNetUsd, phDaysPerBlock: mkt.phDaysPerBlock, market: mkt.market } : { ok: false, reason: mkt.reason },
@@ -812,7 +853,7 @@ async function api(req, env, url, fetchFn) {
       telegram: !!(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID), creds: credStatus(env), limits, config: cfg,
       state: { lastTick: state.lastTick, lastHeight: state.lastHeight, market: state.market, myBlocks: state.myBlocks || [], dailyUsd: state.dailyUsd || 0,
         errors: state.errors || [], edgeHist: state.edgeHist || [], alerts: (state.alerts || []).slice(-30).reverse(),
-        paper: state.paper || null, paperBurst: state.paperBurst || null, paperPlan: state.paperPlan || null, paperAlways: state.paperAlways || null, paperSniper: state.paperSniper || null, sniper: state.sniper || null, snInfo: state.snInfo || null, snLog: (state.snLog || []).slice(-40).reverse(), wallet: state.acct ? { btc: state.acct.balanceBtc, at: state.acct.balAt || state.acct.at } : null, paperArchive: state.paperArchive || null, entryCheck: state.entryCheck || null, calib: state.calib || null, minEdgeNow: state.minEdgeNow || null, luck24: state.luck24 || null, balPlan: state.balPlan || null, planOn: !!state.planBackup, calibPrev: state.calibPrev || null, robotTest: state.robotTest || null, aiReport: state.aiReport || null, mktMargin: state.mktMargin || null, asertF: state.asertF || null, exec: execSummary(state.execLog), bestScen: state.bestScen || null, hashMkts: state.hashMkts || null, fronts: state.fronts || null, frontsPaper: state.frontsPaper || null, market2: state.market2 || null, aiPanorama: state.aiPanorama || null,
+        paper: state.paper || null, paperBurst: state.paperBurst || null, paperPlan: state.paperPlan || null, paperAlways: state.paperAlways || null, paperSniper: state.paperSniper || null, sniper: state.sniper || null, snInfo: state.snInfo || null, snLog: (state.snLog || []).slice(-40).reverse(), orderEnds: (state.orderEnds || []).slice(-10).reverse(), wallet: state.acct ? { btc: state.acct.balanceBtc, at: state.acct.balAt || state.acct.at } : null, paperArchive: state.paperArchive || null, entryCheck: state.entryCheck || null, calib: state.calib || null, minEdgeNow: state.minEdgeNow || null, luck24: state.luck24 || null, balPlan: state.balPlan || null, planOn: !!state.planBackup, calibPrev: state.calibPrev || null, robotTest: state.robotTest || null, aiReport: state.aiReport || null, mktMargin: state.mktMargin || null, asertF: state.asertF || null, exec: execSummary(state.execLog), bestScen: state.bestScen || null, hashMkts: state.hashMkts || null, fronts: state.fronts || null, frontsPaper: state.frontsPaper || null, market2: state.market2 || null, aiPanorama: state.aiPanorama || null,
         fundPaperLT: state.fundPaperLT ? { summary: fundPaperSummary(state.fundPaperLT, LT_FEES), open: state.fundPaperLT.open, closed: state.fundPaperLT.closed.slice(-50).reverse() } : null, opLog: (state.opLog || []).slice(-20).reverse(), real: state.real ? Object.assign({}, state.real, { paid: undefined }) : null,
         fundPaper: state.fundPaper ? { summary: fundPaperSummary(state.fundPaper, FD.DEFAULT_FEES), open: state.fundPaper.open, closed: state.fundPaper.closed.slice(-100).reverse() } : null,
         algoPaper: state.algoPaper || null,

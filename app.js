@@ -728,7 +728,7 @@ function tipNew(b){
   var el=$('tipToast');if(!el){el=document.createElement('div');el.id='tipToast';el.className='banner';el.setAttribute('role','status');el.style.cssText='position:fixed;left:12px;right:12px;top:calc(env(safe-area-inset-top,0px) + 10px);z-index:60;box-shadow:0 6px 24px rgba(0,0,0,.25);border-color:var(--ok,#2a9d5b)';el.onclick=function(){el.hidden=true};document.body.appendChild(el)}
   el.innerHTML='<b>Bloco '+b.height+' minerado agora</b> <span class="note">(horário do bloco há '+(lag<90?lag+' s':nf(lag/60,0)+' min')+')</span><br><span class="note">Atualizando servidor, rede e Sniper…</span>';el.hidden=false;
   clearTimeout(el._t);el._t=setTimeout(function(){el.hidden=true},12000);
-  try{renderNetCard();renderMine()}catch(e){}
+  try{renderNetCard();renderMine();renderLive()}catch(e){}
   tipAddBlock(b);
   // o servidor roda a decisão do Sniper pelo vigia dele; o painel busca de novo para mostrar o resultado
   [6000,20000,45000].forEach(function(ms){setTimeout(function(){if(settings.apiUrl)loadOps()},ms)});
@@ -1297,6 +1297,30 @@ function renderLuck(){
   el.innerHTML=h;
 }
 document.addEventListener('click',function(e){var b=e.target.closest('#bl_luck [data-luckw]');if(!b)return;luckWin=+b.dataset.luckw;renderLuck()});
+// Faixa "Agora" no topo do Operar: rede, Sniper, ordem e saldo num lugar só (sem trocar de aba para ver o bloco).
+function renderLive(){
+  var el=$('o_live');if(!el)return;var st=ops.status,S=st&&st.state,cfg=(st&&st.config)||{};
+  if(!S){el.hidden=true;return}el.hidden=false;
+  var h=Math.max(S.lastHeight||0,tipLive.h||0),t=tipLive.h>=(S.lastHeight||0)&&tipLive.t?tipLive.t:S.lastBlockT,ageMin=t?(Date.now()-t)/60e3:null;
+  var I=S.snInfo||{},SN=S.sniper||{},L0=(S.snLog||[])[0],shot=!!SN.shotStart,mine=(ops.orders||[]).filter(function(o){return o.managed&&o.alive!==false});
+  var got=mine.reduce(function(a,o){return a+(+o.speedPH||0)},0),lim=mine.reduce(function(a,o){return a+(+o.limitPH||0)},0),avail=mine.reduce(function(a,o){return a+(+o.availableBtc||0)},0);
+  var bal=ops.bal?+ops.bal.available:(S.wallet?S.wallet.btc:null),bu=(S.market||{}).btcUsd||0,E=(S.orderEnds||[])[0],m=S.market||{};
+  var stTxt=!cfg.sniper?(cfg.mode==='active'?'Robô ativo (regra de margem)':'Robô em '+(MODE_TXT[cfg.mode]||cfg.mode)):
+    shot?'<span class="warn" style="font-weight:600">Tiro: '+nf(Math.min(cfg.sniperPh||25,(st.limits||{}).maxLimitPh||100),0)+' PH/s</span> mirando o bloco '+((SN.shotBlockId||h)+1)+' · há '+FDI.dur(Date.now()-SN.shotStart)+' de '+nf(cfg.sniperShotMin||7,0)+' min':
+    'Espera: '+nf(cfg.sniperIdlePh===undefined?1:cfg.sniperIdlePh,0)+' PH/s'+(SN.shotBlockId===h||SN.usedBlockId===h?' · já atirou mirando o bloco '+(h+1):'');
+  var gate=cfg.sniper?[(I.diffDropPct!==null&&I.diffDropPct!==undefined?'dificuldade '+(I.diffDropPct>=0?nf(I.diffDropPct,2)+'% abaixo':nf(-I.diffDropPct,2)+'% acima')+' (gatilho '+nf(cfg.sniperDiffDropPct,1)+'%)':''),(I.feeX?'mempool '+nf(I.feeX,1)+'× (gatilho '+nf(cfg.sniperFeeX,1)+'×)':''),(cfg.sniperUseAge&&ageMin!==null?'atraso '+nf(ageMin,0)+' de '+nf(cfg.sniperAgeMin,0)+' min':''),(isFinite(m.edgeAtBidPct)?'margem '+pct(m.edgeAtBidPct,1)+' (trava '+pct(cfg.sniperMinEdge,1)+')':'')].filter(Boolean).join(' · '):'';
+  var ordTxt=mine.length?'<span style="font-weight:600">'+nf(got,1)+'</span> de '+nf(lim,0)+' PH/s chegando · saldo da ordem '+avail.toFixed(6).replace('.',',')+' BTC'+(bu?' ('+usd(avail*bu)+')':''):'<span class="bad" style="font-weight:600">sem ordem aberta</span>';
+  var balTxt=bal===null||bal===undefined?'—':bal.toFixed(6).replace('.',',')+' BTC'+(bu?' ('+usd(bal*bu)+')':'');
+  var warn=!mine.length&&cfg.mode==='active'?(bal!==null&&bal<0.00101?'Sem saldo para abrir ordem: deposite pelo menos 0,00101 BTC na NiceHash.':!cfg.poolId?'Escolha o pool no Robô para o robô abrir ordem.':!cfg.autoCreate?'"Criar ordem sozinho" está desligado.':'O robô abre a ordem no próximo ciclo.'):'';
+  el.innerHTML='<div class="row between" style="align-items:baseline"><h2 style="margin:0">Agora</h2><span class="note">'+(tipLive.mode==='ao vivo'?'<span class="chip ok">rede ao vivo</span>':'rede a cada 10 s')+'</span></div>'+
+    '<div class="kv" style="margin-top:6px"><div><small>Último bloco</small><span class="mono">#'+nf(h,0)+'</span><div class="note">há <span data-ago="'+(t||'')+'">'+(t?ago(t):'—')+'</span></div></div>'+
+    '<div><small>Saldo livre</small><span class="mono" style="font-size:15px">'+balTxt.replace(' (','</span><div class="note">').replace(/\)$/,'')+(balTxt.indexOf(' (')>=0?'</div>':'</span>')+'</div></div>'+
+    '<div class="stack" style="gap:6px;margin-top:8px"><div class="box" style="margin:0"><small class="eyebrow">Sniper</small><div>'+stTxt+'</div>'+(gate?'<div class="note">'+gate+'</div>':'')+'</div>'+
+    '<div class="box" style="margin:0"><small class="eyebrow">Ordem do robô</small><div>'+ordTxt+'</div></div></div>'+
+    (warn?'<p class="note" style="margin:6px 0 0"><b class="warn">'+esc(warn)+'</b></p>':'')+
+    (E&&Date.now()-E.t<6*3600e3?'<p class="note" style="margin:6px 0 0">'+hhmm(new Date(E.t))+' · '+esc(E.text)+'</p>':'')+
+    (L0?'<p class="note" style="margin:4px 0 0">Último tiro: '+hhmm(new Date(L0.start))+' mirando o bloco '+(L0.h+1)+' · '+esc(L0.order||'')+' · recebeu até '+nf(L0.maxPH||0,1)+' de '+nf(L0.ph||0,0)+' PH/s · '+(L0.end?(L0.endWhy==='bloco'?'terminou com bloco novo':'terminou pelo prazo')+' em '+nf(L0.mins,1)+' min':'em andamento')+'</p>':'');
+}
 function snLogHTML(L){
   if(!L||!L.length)return '<p class="note" style="margin:6px 0 0">Registro dos tiros: começa no próximo tiro (hora, gatilho, atraso, potência recebida e como terminou).</p>';
   var W={dif:'dificuldade',fee:'mempool',age:'atraso'},row=function(x){
@@ -1521,6 +1545,7 @@ document.addEventListener('click',function(e){
   go.then(function(){$('cal_msg')&&($('cal_msg').textContent='Feito. Atualizando…');loadOps()},function(er){b.disabled=false;if($('cal_msg'))$('cal_msg').textContent='Não deu: '+er.message});
 });
 function renderOps(){
+  try{renderLive()}catch(e){}
   var c=apiCfg(),st=ops.status;
   if(!c.url){
     $('o_conn').innerHTML='<h2>Backend não configurado</h2><p class="note">Para operar (ordens, robô, parada no bloco) é preciso o backend. É só mandar um token do Cloudflare no chat: o passo a passo de 4 itens está em Ajustes.</p><div class="row"><button class="sm" data-go="set" data-focus="#setup">Abrir Ajustes</button></div>';
@@ -1532,13 +1557,17 @@ function renderOps(){
     :'<div class="row" style="justify-content:space-between"><h2 style="margin:0">Backend</h2><span class="chip bad">sem conexão</span></div><p class="note">'+esc(ops.err.status||'carregando…')+'</p>';
   if(!st){$('o_status').innerHTML='';return}
   var cfg=st.config,s=st.state||{},m=s.market||{};
-  var lvl=m.green===undefined?'sem-dado':(m.green?'favoravel':(m.edgeAtBidPct>=0?'neutro':'desfavoravel'));
+  // com o Sniper ligado, a regra que vale é a trava de margem do tiro (o teto da regra de margem fica de lado)
+  var snOn=!!cfg.sniper,snLock=cfg.sniperMinEdge===undefined?-7:cfg.sniperMinEdge,okBuy=snOn?m.edgeAtBidPct>=snLock:m.green;
+  var lvl=m.green===undefined?'sem-dado':(okBuy?'favoravel':(m.edgeAtBidPct>=0?'neutro':'desfavoravel'));
   $('o_status').className='card sig '+lvl;
   $('o_status').innerHTML='<div class="row" style="justify-content:space-between"><h2 style="margin:0">Robô</h2><span class="chip '+MODE_CHIP[cfg.mode]+'">'+MODE_TXT[cfg.mode]+'</span></div>'+
-    (m.bidEH?'<div class="row" style="margin-top:10px;align-items:baseline"><span class="huge '+(m.green?'good':m.edgeAtBidPct>=0?'warn':'bad')+'">'+pct(m.edgeAtBidPct,1)+'</span><span class="note">margem no lance (servidor)</span></div>'+
+    (m.bidEH?'<div class="row" style="margin-top:10px;align-items:baseline"><span class="huge '+(okBuy?'good':m.edgeAtBidPct>=0?'warn':'bad')+'">'+pct(m.edgeAtBidPct,1)+'</span><span class="note">margem no lance (servidor)'+(snOn?' · trava do Sniper '+pct(snLock,1)+': '+(okBuy?'pode atirar':'não atira'):'')+'</span></div>'+
     '<div class="kv judged" style="margin-top:8px">'+
+      (snOn?kvJ('Lance',m.bidEH.toFixed(4).replace('.',','),okBuy?'good':'bad',okBuy?'margem acima da trava do tiro':'margem abaixo da trava do tiro','preço do tiro agora')+
+        kvJ('Trava do Sniper',pct(snLock,1),'',null,'margem mínima para atirar (o teto da regra de margem não vale com o Sniper)'):
       kvJ('Lance',m.bidEH.toFixed(4).replace('.',','),m.bidEH<=m.capEH?'good':'bad',m.bidEH<=m.capEH?'↓ abaixo do teto: compra':'↑ acima do teto: pausa','preço que o robô pagaria agora')+
-      kvJ('Teto',m.capEH.toFixed(4).replace('.',','),'',null,'máximo aceito (empate − sua margem)')+
+      kvJ('Teto',m.capEH.toFixed(4).replace('.',','),'',null,'máximo aceito (empate − sua margem)'))+
       kvJ('Empate',m.breakEvenEH.toFixed(4).replace('.',','),'',null,'acima disto, prejuízo médio')+
       kvJ('Custo por bloco',usd(m.costPerBlockUsd),m.blockNetUsd&&m.costPerBlockUsd<m.blockNetUsd?'good':'bad',m.blockNetUsd?(m.costPerBlockUsd<m.blockNetUsd?'↓ abaixo do valor do bloco':'↑ acima do valor do bloco'):null,m.blockNetUsd?'bloco vale ~'+usd(m.blockNetUsd,0):'')+
       kvJ('Gasto hoje',usd(s.dailyUsd||0),(s.dailyUsd||0)>=(cfg.dailyBudgetUsd||1e9)?'bad':(s.dailyUsd||0)>=0.8*(cfg.dailyBudgetUsd||1e9)?'warn':'neutral',(s.dailyUsd||0)>=(cfg.dailyBudgetUsd||1e9)?'limite do dia atingido':'→ dentro do limite','limite diário: '+usd(cfg.dailyBudgetUsd||0,0))+
@@ -1563,6 +1592,17 @@ function renderOps(){
   var popts='<option value="">—</option>'+okPools.map(function(p){return '<option value="'+esc(p.id)+'">'+esc(p.name)+' ('+esc(p.stratumHostname)+')</option>'}).join('')+
     (cfg.poolId&&!okPools.some(function(p){return p.id===cfg.poolId})?'<option value="'+esc(cfg.poolId)+'">pool atual ('+esc(String(cfg.poolId).slice(0,8))+'; lista de pools não carregou)</option>':''); // sem isso, salvar com a lista vazia apagava o pool
   $('b_poolId').innerHTML=popts;$('n_pool').innerHTML=popts;
+  (function(){var el=$('b_poolInfo');if(!el)return;var P=okPools.filter(function(p){return p.id===cfg.poolId})[0];
+    if(!P){el.innerHTML=cfg.poolId?'Pool atual: '+esc(String(cfg.poolId).slice(0,8))+' (lista de pools não carregou).':'<b class="bad">Nenhum pool escolhido:</b> o robô não consegue criar ordem.';return}
+    var pw=String(P.password||''),dm=/(?:^|[,;\s])d(?:iff)?=(\d+)/.exec(pw),d=dm?+dm[1]:null;
+    el.innerHTML='Pool atual: <b>'+esc(P.name)+'</b> · '+esc(P.stratumHostname)+':'+esc(P.stratumPort)+' · senha <span class="mono">'+esc(pw||'—')+'</span> → '+
+      (d?(d>=500000?'<span class="good">dificuldade fixa '+nf(d,0)+'</span> (a NiceHash pede no mínimo 500.000 no SHA256).':'<span class="bad">dificuldade '+nf(d,0)+' abaixo do mínimo da NiceHash (500.000): a ordem pode morrer.</span>'):'dificuldade automática do pool (o BlockSniper dá 500.000 para a NiceHash).')+
+      (d&&d>=500000?'':'<div class="row" style="margin-top:6px;gap:6px;align-items:center"><input id="b_poolD" value="10000000" inputmode="numeric" style="max-width:140px"><button class="sm" id="b_poolNew">Criar cópia deste pool com d= e usar nas próximas ordens</button></div>'+
+      '<span class="note">Dificuldade alta não muda a chance de achar bloco (no solo ela depende só do hash): manda menos shares, o que deixa a conexão do hash alugado mais estável. A ordem que já está rodando continua no pool dela; vale para as próximas.</span>');
+    var bn=$('b_poolNew');if(bn)bn.onclick=function(){var v=Math.round(+String($('b_poolD').value).replace(/\D/g,''));if(!(v>=500000)){alert('Use 500000 ou mais (mínimo da NiceHash para SHA256).');return}
+      if(!confirm('Criar na NiceHash o pool "'+P.name+' d='+v+'" (mesmo host, porta e endereço, senha d='+v+') e usá-lo nas próximas ordens do robô?'))return;bn.disabled=true;
+      apiCall('POST','/pools',{name:(P.name+' d='+v).slice(0,60),host:P.stratumHostname,port:P.stratumPort,username:P.username,password:'d='+v}).then(function(r){var id=r&&(r.id||(r.pool&&r.pool.id));if(!id)throw new Error('a NiceHash não devolveu o id do pool');return apiCall('PUT','/config',{poolId:id})}).then(function(){alert('Pool criado e escolhido para as próximas ordens.');loadOps()},function(e){bn.disabled=false;alert('Não deu: '+e.message)})};
+  })();
   if(!ops.dirty)BOT_FIELDS.forEach(function(k){var el=$('b_'+k);if(el){var v=cfg[k];el.value=v===undefined||v===null?'':(typeof v==='number'?String(v).replace('.',','):v)}});
   relCalcUI();
   (function(){var el=$('b_rules');if(!el){var anchor=$('b_minEdgePct');if(!anchor)return;var box=anchor.closest('.grid2')||anchor.parentNode;el=document.createElement('div');el.id='b_rules';el.className='box';el.style.margin='0 0 10px';box.parentNode.insertBefore(el,box)}

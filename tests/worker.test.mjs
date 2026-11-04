@@ -1644,3 +1644,32 @@ test('integração: NiceHash recusa baixar o preço (5061): a potência desce me
     assert.ok(s2.lastPriceChange[id] > Date.now() - 200e3, JSON.stringify(s2.lastPriceChange)); // baixa agendada pelo tempo que a NiceHash informou
   } finally { t.server.close(); }
 });
+
+test('integração: ordem que acabou o saldo é avisada com o motivo, sai da lista do robô e diz o que acontece agora', async () => {
+  const t = await setup();
+  try {
+    const sent = [];
+    const env = Object.assign({}, t.env, { TELEGRAM_BOT_TOKEN: 'tg', TELEGRAM_CHAT_ID: '1' });
+    const fetchFn = (u, o) => { if (String(u).includes('api.telegram.org')) { sent.push(JSON.parse(o.body).text); return Promise.resolve(new Response('{}')); } return fetch(u, o); };
+    const o = await t.call('POST', '/api/orders', { priceEH: 0.42, limitPH: 1, amountBtc: 0.001, poolId: 'pool-1', managed: true });
+    const id = o.body.id || Object.keys(t.state.orders)[0];
+    await t.call('PUT', '/api/config', { mode: 'active', payoutAddress: 'bitcoincash:q' + 'a'.repeat(41), autoCreate: false });
+    await tick(env, { fetchFn });                                  // ordem vista
+    t.state.balance = 0; Object.assign(t.state.orders[id], { alive: false, paid: 0.001, endStatus: 'COMPLETED' }); // a NiceHash encerrou: saldo da ordem acabou
+    await tick(env, { fetchFn });
+    const m = sent.find((x) => /encerrada: acabou o saldo da ordem/.test(x));
+    assert.ok(m, JSON.stringify(sent)); assert.match(m, /Deposite/);
+    const b = (await t.call('GET', '/api/status')).body;
+    assert.ok(!(b.config.managed || []).includes(id)); assert.equal(b.state.orderEnds[0].why, 'saldo');
+  } finally { t.server.close(); }
+});
+
+test('limite diário conta o gasto real do dia, inclusive de ordens que já acabaram', () => {
+  const T = Date.UTC(2026, 10, 4, 12), day = '2026-11-04';
+  const cfg = Object.assign({}, DEFAULT_CONFIG, { dailyBudgetUsd: 150, sniper: true, managed: [] });
+  const mk = { ok: true, green: true, bidEH: 0.42, capEH: 0.43, breakEvenEH: 0.44, edgeAtBidPct: 4, fillEH: 0.418, fillTopEH: 0.418, btcUsd: 77000, market: 'BTC' };
+  const d = decide({ cfg, mkt: mk, orders: [], now: T, units: { minLimitPH: 1, priceDownStepEH: 0.002, minOrderBtc: 0.001 }, limits: { maxLimitPh: 100, maxOrderBtc: 0.01 },
+    state: { real: { days: { [day]: { spendUsd: 160 } } } }, blockT: T - 60e3, blockId: 1, walletBtc: 0.005 });
+  assert.ok(d.notes.some((n) => /limite diário atingido/.test(n)), JSON.stringify(d.notes));
+  assert.ok(!d.actions.some((a) => a.type === 'create'));
+});

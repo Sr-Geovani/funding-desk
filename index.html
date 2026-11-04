@@ -428,15 +428,14 @@ details.card>summary{color:var(--fg);font-size:15px}
     </div>
     <div id="mine-ops" class="stack" hidden>
       <div class="card" id="o_conn"></div>
+      <div class="card sig" id="o_live" aria-live="polite"></div>
       <div class="card sig" id="o_status"></div>
+      <div class="card"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Ordens na NiceHash</h2><button class="sm" id="o_refresh">Atualizar</button></div>
+        <div id="o_bal" class="note" style="margin:6px 0 10px"></div><div id="o_orders" style="display:grid;gap:10px"></div></div>
       <div class="card" id="o_paper"></div>
       <div class="card" id="o_real" hidden></div>
       <div class="card" id="o_hash"></div>
       <div class="card sig" id="o_bplan"></div>
-      <div class="card" id="o_exec"></div>
-      <div class="card" id="o_rtest"></div>
-      <div class="card"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Ordens na NiceHash</h2><button class="sm" id="o_refresh">Atualizar</button></div>
-        <div id="o_bal" class="note" style="margin:6px 0 10px"></div><div id="o_orders" style="display:grid;gap:10px"></div></div>
       <div class="card">
         <h2>Robô</h2>
         <div class="grid2">
@@ -459,6 +458,7 @@ details.card>summary{color:var(--fg);font-size:15px}
           <label>Taxa do pool (%)<input id="b_poolFeePct" type="text" inputmode="decimal" autocomplete="off" autocorrect="off" spellcheck="false"></label>
           <label>Taxa do aluguel (%)<input id="b_rentFeePct" type="text" inputmode="decimal" autocomplete="off" autocorrect="off" spellcheck="false"></label>
           <label>Pool para ordens novas<select id="b_poolId"></select></label>
+          <div id="b_poolInfo" class="note" style="grid-column:1/-1"></div>
           <label>Valor da ordem nova (BTC)<input id="b_orderAmountBtc" type="text" inputmode="decimal" autocomplete="off" autocorrect="off" spellcheck="false"></label>
         </div>
         <div class="checks" style="margin-top:10px"><label><input type="checkbox" id="b_autoCreate">criar ordem sozinho quando o sinal ficar verde</label><label><input type="checkbox" id="b_orderAmountMax">usar todo o saldo disponível na ordem (ignora o valor acima e reabastece a ordem quando entra saldo)</label></div><p class="note" id="b_amountNote" style="margin:4px 0 0"></p>
@@ -494,7 +494,7 @@ details.card>summary{color:var(--fg);font-size:15px}
             <label>Host<input id="pl_host" value="solo.blocksniper.ai" autocomplete="off"></label>
             <label>Porta<input id="pl_port" type="number" inputmode="numeric" value="3333"></label>
             <label>Usuário (seu endereço BCH)<input id="pl_user" autocomplete="off"></label>
-            <label>Senha<input id="pl_pass" value="x" autocomplete="off"></label>
+            <label>Senha (dificuldade das shares)<input id="pl_pass" value="d=10000000" autocomplete="off"></label>
           </div>
           <div class="row" style="margin-top:10px"><button id="pl_add">Cadastrar pool</button><button id="pl_check">Conferir com a Braiins</button></div>
           <div id="pl_check_msg" class="note" style="margin-top:6px"></div>
@@ -503,6 +503,10 @@ details.card>summary{color:var(--fg);font-size:15px}
       <div class="card"><h3 style="margin-bottom:8px">Margem no lance, histórico do servidor (%)</h3><div class="chart" id="o_edge"></div>
         <p class="note" style="margin:6px 0 0">Um ponto a cada 15 min. Mostra em que horários o aluguel costuma ficar abaixo do preço de empate.</p></div>
       <div class="card"><h2>Log do robô</h2><div id="o_log" class="res"></div></div>
+      <details class="card" id="o_tests"><summary><b>Testes e calibração</b> <span class="note">(teste do robô e teste de calibração; abra quando precisar)</span></summary>
+        <div class="card" id="o_exec" style="margin-top:8px"></div>
+        <div class="card" id="o_rtest"></div>
+      </details>
       <div class="card"><button id="o_kill" style="width:100%;background:var(--bad);border-color:var(--bad);color:#fff">Emergência: desligar robô e cancelar ordens gerenciadas</button></div>
     </div>
     <div id="mine-net" class="stack" hidden>
