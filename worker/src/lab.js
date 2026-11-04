@@ -134,7 +134,7 @@ export function p2pMerchant(series, hours) {
   return { hours, n, avgPct: n ? +(sum / n).toFixed(3) : null, winPct: n ? Math.round(win / n * 100) : null, worstPct: worst === null ? null : +worst.toFixed(3) };
 }
 
-export function labStep(prev, { now, deribit, p2p, boros, pendle, aaveApy, ptax, cdiPct, errs, bfx, bfxCandles, rules = LAB_RULES }) {
+export function labStep(prev, { now, deribit, p2p, boros, pendle, aaveApy, ptax, cdiPct, errs, bfx, bfxCandles, pendleCache, rules = LAB_RULES }) {
   const L = prev && prev.since ? JSON.parse(JSON.stringify(prev)) : { since: now, series: [], counts: {}, paper: { open: [], closed: [] } };
   const events = [];
   const B = basisOf(deribit, now, rules), P = p2p ? p2pOf(p2p.sell, p2p.buy, ptax) : null, BO = borosOf(boros, rules), PE = pendleOf(pendle || [], aaveApy, now, rules);
@@ -158,7 +158,9 @@ export function labStep(prev, { now, deribit, p2p, boros, pendle, aaveApy, ptax,
   L.series.push([now, bBest ? bBest.netApr : null, P ? P.spreadPct : null, P ? P.premPtaxPct : null, boRecv ? boRecv.gapPp : null, peBest ? peBest.apy : null, aaveApy, P ? P.ask : null, P ? P.bid : null, BX ? BX.lastApr : null, BX ? BX.hiApr : null]);
   if (L.series.length > rules.keepSeries) L.series.splice(0, L.series.length - rules.keepSeries);
   L.now = { at: now, basis: B.slice(0, 6), p2p: P, boros: BO.sort((a, b) => Math.abs(b.gapPp) - Math.abs(a.gapPp)).slice(0, 10), pendle: PE.slice(0, 8), aaveApy, cdiPct, bar: cdiBar(cdiPct, rules), bfx: BX, errs: errs && Object.keys(errs).length ? errs : null,
-    pendleRaw: (pendle || []).map(([c, j]) => c + ':' + (j && j.markets ? j.markets.length : 'vazio')).join(' ') };
+    pendleRaw: (pendle || []).map(([c, j]) => c + ':' + (j && j.markets ? j.markets.length : 'vazio')).join(' ') || 'sem leitura' };
+  if (pendleCache) L.pendleCache = pendleCache;
+  L.now.pendleAt = pendleCache ? pendleCache.at : null;
   L.lastTs = now;
   return { lab: L, events };
 }
