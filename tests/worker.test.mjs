@@ -1828,3 +1828,11 @@ test('lastro: preço do hash de hoje contra o último ano (percentil e mediana)'
   assert.ok(s.pct < 1, JSON.stringify(s)); assert.ok(s.vsMedPct < -45); assert.equal(s.days, 301);
   assert.equal(priceHistStats(rows.slice(-5), now), null); // pouco histórico: sem conclusão
 });
+
+test('PPS: estado antigo com ordem aberta não cobra a taxa de novo e entra com margem de 4%', async () => {
+  const { xmrPaperStep } = await import('../worker/src/paperxmr.js');
+  const T = Date.UTC(2026, 10, 4, 16);
+  const old = { since: T - 864e5, lastTs: T - 900e3, walletBtc: 0, startBtc: 0.002, orderBtc: 0.00198, spentBtc: 0.00001, feesBtc: 0.00001, revUsd: 0.8, poolXmr: 0, paidXmr: 0, payouts: [], runs: [], run: null, on: false, hoursOn: 0.2, days: {} };
+  const r = xmrPaperStep(old, { m: { edgePct: 4.3, marketUsdDay: 4384 }, now: T, btcUsd: 77000, xmrUsd: 300 });
+  assert.equal(r.px.on, true, r.events.join(' | ')); assert.match(r.events.join(' '), /sem taxa nova/);
+});

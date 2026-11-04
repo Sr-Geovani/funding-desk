@@ -14,6 +14,7 @@ const usd2 = (x) => (x < 0 ? '−' : '') + 'US$' + Math.abs(x).toFixed(2).replac
 export function xmrPaperStep(px, { m, now, btcUsd, xmrUsd, rules = XMR_RULES }) {
   const p = px && px.since ? JSON.parse(JSON.stringify(px)) : { since: now, lastTs: now, walletBtc: rules.walletBtc, startBtc: rules.walletBtc, orderBtc: 0,
     spentBtc: 0, feesBtc: 0, revUsd: 0, poolXmr: 0, paidXmr: 0, payouts: [], runs: [], run: null, on: false, edgePct: null, hoursOn: 0, days: {} };
+  if (p.orderOpen === undefined && p.orderBtc > 1e-8) p.orderOpen = true; // estado antigo: a ordem já estava aberta (sem isso a conta cobrava a taxa de novo)
   const events = [], dt = Math.min(Math.max(0, now - (p.lastTs || now)), rules.maxGap), day = new Date(now).toISOString().slice(0, 10);
   // 1) o intervalo que passou, com a decisão anterior
   if (p.on && dt > 0 && btcUsd > 0) {
