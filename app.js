@@ -1818,21 +1818,9 @@ function renderBrain(){
     {k:'Funding',c:fp&&fp.netUsd>0?'g':'b',on:!!(S.fundPaper&&S.fundPaper.open&&S.fundPaper.open.length),v:fp?usd(fp.netUsd):'—'},
     {k:'Rendimentos',c:yBest>=12?'g':yBest>0?'w':'n',on:true,v:yBest?pct(yBest,1)+' a.a.':'—'},
     {k:'Copiloto',c:weak?'w':'g',on:true,v:ai.rate?pctp(ai.rate*100,0)+' acerto':'—'}];
-  // desenho do cérebro (vista lateral): contorno, sulcos, neurônios que disparam e sinapses correndo; cada frente é uma
-  // região ligada ao núcleo, com a cor do estado (linha correndo = frente ativa)
-  var NEU=[[95,70],[120,52],[150,44],[180,40],[210,46],[238,62],[255,88],[88,100],[118,88],[148,76],[178,72],[208,80],[234,98],[100,130],[130,118],[160,108],[192,110],[222,126],[248,128],[120,150],[155,142],[188,146],[218,152]];
-  var SYN=[[0,1],[1,2],[2,3],[3,4],[4,5],[5,6],[0,7],[7,8],[8,9],[9,10],[10,11],[11,12],[12,6],[1,8],[2,9],[3,10],[4,11],[7,13],[13,14],[14,15],[15,16],[16,17],[17,18],[12,18],[8,14],[9,15],[10,16],[11,17],[13,19],[19,20],[20,21],[21,22],[14,20],[15,20],[16,21],[17,22],[18,22]];
-  var REG=[{n:2,lx:150,ly:14,a:'middle'},{n:5,lx:300,ly:52,a:'end'},{n:12,lx:308,ly:112,a:'end'},{n:22,lx:290,ly:196,a:'end'},{n:19,lx:40,ly:196,a:'start'},{n:7,lx:12,ly:96,a:'start'}];
-  var svg='<svg viewBox="0 0 320 210" role="img" aria-label="Cérebro do Jarbas: estado de cada frente">'+
-    '<path class="shell" d="M62,118 C42,92 54,52 90,42 C106,22 146,16 166,28 C188,14 232,20 246,44 C276,50 290,82 274,106 C288,128 270,160 244,162 C232,180 202,184 186,170 C170,184 136,184 120,170 C96,180 66,166 70,146 C54,140 52,128 62,118 Z"/>'+
-    '<path class="gyri" d="M90,62 C110,72 130,58 150,66 M170,50 C190,64 214,52 230,70 M84,96 C104,90 120,104 140,94 C160,84 176,98 196,92 C216,86 232,100 252,94 M92,128 C112,120 132,134 152,124 C172,116 192,130 214,122 C232,116 246,128 262,122 M118,154 C138,146 158,158 178,150 C196,144 212,154 228,148"/>'+
-    '<path class="gyri" d="M238,164 C250,176 270,176 278,164 M196,172 C198,186 206,196 214,200"/>';
-  SYN.forEach(function(e,k){var a=NEU[e[0]],b=NEU[e[1]];svg+='<line class="syn" x1="'+a[0]+'" y1="'+a[1]+'" x2="'+b[0]+'" y2="'+b[1]+'" stroke="var(--acc,#b5e655)" stroke-width="1" style="animation-delay:-'+((k*0.37)%1.8).toFixed(2)+'s"/>'});
-  N.forEach(function(n,i){var r=REG[i],q=NEU[r.n];svg+='<line x1="'+q[0]+'" y1="'+q[1]+'" x2="'+r.lx+'" y2="'+(r.ly-4)+'" stroke="'+C(n.c)+'" stroke-width="1.4" class="'+(n.on?'flow':'idle')+'"/>'+
-    '<circle cx="'+q[0]+'" cy="'+q[1]+'" r="5.5" fill="'+C(n.c)+'"'+(n.on?' class="pulse"':'')+'/>'+
-    '<text x="'+r.lx+'" y="'+r.ly+'" text-anchor="'+r.a+'" font-size="9.5" font-weight="600" fill="currentColor">'+n.k+'</text><text x="'+r.lx+'" y="'+(r.ly+10)+'" text-anchor="'+r.a+'" font-size="8.5" fill="currentColor" opacity=".7">'+n.v+'</text>'});
-  NEU.forEach(function(q,k){svg+='<circle class="neu" cx="'+q[0]+'" cy="'+q[1]+'" r="2.4" fill="var(--acc,#b5e655)" style="animation-delay:-'+((k*0.61)%2.6).toFixed(2)+'s"/>'});
-  svg+='</svg>';
+  // cérebro em 3D (inspirado no conectoma da mosca): os pontos são neurônios; as frentes são regiões; a atividade de cada
+  // frente vira taxa de disparo. O desenho fica num canvas que persiste entre as atualizações (só o estado muda).
+  window.FD_brainState={regions:N.map(function(n){return {k:n.k,c:n.c,on:n.on,v:n.v}})};
   // o que ele está "pensando": uma frase por frente, girando a cada 4 s
   var TH=[];
   TH.push(isFinite(m.edgeAtBidPct)?'Olhando o BCH: margem '+pct(m.edgeAtBidPct,1)+(m.edgeAtBidPct>=0?'. Janela aberta, rara.':'. Cada US$100 de aluguel voltam ~US$'+nf(100+m.edgeAtBidPct,0)+': não compensa.'):'Esperando o preço do aluguel do BCH.');
@@ -1851,12 +1839,66 @@ function renderBrain(){
   var YL=(S.market2&&S.market2.yields)||{},YN={bfx:'Empréstimo Bitfinex',basis:'Base BTC',ethena:'Ethena',hlp:'Hyperliquid HLP',aaveUsdc:'Aave USDC',aaveUsdt:'Aave USDT',sUsds:'Sky sUSDS',stEth:'Lido stETH',jitoSol:'Jito SOL'};
   var yH=Object.keys(FR).map(function(k){return {k:YN[k]||k,r:FR[k].rate}}).concat(Object.keys(YL).map(function(k){return {k:YN[k]||k,r:YL[k]&&YL[k].apy}})).filter(function(x){return isFinite(x.r)}).sort(function(a,b){return b.r-a.r}).map(function(x){return esc(x.k)+' '+pct(x.r,1)}).join(' · ');
   var acts=(ops.log||[]).slice(-40).reverse().filter(function(x){return /simulado|acao|ia|bloco/.test(x.kind)}).slice(0,6);
-  el.innerHTML='<div class="row between" style="align-items:baseline"><h2 style="margin:0">Cérebro</h2><span class="note">'+(J.telegram?'<span class="chip ok">Jarbas no Telegram</span>':'<span class="chip">Telegram: Ajustes</span>')+'</span></div>'+svg+'<p class="note think" id="brainThink" aria-live="polite"><b>Pensando agora:</b> '+esc(TH[0]||'')+'</p>'+
+  if(!$('brainCv'))el.innerHTML='<div class="row between" style="align-items:baseline"><h2 style="margin:0">Cérebro</h2><span class="note" id="brainTg"></span></div>'+
+    '<div style="position:relative;margin-top:6px"><canvas id="brainCv" style="width:100%;height:260px;display:block;border-radius:12px;background:radial-gradient(ellipse at center,#0f1a12 0%,#070b08 75%)" aria-label="Cérebro do Jarbas: cada região é uma frente; os pontos que acendem são decisões e leituras"></canvas>'+
+    '<div id="brainLeg" class="note" style="position:absolute;left:10px;right:10px;bottom:8px;display:flex;flex-wrap:wrap;gap:4px 10px;color:#cfe;font-size:11px;pointer-events:none"></div></div>'+
+    '<p class="note think" id="brainThink" aria-live="polite"></p><div id="brainInfo"></div>';
+  $('brainTg').innerHTML=J.telegram?'<span class="chip ok">Jarbas no Telegram</span>':'<span class="chip">Telegram: Ajustes</span>';
+  $('brainLeg').innerHTML=N.map(function(n){return '<span><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:'+C(n.c)+';margin-right:4px"></span>'+esc(n.k)+' '+n.v+'</span>'}).join('');
+  if(!$('brainThink').textContent)$('brainThink').innerHTML='<b>Pensando agora:</b> '+esc(TH[0]||'');
+  brainStart();
+  $('brainInfo').innerHTML=
     '<div class="kv" style="margin-top:2px"><div><small>Dinheiro real</small><span style="font-size:15px">gasto '+usd(realSpent,0)+'</span><div class="note">'+((S.myBlocks||[]).length)+' blocos</div></div><div><small>Moedas PPS (como real)</small><span class="'+(ppsRes>0?'good':ppsRes<0?'bad':'')+'" style="font-size:15px">'+(ppsRes>=0?'+':'')+usd(ppsRes)+'</span><div class="note">'+ppsAll.length+' algoritmos acompanhados</div></div></div>'+
     '<div class="eyebrow" style="margin:10px 0 4px">Oportunidades agora</div><p class="note" style="margin:0 0 6px">A porcentagem é a margem: quanto a moeda paga acima (+) ou abaixo (−) do que custa o aluguel, já com as taxas. +5% = cada US$100 de aluguel voltam US$105.</p><div class="stack" style="gap:6px">'+(oppH||'<p class="note">O mapa de moedas atualiza a cada 15 min.</p>')+'</div>'+
     (yH?'<p class="note" style="margin:6px 0 0">Rendimentos ao ano em dólar: '+yH+'. CDI em reais: '+pct((S.fronts&&S.fronts.cdi)||13.65,2)+' (sem risco de cripto; em dólar some a variação do câmbio).</p>':'')+
     (acts.length?'<details style="margin-top:8px" open><summary>Atividade agora</summary><div class="stack" style="gap:2px;margin-top:4px">'+acts.map(function(x){return '<div class="note">'+hhmm(new Date(x.t))+' · '+esc(x.text)+'</div>'}).join('')+'</div></details>':'')+
     '<p class="note" style="margin:6px 0 0">Converse com o Jarbas no Telegram: /status, /monero, /bch, /funding, /saldo, /copiloto, /relatorio.</p>';
+}
+// Motor do cérebro 3D: ~900 neurônios num formato de cérebro de mosca (lobo central + dois lobos ópticos), girando
+// devagar; disparos nascem nas regiões conforme a atividade da frente e se propagam pelas ligações (pulso correndo).
+var BR=null;
+function brainBuild(){
+  var P=[],L=[],rnd=function(){return Math.random()*2-1},tries=0;
+  var inside=function(x,y,z){var c=(x*x)/(0.42*0.42)+(y*y)/(0.30*0.30)+(z*z)/(0.26*0.26),l=((x+0.78)*(x+0.78))/(0.24*0.24)+(y*y)/(0.34*0.34)+(z*z)/(0.22*0.22),r=((x-0.78)*(x-0.78))/(0.24*0.24)+(y*y)/(0.34*0.34)+(z*z)/(0.22*0.22);return c<=1||l<=1||r<=1};
+  while(P.length<900&&tries<40000){tries++;var x=rnd()*1.05,y=rnd()*0.4,z=rnd()*0.3;if(inside(x,y,z))P.push({x:x,y:y,z:z,e:0,reg:0})}
+  // regiões: 0 BCH (lobo esquerdo) · 1 PPS (lobo direito) · 2 Sniper (centro-esquerda) · 3 Funding (centro-baixo) · 4 Rendimentos (centro-direita) · 5 Copiloto (centro-alto)
+  P.forEach(function(q){q.reg=q.x<-0.52?0:q.x>0.52?1:q.y>0.1?5:q.y<-0.12?3:q.x<0?2:4});
+  P.forEach(function(q,i){var best=[];for(var t=0;t<40;t++){var j=(Math.random()*P.length)|0;if(j===i)continue;var o=P[j],d=(o.x-q.x)*(o.x-q.x)+(o.y-q.y)*(o.y-q.y)+(o.z-q.z)*(o.z-q.z);best.push([d,j])}
+    best.sort(function(a,b){return a[0]-b[0]});q.nb=best.slice(0,3).map(function(b){return b[1]});q.nb.forEach(function(j){if(i<j)L.push([i,j])})});
+  return {P:P,L:L,ang:0,pulses:[],last:0,raf:0}
+}
+function brainStart(){
+  var cv=$('brainCv');if(!cv)return;if(!BR)BR=brainBuild();if(BR.raf)return;
+  var reduce=window.matchMedia&&matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var col={g:[80,220,130],w:[235,190,70],b:[235,85,95],n:[150,160,170]};
+  var step=function(t){
+    BR.raf=0;var home=$('tab-home');if(!cv.isConnected)return;
+    if(document.visibilityState!=='visible'||(home&&home.hidden)){BR.raf=requestAnimationFrame(step);return}
+    var dpr=Math.min(2,window.devicePixelRatio||1),W=cv.clientWidth,H=cv.clientHeight;if(cv.width!==W*dpr){cv.width=W*dpr;cv.height=H*dpr}
+    var g=cv.getContext('2d');g.setTransform(dpr,0,0,dpr,0,0);g.clearRect(0,0,W,H);
+    var dt=Math.min(64,t-(BR.last||t));BR.last=t;if(!reduce)BR.tt=(BR.tt||0)+dt;BR.ang=Math.sin((BR.tt||0)*0.00022)*0.55; // balança de frente, como a visualização do conectoma
+    var S=(window.FD_brainState||{}).regions||[],ca=Math.cos(BR.ang),sa=Math.sin(BR.ang),sc=Math.min(W/2.15,(H-64)/0.85),cy0=(H-58)/2;
+    var pr=function(q){var x=q.x*ca+q.z*sa,z=-q.x*sa+q.z*ca,f=1/(1.9-z*0.9);var k2=f/0.53;return {x:W/2+x*sc*k2*0.93,y:cy0-q.y*sc*k2*0.93,z:z,f:k2}};
+    // disparos espontâneos: frente ativa dispara mais; verde e amarelo mais que vermelho
+    if(!reduce)for(var r=0;r<6;r++){var st=S[r]||{},rate=(st.on?0.09:0.025)*(st.c==='g'?1.6:st.c==='w'?1.1:0.7);if(Math.random()<rate*dt/16){var cand=BR.P.filter(function(q){return q.reg===r});var q=cand[(Math.random()*cand.length)|0];if(q)q.e=1}}
+    var Q=BR.P.map(pr);
+    // ligações (fracas) e pulsos correndo nelas
+    g.lineWidth=0.5;
+    for(var k=0;k<BR.L.length;k+=2){var a=Q[BR.L[k][0]],b=Q[BR.L[k][1]];g.strokeStyle='rgba(120,200,160,'+(0.04+0.03*(a.f+b.f-1.6))+')';g.beginPath();g.moveTo(a.x,a.y);g.lineTo(b.x,b.y);g.stroke()}
+    BR.pulses=BR.pulses.filter(function(p){p.t+=dt/380;if(p.t>=1){var n=BR.P[p.b];if(Math.random()<0.55)n.e=Math.max(n.e,0.85);return false}
+      var a=Q[p.a],b=Q[p.b],x=a.x+(b.x-a.x)*p.t,y=a.y+(b.y-a.y)*p.t,c=col[(S[BR.P[p.a].reg]||{}).c||'n'];g.fillStyle='rgba('+c[0]+','+c[1]+','+c[2]+',0.95)';g.beginPath();g.arc(x,y,1.6,0,6.3);g.fill();return true});
+    // neurônios (de trás para frente)
+    var ord=Q.map(function(q,i){return i}).sort(function(i,j){return Q[i].z-Q[j].z});
+    ord.forEach(function(i){var n=BR.P[i],q=Q[i],c=col[(S[n.reg]||{}).c||'n'],e=n.e,a=0.18+0.35*(q.f-0.45)+e*0.8;
+      g.fillStyle='rgba('+c[0]+','+c[1]+','+c[2]+','+Math.min(1,a).toFixed(3)+')';g.beginPath();g.arc(q.x,q.y,(0.85+e*2.4)*q.f,0,6.3);g.fill();
+      if(e>0.95&&BR.pulses.length<260)n.nb.forEach(function(j){BR.pulses.push({a:i,b:j,t:0})});
+      if(e>0)n.e=Math.max(0,e-dt/650)});
+    // nome das regiões
+    var cen=[[-0.8,0.48],[0.8,0.48],[-0.42,-0.42],[0,-0.42],[0.42,-0.42],[0,0.4]];
+    g.font='600 10px system-ui,sans-serif';g.textAlign='center';
+    cen.forEach(function(cc,r){var st=S[r];if(!st)return;var q=pr({x:cc[0],y:cc[1],z:0}),c=col[st.c||'n'];g.fillStyle='rgba('+c[0]+','+c[1]+','+c[2]+',0.95)';g.fillText(st.k,q.x,q.y)});
+    if(!reduce)BR.raf=requestAnimationFrame(step)};
+  BR.raf=requestAnimationFrame(step);
 }
 var thinkI=0,thinkT=null;
 function thinkStart(){if(thinkT)return;thinkT=setInterval(function(){var el=$('brainThink'),T=window.FD_think||[];if(!el||!T.length||document.visibilityState!=='visible'||$('tab-home').hidden)return;

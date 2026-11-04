@@ -1805,3 +1805,17 @@ test('varredura: MRR convertida por hash e comparada com a receita; janelas das 
   const S = xmrSummary(p, 77000, null);
   assert.equal(S.win.n7d, 3); assert.equal(Math.round(S.win.medMin), 30);
 });
+
+test('PPS como arbitragem: só entra se a janela paga a taxa e manda o lucro de cada operação', async () => {
+  const { xmrPaperStep } = await import('../worker/src/paperxmr.js');
+  const T = Date.UTC(2026, 10, 4, 15), M = 60e3;
+  // mercado minúsculo: janela renderia centavos → não entra e diz por quê
+  let r = xmrPaperStep(null, { m: { edgePct: 3, marketUsdDay: 100 }, now: T, btcUsd: 77000 });
+  assert.equal(r.px.on, false); assert.match(r.events.join(' '), /não entra/);
+  // mercado bom: entra com lucro esperado e, na saída, manda gasto, receita e lucro
+  r = xmrPaperStep(null, { m: { edgePct: 6, marketUsdDay: 50000 }, now: T, btcUsd: 77000 });
+  assert.equal(r.px.on, true); assert.match(r.events.join(' '), /Lucro esperado/);
+  let p = r.px; for (let i = 1; i <= 4; i++) p = xmrPaperStep(p, { m: { edgePct: 6, marketUsdDay: 50000 }, now: T + i * 15 * M, btcUsd: 77000 }).px;
+  r = xmrPaperStep(p, { m: { edgePct: -1, marketUsdDay: 50000 }, now: T + 5 * 15 * M, btcUsd: 77000 });
+  assert.match(r.events.join(' '), /Resultado desta operação: gasto US\$[\d,]+ \+ taxa US\$0,77, receita US\$[\d,]+, (lucro|prejuízo) .* em 75 min\. Acumulado/);
+});

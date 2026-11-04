@@ -8,7 +8,8 @@
 // para o mínimo quando ela fecha; sem isso a taxa fixa (0,00001 BTC, ~US$0,77) come o lucro de janelas de 15 a 30 min.
 // Gasto por dia na janela: até budgetUsdDay, sem passar de 10% do que o mercado inteiro do algoritmo gasta por dia
 // (mercado pequeno não absorve uma ordem grande sem subir o preço).
-export const XMR_RULES = { walletBtc: 0.002, enterPct: 2, exitPct: 0, budgetUsdDay: 300, marketShare: 0.1, minOrderBtc: 0.001, newOrderFeeBtc: 0.00001, payoutXmr: 0.01, maxGap: 20 * 60e3 };
+export const XMR_RULES = { walletBtc: 0.002, enterPct: 2, exitPct: 0, budgetUsdDay: 300, marketShare: 0.1, minOrderBtc: 0.001, newOrderFeeBtc: 0.00001, payoutXmr: 0.01, maxGap: 20 * 60e3, winMin: 30, minExpUsd: 0.05 };
+const usd2 = (x) => (x < 0 ? '−' : '') + 'US$' + Math.abs(x).toFixed(2).replace('.', ',');
 
 export function xmrPaperStep(px, { m, now, btcUsd, xmrUsd, rules = XMR_RULES }) {
   const p = px && px.since ? JSON.parse(JSON.stringify(px)) : { since: now, lastTs: now, walletBtc: rules.walletBtc, startBtc: rules.walletBtc, orderBtc: 0,
@@ -33,6 +34,16 @@ export function xmrPaperStep(px, { m, now, btcUsd, xmrUsd, rules = XMR_RULES }) 
     else if (!p.on && e >= rules.enterPct) {
       const mk = m && m.marketUsdDay > 0 ? m.marketUsdDay * rules.marketShare : Infinity;
       p.rateUsdDay = Math.max(1, Math.min(rules.budgetUsdDay, mk));
+      // como numa arbitragem: só entra se a janela típica paga a taxa de entrada e sobra lucro
+      const ds = p.runs.map((r) => (r.end - r.start) / 60e3).sort((a, b) => a - b), winMin = ds.length >= 3 ? ds[ds.length >> 1] : rules.winMin;
+      // a taxa de ordem nova é paga uma vez e se divide pelas janelas que o valor da ordem cobre (a ordem fica aberta)
+      const winSpend = p.rateUsdDay / 1440 * winMin, orderUsd = (p.orderOpen ? p.orderBtc : Math.max(0, p.walletBtc - rules.newOrderFeeBtc)) * (btcUsd || 0);
+      const nWin = Math.max(1, orderUsd / Math.max(1e-9, winSpend)), feeAll = p.orderOpen ? 0 : rules.newOrderFeeBtc * (btcUsd || 0), feeUsd = feeAll / nWin;
+      const expUsd = winSpend * e / 100 - feeUsd, beMin = e > 0 && feeAll ? feeAll / (p.rateUsdDay / 1440 * e / 100) : null;
+      if (expUsd < rules.minExpUsd) {
+        if (!p.skipAt || now - p.skipAt > 3600e3) { p.skipAt = now; events.push(`Monero (simulado): margem de ${e.toFixed(1).replace('.', ',')}%, mas não entra: numa janela típica de ~${Math.round(winMin)} min renderia ~${usd2(expUsd + feeUsd)} (mínimo para valer: ${usd2(rules.minExpUsd + feeUsd)})`); }
+      } else {
+      p.expect = { usd: expUsd, winMin, beMin };
       if (!p.orderOpen) {
         const amt = Math.floor((p.walletBtc - rules.newOrderFeeBtc) * 1e8) / 1e8;
         if (amt >= rules.minOrderBtc) {
@@ -40,11 +51,18 @@ export function xmrPaperStep(px, { m, now, btcUsd, xmrUsd, rules = XMR_RULES }) 
           events.push(`Monero (simulado): abriria ordem de ${amt.toFixed(6).replace('.', ',')} BTC no RandomX com margem de ${e.toFixed(1).replace('.', ',')}% (taxa de ordem nova paga uma vez)`);
         } else if (!p.noFunds) { p.noFunds = now; events.push('Monero (simulado): margem boa, mas a carteira virtual não tem o mínimo de 0,001 BTC'); }
       } else events.push(`Monero (simulado): subiria a potência no RandomX com margem de ${e.toFixed(1).replace('.', ',')}% (ordem já aberta, sem taxa nova)`);
-      if (p.orderOpen) { p.on = true; p.edgePct = e; p.run = { start: now, edgePct: e, spentBtc: 0, revUsd: 0, orderBtc: p.orderBtc, rateUsdDay: p.rateUsdDay }; }
+      if (p.orderOpen) {
+        const fee = p.feesBtc - (p.feesPrev || 0); p.feesPrev = p.feesBtc;
+        p.on = true; p.edgePct = e; p.run = { start: now, edgePct: e, spentBtc: 0, revUsd: 0, feeBtc: fee, orderBtc: p.orderBtc, rateUsdDay: p.rateUsdDay };
+        events[events.length - 1] += `. Lucro esperado ~${usd2(expUsd)} se a janela durar ~${Math.round(winMin)} min${beMin ? `; a taxa de ordem nova (${usd2(feeAll)}) se paga em ~${Math.round(beMin)} min de mineração e serve para as próximas janelas` : ''}; gasto de até ${usd2(p.rateUsdDay / 24)} por hora`;
+      }
+      }
     } else if (p.on && (e < rules.exitPct || (m && m.thin))) {
       const why = m && m.thin ? 'mercado ficou raso (pouca ordem recebendo hash)' : `margem caiu para ${e.toFixed(1).replace('.', ',')}%`;
-      close(why);
-      events.push(`Monero (simulado): baixaria a potência para o mínimo (${why}); a ordem fica aberta para a próxima janela`);
+      const R0 = p.run; close(why);
+      const res = R0 ? R0.revUsd - (R0.spentBtc + (R0.feeBtc || 0)) * (btcUsd || 0) : 0, mins = R0 ? Math.round((now - R0.start) / 60e3) : 0;
+      const tot = p.revUsd - (p.spentBtc + p.feesBtc) * (btcUsd || 0);
+      events.push(`Monero (simulado): baixaria a potência para o mínimo (${why}); a ordem fica aberta para a próxima janela. Resultado desta operação: ${R0 ? `gasto ${usd2(R0.spentBtc * (btcUsd || 0))}${R0.feeBtc ? ` + taxa ${usd2(R0.feeBtc * (btcUsd || 0))}` : ''}, receita ${usd2(R0.revUsd)}, ${res >= 0 ? 'lucro' : 'prejuízo'} ${usd2(res)} em ${mins} min` : '—'}. Acumulado: ${usd2(tot)}`);
     } else if (p.on) p.edgePct = e;
   }
   for (const k of Object.keys(p.days).sort().slice(0, -30)) delete p.days[k];
@@ -70,5 +88,5 @@ export function xmrSummary(p, btcUsd, xmrUsd) {
     avgEdgePct: R.length ? R.reduce((a, r) => a + r.edgePct, 0) / R.length : null };
   return { win, since: p.since, on: p.on, edgeNow: p.edgeNow, hoursOn: p.hoursOn, runs: p.runs.length + (p.run ? 1 : 0), spentUsd: costUsd, revUsd: p.revUsd, resultUsd: resUsd,
     retPct: costUsd > 0 ? resUsd / costUsd * 100 : null, perDayUsd: resUsd / days, walletBtc: p.walletBtc + p.orderBtc, poolXmr: p.poolXmr, paidXmr: p.paidXmr,
-    paidUsd: xmrUsd ? p.paidXmr * xmrUsd : null, payouts: p.payouts.length, lastRuns: p.runs.slice(-5).reverse(), run: p.run };
+    paidUsd: xmrUsd ? p.paidXmr * xmrUsd : null, payouts: p.payouts.length, lastRuns: p.runs.slice(-5).reverse().map((r) => Object.assign({}, r, { resultUsd: r.revUsd - (r.spentBtc + (r.feeBtc || 0)) * (btcUsd || 0) })), run: p.run, expect: p.expect || null };
 }
