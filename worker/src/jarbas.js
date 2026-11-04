@@ -45,7 +45,7 @@ export function brainContext(state, cfg, now) {
 }
 
 const HELP = 'Sou o Jarbas, o sócio que acompanha a operação. Pergunte do jeito que quiser ou use:\n' +
-  '/status – resumo de tudo\n/laboratorio – novas frentes (base, P2P, Boros, Pendle)\n/placar – resultado e lastro de cada frente\n/oportunidades – onde entrar agora\n/rendimentos – juros e CDI\n/mrr – preços da MiningRigRentals\n/bch – mineração BCH e Sniper\n/monero – operação Monero (PPS)\n/funding – funding e placar dos sinais\n/saldo – dinheiro real e carteira\n/copiloto – onde a IA acerta e erra\n/relatorio – relatório do dia\n' +
+  '/status – resumo de tudo\n/laboratorio – novas frentes (base, P2P, Boros, Pendle, Bitfinex)\n/placar – resultado e lastro de cada frente\n/oportunidades – onde entrar agora\n/rendimentos – juros e CDI\n/mrr – preços da MiningRigRentals\n/bch – mineração BCH e Sniper\n/monero – operação Monero (PPS)\n/funding – funding e placar dos sinais\n/saldo – dinheiro real e carteira\n/copiloto – onde a IA acerta e erra\n/relatorio – relatório do dia\n' +
   '/modo observar | ativo | desligado – muda o modo do robô\n/sniper ligar | desligar';
 
 function reportText(c) {
@@ -81,13 +81,17 @@ export function ruleReply(text, c) {
   if (snp) { const on = /ligar|ligado|on/.test(snp[1]) && !/desl/.test(snp[1]); return { text: `Feito: Sniper ${on ? 'ligado' : 'desligado'}.`, action: { sniper: on } }; }
   if (/^\/(start|ajuda|help)|^ajuda/.test(t)) return { text: HELP };
   if (/relat/.test(t) || /^\/status|como estamos|resumo|status/.test(t)) return { text: reportText(c) };
-  if (/laborat|novas frentes|basis|base|p2p|boros|pendle/.test(t)) { const B = c.laboratorio; if (!B) return { text: 'O laboratório coleta a cada 15 min; a primeira leitura sai na próxima varredura.' };
+  if (/laborat|novas frentes|basis|base|p2p|boros|pendle|bitfinex/.test(t)) { const B = c.laboratorio; if (!B) return { text: 'O laboratório coleta a cada 15 min; a primeira leitura sai na próxima varredura.' };
     const n = B.now || {}, b = (n.basis || [])[0], p = n.p2p, bo = (n.boros || [])[0], pe = (n.pendle || [])[0];
     return { text: [`Laboratório de novas frentes (${(B.days || 0).toFixed(1).replace('.', ',')} dias, ${B.samples} leituras; papel, sem capital):`,
       `• Base (Deribit): melhor agora ${b ? b.inst + ' ' + pc(b.netApr) + ' ao ano líquido' : '—'}; média ${pc(B.avg.basisNetApr)}; acima de 10% em ${B.hitPct.basis !== null ? Math.round(B.hitPct.basis) : '—'}% das leituras.`,
       `• P2P USDT/BRL (Bybit): compra ${p ? p.ask : '—'}, venda ${p ? p.bid : '—'}, diferença ${p ? pc(p.spreadPct, 2) : '—'}; ágio sobre a PTAX ${p ? pc(p.premPtaxPct, 2) : '—'}. Arbitragem direta (vender acima de onde se compra) apareceu em ${B.hitPct.p2p !== null ? Math.round(B.hitPct.p2p) : '—'}% das leituras.`,
       `• Boros: ${bo ? bo.sym + ' fixa ' + pc(bo.fixed) + ' × flutuante ' + pc(bo.floating) : '—'}.`,
       `• Pendle PT (stablecoin): ${pe ? pe.name + ' ' + pc(pe.apy) + ' fixo por ' + pe.days + ' dias' : '—'}; Aave USDC ${pc(n.aaveApy)}; CDI ${pc(n.cdiPct)} (reais).`,
+      `• P2P como comerciante (compra no bid, revende no ask depois): ${(B.p2pMerchant || []).map((m) => m.n ? `em ${m.hours} h ${pc(m.avgPct, 2)} em média, positivo ${m.winPct}% das vezes (pior ${pc(m.worstPct, 2)})` : `em ${m.hours} h: juntando dados`).join('; ')}. Fora da conta: golpe, devolução de Pix e trabalho manual.`,
+      `• Boros, a pergunta certa (o fixo erra o funding que vem depois?): ${(B.borosRealized || []).map((r) => r.n ? `${r.days} dias: flutuante realizado − fixo = ${pc(r.avgPp)} (quem pagou fixo ganhou ${r.payWinPct}% das vezes)` : `${r.days} dias: precisa de ${r.days} dias de história`).join('; ')}.`,
+      `• Bitfinex (empréstimo de dólar): agora ${n.bfx ? pc(n.bfx.lastApr) + ' (pico recente ' + pc(n.bfx.hiApr) + ')' : '—'}. Papel US$500: sempre emprestado ${B.bfxPaper && B.bfxPaper.sempre ? pc(B.bfxPaper.sempre.aprRealized) + ' realizado' : '—'}; só nos picos (≥16%) ${B.bfxPaper && B.bfxPaper.picos ? pc(B.bfxPaper.picos.aprRealized) + ' realizado, ' + B.bfxPaper.picos.loans + ' empréstimos' : '—'}.`,
+      `Régua: CDB 100% CDI rende ${pc(B.bar && B.bar.cdbNetPct)} depois do IR; em dólar no exterior precisa de ${pc(B.bar && B.bar.usdGrossNeedPct)} bruto para empatar (sem contar o câmbio).`,
       `Papel: ${(B.paper.open || []).length} posições abertas, ${money(B.paper.lockedUsd)} travados.`].join('\n') }; }
   if (/placar|lastro|hist[oó]ric/.test(t)) { const S = c.simulacoes, Lm = S.lastro.margemHoraAHora || {}, Hp = S.lastro.precoHashVsAno || {};
     const ln = [`Placar das frentes (real e simulado):`, `• BCH solo, real: gasto ${money(c.dinheiroReal.gastoTotalUsd)}, ${c.dinheiroReal.blocos} blocos. Margem em 7 dias: média ${pc(c.bch.margem7d && c.bch.margem7d.media)}, positiva em ${c.bch.margem7d ? Math.round(c.bch.margem7d.positivaPctDoTempo) : '—'}% do tempo.`];

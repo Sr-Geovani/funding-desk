@@ -4,7 +4,11 @@
 // conta as oportunidades executáveis (já com custos) e simula em papel as que travam o retorno (base e PT).
 // Regra do projeto: nenhuma frente vira operação real por APR anunciado; só com histórico de lucro líquido repetido.
 export const LAB_RULES = { basisMinNetApr: 10, basisFeesPct: 0.3, pendleMinGapPp: 2, pendleMinLiqUsd: 1e6, borosMinGapPp: 5, borosMinOiUsd: 10000,
-  p2pMinNetPct: 0.8, paperUsd: 500, keepSeries: 3000 };
+  p2pMinNetPct: 0.8, paperUsd: 500, keepSeries: 3000,
+  // régua: CDB 100% CDI com IR de 17,5% (1 a 2 anos); rendimento em plataforma no exterior paga 15% de IR (Lei 14.754/2023)
+  cdbIrPct: 17.5, abroadIrPct: 15,
+  // Bitfinex: a corretora fica com 15% dos juros; papel B só empresta quando a taxa passa do que bate o CDB depois de taxa e IR
+  bfxFeePct: 15, bfxSpikeApr: 16, bfxDays: 2, boHistKeep: 900 };
 const STABLE = /usd|dai|gho|frax|usde|usdai|usdc|usdt|crvusd|lusd|pyusd/i;
 // stablecoins de primeira linha (emissor grande, histórico longo); o resto é "exótica": juros altos = prêmio de risco
 const BLUE = /^(s?usdc|s?usdt|s?dai|s?usds|s?gho|s?usde|pyusd|crvusd|s?frax|scrvusd|sdai|susde|usdc\.e)$/i;
@@ -58,7 +62,79 @@ function paperOpen(paper, key, kind, apr, days, now, exp, rules) {
   paper.open.push(o); return o;
 }
 
-export function labStep(prev, { now, deribit, p2p, boros, pendle, aaveApy, ptax, cdiPct, errs, rules = LAB_RULES }) {
+// Régua do CDI depois do imposto: quanto um rendimento em dólar precisa render (bruto) para empatar, sem contar o câmbio.
+export function cdiBar(cdiPct, rules = LAB_RULES) {
+  const cdi = cdiPct || 13.65, net = cdi * (1 - rules.cdbIrPct / 100);
+  return { cdiPct: cdi, cdbNetPct: +net.toFixed(2), usdGrossNeedPct: +(net / (1 - rules.abroadIrPct / 100)).toFixed(2) };
+}
+
+// Bitfinex (empréstimo de dólar): taxa do dia × 365. Ticker fUSD: [FRR, BID, BID_PERIOD, BID_SIZE, ASK, ASK_PERIOD, ASK_SIZE, ..., LAST(9)].
+export function bfxOf(tk, candles) {
+  if (!Array.isArray(tk) || !(tk[9] > 0)) return null;
+  const apr = (r) => +(r * 365 * 100).toFixed(2), hi = Array.isArray(candles) && candles.length ? Math.max(...candles.map((c) => c[3] || 0)) : null;
+  return { frrApr: apr(tk[0]), bidApr: apr(tk[1]), bidDays: tk[2], askApr: apr(tk[4]), lastApr: apr(tk[9]), hiApr: hi ? apr(hi) : null };
+}
+
+// Papel na Bitfinex com US$500: A = sempre emprestado a 2 dias na taxa negociada; B = oferta parada na taxa de pico (só é tomada
+// se a taxa negociada chegar nela); ninguém conta o juro antes de o empréstimo vencer. Taxa de 15% da corretora já descontada.
+function bfxPaperStep(Q, x, now, rules) {
+  const book = (k) => Q[k] || (Q[k] = { since: now, earnedUsd: 0, loans: 0, until: 0, apr: null, lentMs: 0, last: now });
+  const step = (k, take) => {
+    const b = book(k); if (b.until && b.until > b.last) b.lentMs += Math.min(now, b.until) - b.last; b.last = now;
+    if (b.until && now >= b.until && b.pendingUsd) { b.earnedUsd += b.pendingUsd; b.pendingUsd = 0; }
+    if (now >= b.until && x) { const r = take(); if (r) { b.apr = r.apr; b.until = now + r.days * 864e5; b.pendingUsd = rules.paperUsd * r.apr / 100 * r.days / 365 * (1 - rules.bfxFeePct / 100); b.loans++; return r; } }
+    return null;
+  };
+  step('sempre', () => ({ apr: x.lastApr, days: rules.bfxDays }));
+  return step('picos', () => (x.hiApr !== null && x.hiApr >= rules.bfxSpikeApr ? { apr: rules.bfxSpikeApr, days: rules.bfxDays } : null));
+}
+function bfxPaperSum(Q, now, rules) {
+  const o = {};
+  for (const [k, b] of Object.entries(Q || {})) { const yrs = Math.max(1 / 365, (now - b.since) / 365 / 864e5); o[k] = { earnedUsd: +b.earnedUsd.toFixed(2), loans: b.loans, aprRealized: +(b.earnedUsd / rules.paperUsd / yrs * 100).toFixed(2), lentPct: +(b.lentMs / Math.max(1, now - b.since) * 100).toFixed(0), days: +((now - b.since) / 864e5).toFixed(1), lentNow: b.until > now ? b.apr : null }; }
+  return o;
+}
+
+// Boros: guarda fixo e flutuante de hora em hora (BTC e ETH, mercados líquidos) para responder a pergunta certa:
+// o fixo de hoje erra o funding que acontece depois? flutuante médio realizado − fixo > 0: quem paga fixo ganhou; < 0: quem recebe fixo.
+function borosHistStep(H, BO, now, rules) {
+  H = H || {};
+  for (const b of BO.filter((x) => x.liquid && !x.spread && /BTC|ETH/i.test(x.sym))) {
+    const a = H[b.sym] || (H[b.sym] = []);
+    if (!a.length || now - a[a.length - 1][0] >= 3540e3) a.push([now, b.fixed, b.floating]);
+    if (a.length > rules.boHistKeep) a.splice(0, a.length - rules.boHistKeep);
+  }
+  for (const k of Object.keys(H)) if (!H[k].length || now - H[k][H[k].length - 1][0] > 3 * 864e5) delete H[k];
+  return H;
+}
+export function borosRealized(H, days) {
+  let n = 0, sum = 0, pay = 0; const by = {};
+  for (const [k, a] of Object.entries(H || {})) {
+    const pre = [0]; for (const r of a) pre.push(pre[pre.length - 1] + r[2]);
+    let kn = 0, ks = 0, j = 0;
+    for (let i = 0; i < a.length; i++) {
+      const end = a[i][0] + days * 864e5; if (a[a.length - 1][0] < end) break;
+      if (j < i + 1) j = i + 1; while (j < a.length && a[j][0] <= end) j++;
+      const c = j - (i + 1); if (c < days * 24 * 0.6) continue;
+      const d = (pre[j] - pre[i + 1]) / c - a[i][1]; kn++; ks += d; n++; sum += d; if (d > 0) pay++;
+    }
+    if (kn) by[k] = { n: kn, avgPp: +(ks / kn).toFixed(2) };
+  }
+  return { days, n, avgPp: n ? +(sum / n).toFixed(2) : null, payWinPct: n ? Math.round(pay / n * 100) : null, by };
+}
+
+// P2P como comerciante: compra USDT pelo anúncio de compra (bid) e revende depois pelo anúncio de venda (ask) h horas mais tarde.
+// Mede se o spread paga a variação do dólar no tempo do giro (sem contar golpe, devolução de Pix e o trabalho manual).
+export function p2pMerchant(series, hours) {
+  const S = (series || []).filter((r) => r[7] > 0 && r[8] > 0); let n = 0, sum = 0, win = 0, worst = null, j = 0;
+  for (let i = 0; i < S.length; i++) {
+    const target = S[i][0] + hours * 3600e3; if (j < i) j = i; while (j < S.length && S[j][0] < target) j++;
+    if (j >= S.length) break; if (S[j][0] - target > 1800e3) continue;
+    const r = (S[j][7] / S[i][8] - 1) * 100; n++; sum += r; if (r > 0) win++; if (worst === null || r < worst) worst = r;
+  }
+  return { hours, n, avgPct: n ? +(sum / n).toFixed(3) : null, winPct: n ? Math.round(win / n * 100) : null, worstPct: worst === null ? null : +worst.toFixed(3) };
+}
+
+export function labStep(prev, { now, deribit, p2p, boros, pendle, aaveApy, ptax, cdiPct, errs, bfx, bfxCandles, rules = LAB_RULES }) {
   const L = prev && prev.since ? JSON.parse(JSON.stringify(prev)) : { since: now, series: [], counts: {}, paper: { open: [], closed: [] } };
   const events = [];
   const B = basisOf(deribit, now, rules), P = p2p ? p2pOf(p2p.sell, p2p.buy, ptax) : null, BO = borosOf(boros, rules), PE = pendleOf(pendle || [], aaveApy, now, rules);
@@ -74,9 +150,14 @@ export function labStep(prev, { now, deribit, p2p, boros, pendle, aaveApy, ptax,
   for (const p of PEb.filter((x) => x.gapPp !== null && x.gapPp >= rules.pendleMinGapPp).sort((a, b) => b.apy - a.apy).slice(0, 2)) { const o = paperOpen(L.paper, 'pt:' + p.name + ':' + p.exp, 'PT ' + p.name, p.apy, p.days, now, p.exp, rules); if (o) events.push(`Laboratório (papel): PT ${p.name} travaria ${p.apy.toFixed(1).replace('.', ',')}% ao ano por ${p.days} dias (US$${o.lockedUsd.toFixed(2).replace('.', ',')} em US$500; Aave paga ${aaveApy !== null ? aaveApy.toFixed(1).replace('.', ',') : '—'}%${p.l1 ? '; na rede Ethereum o custo de transação pesa abaixo de ~US$5.000' : ''})`); }
   L.paper.open = L.paper.open.filter((o) => { if (now >= o.exp) { L.paper.closed.push(Object.assign(o, { end: now, resultUsd: o.lockedUsd })); events.push(`Laboratório (papel): ${o.kind} venceu: +US$${o.lockedUsd.toFixed(2).replace('.', ',')}`); return false; } return true; });
   L.paper.closed = L.paper.closed.slice(-50);
-  L.series.push([now, bBest ? bBest.netApr : null, P ? P.spreadPct : null, P ? P.premPtaxPct : null, boRecv ? boRecv.gapPp : null, peBest ? peBest.apy : null, aaveApy]);
+  L.boHist = borosHistStep(L.boHist, BO, now, rules);
+  const BX = bfxOf(bfx, bfxCandles); L.bfxPaper = L.bfxPaper || {};
+  const got = bfxPaperStep(L.bfxPaper, BX, now, rules);
+  if (got) events.push(`Laboratório (papel): Bitfinex emprestaria US$500 a ${got.apr.toFixed(1).replace('.', ',')}% ao ano por ${got.days} dias (pico da taxa; a média hoje é ${BX.lastApr.toFixed(1).replace('.', ',')}%)`);
+  c('bitfinexPico', BX && BX.hiApr !== null && BX.hiApr >= rules.bfxSpikeApr);
+  L.series.push([now, bBest ? bBest.netApr : null, P ? P.spreadPct : null, P ? P.premPtaxPct : null, boRecv ? boRecv.gapPp : null, peBest ? peBest.apy : null, aaveApy, P ? P.ask : null, P ? P.bid : null, BX ? BX.lastApr : null, BX ? BX.hiApr : null]);
   if (L.series.length > rules.keepSeries) L.series.splice(0, L.series.length - rules.keepSeries);
-  L.now = { at: now, basis: B.slice(0, 6), p2p: P, boros: BO.sort((a, b) => Math.abs(b.gapPp) - Math.abs(a.gapPp)).slice(0, 10), pendle: PE.slice(0, 8), aaveApy, cdiPct, errs: errs && Object.keys(errs).length ? errs : null,
+  L.now = { at: now, basis: B.slice(0, 6), p2p: P, boros: BO.sort((a, b) => Math.abs(b.gapPp) - Math.abs(a.gapPp)).slice(0, 10), pendle: PE.slice(0, 8), aaveApy, cdiPct, bar: cdiBar(cdiPct, rules), bfx: BX, errs: errs && Object.keys(errs).length ? errs : null,
     pendleRaw: (pendle || []).map(([c, j]) => c + ':' + (j && j.markets ? j.markets.length : 'vazio')).join(' ') };
   L.lastTs = now;
   return { lab: L, events };
@@ -90,6 +171,8 @@ export function labSummary(L) {
   const locked = (L.paper.open || []).reduce((a, o) => a + o.lockedUsd, 0) + (L.paper.closed || []).reduce((a, o) => a + (o.resultUsd || 0), 0);
   return { since: L.since, days: L.lastTs ? (L.lastTs - L.since) / 864e5 : 0, samples: S.length, now: L.now,
     avg: { basisNetApr: avg(1), p2pSpreadPct: avg(2), p2pPremPtaxPct: avg(3), borosGapPp: avg(4), pendleApy: avg(5), aaveApy: avg(6) },
-    hitPct: { basis: pct('basis'), p2p: pct('p2p'), borosRecebeFixo: pct('borosRecebeFixo'), borosPagaFixo: pct('borosPagaFixo'), pendle: pct('pendle') },
-    paper: { open: L.paper.open, closed: (L.paper.closed || []).slice(-10), lockedUsd: locked } };
+    hitPct: { basis: pct('basis'), p2p: pct('p2p'), borosRecebeFixo: pct('borosRecebeFixo'), borosPagaFixo: pct('borosPagaFixo'), pendle: pct('pendle'), bitfinexPico: pct('bitfinexPico') },
+    paper: { open: L.paper.open, closed: (L.paper.closed || []).slice(-10), lockedUsd: locked },
+    bar: cdiBar(L.now && L.now.cdiPct), avgBfx: { lastApr: avg(9), hiApr: avg(10) }, bfxPaper: bfxPaperSum(L.bfxPaper, L.lastTs || L.since, LAB_RULES),
+    borosRealized: [borosRealized(L.boHist, 7), borosRealized(L.boHist, 30)], p2pMerchant: [p2pMerchant(S, 1), p2pMerchant(S, 6)] };
 }

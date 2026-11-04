@@ -1394,13 +1394,14 @@ export default {
       // laboratório das novas frentes (base, P2P, Boros, Pendle PT): coleta pública, papel, sem capital
       try {
         const f = (u, o) => fetch(u, Object.assign({ headers: { accept: 'application/json', 'content-type': 'application/json', 'user-agent': 'funding-desk/1.0' } }, o || {})).then((x) => { if (!x.ok) throw new Error('HTTP ' + x.status); return x.json(); });
-        const errs = {}, names = ['deribitBTC', 'deribitETH', 'p2pVenda', 'p2pCompra', 'boros', 'pendleEthereum', 'pendleArbitrum', 'pendleBase'], S2 = (pr, i) => pr.then((v) => v, (e) => { errs[names[i]] = String((e && e.message) || e).slice(0, 80); return null; }), p2pq = (side) => f('https://api2.bybit.com/fiat/otc/item/online', { method: 'POST', body: JSON.stringify({ tokenId: 'USDT', currencyId: 'BRL', side, size: '20', page: '1', amount: '500', authMaker: true, canTrade: false }) });
-        const [db, de, ps, pb, bo, p1, p2, p3] = await Promise.all([f('https://www.deribit.com/api/v2/public/get_book_summary_by_currency?currency=BTC&kind=future'), f('https://www.deribit.com/api/v2/public/get_book_summary_by_currency?currency=ETH&kind=future'),
-          p2pq('1'), p2pq('0'), f('https://api.boros.finance/open-api/v1/markets'), f('https://api-v2.pendle.finance/core/v1/1/markets/active'), f('https://api-v2.pendle.finance/core/v1/42161/markets/active'), f('https://api-v2.pendle.finance/core/v1/8453/markets/active')].map(S2));
+        const errs = {}, names = ['deribitBTC', 'deribitETH', 'p2pVenda', 'p2pCompra', 'boros', 'pendleEthereum', 'pendleArbitrum', 'pendleBase', 'bitfinex', 'bitfinexVelas'], S2 = (pr, i) => pr.then((v) => v, (e) => { errs[names[i]] = String((e && e.message) || e).slice(0, 80); return null; }), p2pq = (side) => f('https://api2.bybit.com/fiat/otc/item/online', { method: 'POST', body: JSON.stringify({ tokenId: 'USDT', currencyId: 'BRL', side, size: '20', page: '1', amount: '500', authMaker: true, canTrade: false }) });
+        const [db, de, ps, pb, bo, p1, p2, p3, bx, bxc] = await Promise.all([f('https://www.deribit.com/api/v2/public/get_book_summary_by_currency?currency=BTC&kind=future'), f('https://www.deribit.com/api/v2/public/get_book_summary_by_currency?currency=ETH&kind=future'),
+          p2pq('1'), p2pq('0'), f('https://api.boros.finance/open-api/v1/markets'), f('https://api-v2.pendle.finance/core/v1/1/markets/active'), f('https://api-v2.pendle.finance/core/v1/42161/markets/active'), f('https://api-v2.pendle.finance/core/v1/8453/markets/active'),
+          f('https://api-pub.bitfinex.com/v2/ticker/fUSD'), f('https://api-pub.bitfinex.com/v2/candles/trade:15m:fUSD:a30:p2:p30/hist?limit=2')].map(S2));
         const y = (st.market2 && st.market2.yields) || {}, prevLab = await kvGet(e2, 'lab', null);
         const lr = labStep(prevLab, { now: Date.now(), deribit: [].concat((db && db.result) || [], (de && de.result) || []), p2p: ps && pb ? { sell: ps.result && ps.result.items, buy: pb.result && pb.result.items } : null,
           boros: bo, pendle: [['Ethereum', p1], ['Arbitrum', p2], ['Base', p3]], aaveApy: y.aaveUsdc && isFinite(y.aaveUsdc.apy) ? y.aaveUsdc.apy : null,
-          ptax: st.fronts && st.fronts.brl && st.fronts.brl.ptax, cdiPct: st.fronts && st.fronts.cdi, errs });
+          ptax: st.fronts && st.fronts.brl && st.fronts.brl.ptax, cdiPct: st.fronts && st.fronts.cdi, errs, bfx: bx, bfxCandles: bxc });
         await kvPut(e2, 'lab', lr.lab);
         for (const ev of lr.events) await notify(e2, ev);
       } catch (e) { await appendLog(e2, [{ t: Date.now(), kind: 'erro', text: 'laboratório: ' + (e.message || e) }]); }

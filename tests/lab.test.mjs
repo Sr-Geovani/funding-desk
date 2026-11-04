@@ -1,7 +1,7 @@
 // Testes do laboratório de novas frentes (base, P2P, Boros, Pendle PT). Rodar: node --test tests/
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { basisOf, p2pOf, borosOf, pendleOf, labStep, labSummary, LAB_RULES } from '../worker/src/lab.js';
+import { basisOf, p2pOf, borosOf, pendleOf, labStep, labSummary, LAB_RULES, cdiBar, bfxOf, borosRealized, p2pMerchant } from '../worker/src/lab.js';
 
 const T = Date.UTC(2026, 10, 4, 12);
 
@@ -64,4 +64,38 @@ test('laboratório: série limitada', () => {
   const rules = Object.assign({}, LAB_RULES, { keepSeries: 3 });
   for (let i = 0; i < 5; i++) L = labStep(L, { now: T + i * 900e3, aaveApy: 5, rules }).lab;
   assert.equal(L.series.length, 3); assert.equal(L.series[0][0], T + 2 * 900e3);
+});
+
+test('régua do CDI: CDB líquido de IR e quanto o dólar precisa render bruto para empatar', () => {
+  const b = cdiBar(13.65);
+  assert.equal(b.cdbNetPct, 11.26); assert.equal(b.usdGrossNeedPct, 13.25);
+});
+
+test('Bitfinex: taxa diária vira taxa ao ano; papel "picos" só empresta quando a taxa negociada chega na oferta', () => {
+  const tk = (last) => [0.0003, 0.00023, 120, 1, 0.000133, 3, 1, 0, 0, last];
+  const x = bfxOf(tk(0.000133), [[0, 0, 0, 0.00014, 0, 0]]);
+  assert.equal(x.lastApr, 4.85); assert.equal(x.hiApr, 5.11); assert.equal(x.bidDays, 120);
+  let L = labStep(null, { now: T, bfx: tk(0.000133), bfxCandles: [[0, 0, 0, 0.00014, 0, 0]], aaveApy: 5 }).lab;
+  assert.equal(L.bfxPaper.sempre.loans, 1); assert.equal(L.bfxPaper.picos.loans, 0);
+  const r = labStep(L, { now: T + 900e3, bfx: tk(0.0002), bfxCandles: [[0, 0, 0, 0.0005, 0, 0]], aaveApy: 5 }); L = r.lab; // pico de 18% ao ano
+  assert.equal(L.bfxPaper.picos.loans, 1); assert.equal(L.bfxPaper.picos.apr, 16); assert.match(r.events.join(' '), /Bitfinex/);
+  L = labStep(L, { now: T + 3 * 864e5, bfx: tk(0.000133), bfxCandles: [[0, 0, 0, 0.00014, 0, 0]], aaveApy: 5 }).lab;
+  const s = labSummary(L).bfxPaper;
+  assert.ok(Math.abs(s.picos.earnedUsd - 500 * 0.16 * 2 / 365 * 0.85) < 0.01, 'juro do pico só conta depois de vencer, já sem os 15% da corretora');
+  assert.ok(s.sempre.earnedUsd > 0);
+});
+
+test('Boros: compara o fixo de cada hora com o flutuante que aconteceu depois', () => {
+  const a = []; for (let h = 0; h <= 24 * 9; h++) a.push([T + h * 3600e3, 8, 11]); // fixo 8%, flutuante realizado 11%
+  const r = borosRealized({ 'BTC-X': a }, 7);
+  assert.ok(r.n > 40); assert.equal(r.avgPp, 3); assert.equal(r.payWinPct, 100);
+  assert.equal(borosRealized({ 'BTC-X': a.slice(0, 100) }, 7).n, 0, 'sem 7 dias de história depois, não conta');
+});
+
+test('P2P como comerciante: compra no bid e revende no ask h horas depois', () => {
+  const S = []; for (let i = 0; i < 40; i++) S.push([T + i * 900e3, 0, 0, 0, 0, 0, 0, 5.52 + (i % 2 ? 0.01 : 0), 5.49]);
+  const m = p2pMerchant(S, 1);
+  assert.ok(m.n >= 30); assert.equal(m.winPct, 100); assert.ok(m.avgPct > 0.5 && m.avgPct < 0.75);
+  const down = S.map((r, i) => [r[0], 0, 0, 0, 0, 0, 0, 5.52 - i * 0.01, 5.49 - i * 0.01]);
+  assert.ok(p2pMerchant(down, 6).avgPct < 0, 'dólar caindo no giro come o spread');
 });
