@@ -1415,18 +1415,18 @@ test('MODO_SNIPER: um tiro por ID de bloco, kill switch de 7 min, trava zera na 
   const X = 975600, tX = T - 16 * M;
   // bloco X atrasado (16 min > 15), margem ok: tiro
   let r = sniperDecide(null, { now: T, blockT: tX, blockId: X, edge: -6, cfg, diffDropPct: 0.2, feeX: 1 });
-  assert.equal(r.shot, true); assert.match(r.reason, /tiro no bloco 975600/);
+  assert.equal(r.shot, true); assert.match(r.reason, /tiro mirando o bloco 975601 \(o 975600 já saiu\)/);
   // 7 min sem bloco: kill switch; não atira de novo no mesmo bloco X
   let k = sniperDecide(r.state, { now: T + 7 * M, blockT: tX, blockId: X, edge: -6, cfg, diffDropPct: 2 });
   assert.equal(k.shot, false); assert.match(k.reason, /kill switch/);
   k = sniperDecide(k.state, { now: T + 10 * M, blockT: tX, blockId: X, edge: -6, cfg, diffDropPct: 2 });
-  assert.equal(k.shot, false); assert.match(k.reason, /já atirou no bloco 975600/);
+  assert.equal(k.shot, false); assert.match(k.reason, /já atirou mirando o bloco 975601/);
   // virada: nasce X+1 com dificuldade 1,2% abaixo da média: a trava zera e o tiro sai na hora
   const n = sniperDecide(k.state, { now: T + 12 * M, blockT: T + 11 * M, blockId: X + 1, edge: -6, cfg, diffDropPct: 1.2 });
-  assert.equal(n.shot, true); assert.match(n.reason, /tiro no bloco 975601/);
+  assert.equal(n.shot, true); assert.match(n.reason, /tiro mirando o bloco 975602/);
   // estilingue: tiro em andamento no bloco X+1, sai X+2 com gatilho ativo: recua e atira de novo no mesmo ciclo
   const e = sniperDecide(n.state, { now: T + 14 * M, blockT: T + 13 * M, blockId: X + 2, edge: -6, cfg, diffDropPct: 1.5 });
-  assert.equal(e.shot, true); assert.match(e.reason, /bloco novo na rede.*tiro no bloco 975602/); assert.equal(e.state.endsBlock, 1);
+  assert.equal(e.shot, true); assert.match(e.reason, /bloco novo na rede.*tiro mirando o bloco 975603/); assert.equal(e.state.endsBlock, 1);
   // virada sem gatilho: recua e fica em espera
   const w = sniperDecide(e.state, { now: T + 16 * M, blockT: T + 15 * M, blockId: X + 3, edge: -6, cfg, diffDropPct: 0.1 });
   assert.equal(w.shot, false); assert.match(w.reason, /bloco novo/);
@@ -1490,7 +1490,7 @@ test('integração: vigia de bloco do Sniper roda o ciclo na hora em que o bloco
     // o bloco nasce entre duas conferências: o ciclo roda na conferência seguinte, sem esperar os 3 min
     ms = 0; let n = 0;
     const r1 = await blockWatch(t.env, { clock, sleep: async (d) => { ms += d; if (++n === 2) await fetch(t.base + '/_mine', { method: 'POST', body: JSON.stringify({ address: 'qoutro' }) }); } });
-    assert.equal(r1.fired, true); assert.equal(r1.h, h0 + 1); assert.equal(r1.polls, 3);
+    assert.equal(r1.fired, true); assert.equal(r1.h, h0 + 1); assert.equal(r1.n, 1); assert.ok(r1.polls >= 3); // disparou na 3ª conferência e seguiu vigiando
     const st = JSON.parse(await t.env.FD_KV.get('state'));
     assert.equal(st.lastHeight, h0 + 1); assert.ok(st.lastTick >= tick0);
     assert.equal(st.sniper.endsBlock, 1, JSON.stringify(st.sniper)); // recuo pelo bloco novo já no ciclo disparado pelo vigia

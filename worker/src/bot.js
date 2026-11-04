@@ -170,6 +170,8 @@ export function sniperDecide(prev, { now, blockT, blockId = null, edge, cfg, dif
   const ageMin = cfg.sniperAgeMin === undefined ? 15 : cfg.sniperAgeMin, minE = cfg.sniperMinEdge === undefined ? -7 : cfg.sniperMinEdge;
   const dur = (cfg.sniperShotMin === undefined ? 7 : cfg.sniperShotMin) * 60e3, age = blockT ? (now - blockT) / 60e3 : null;
   let reason = null, endedByTime = false;
+  // o ID é a altura do ÚLTIMO bloco minerado; o tiro mira o bloco seguinte (altura + 1), que ainda não saiu
+  const tgt = typeof id === 'number' && id < 1e8 ? `o bloco ${id + 1} (o ${id} já saiu)` : `o próximo bloco`;
   if (s.shotStart) {
     if (id !== null && s.shotBlockId !== null && id !== s.shotBlockId) { s.shotStart = null; s.endsBlock++; s.lastEnd = { t: now, why: 'bloco' }; reason = 'sniper: bloco novo na rede, recuo para a potência de espera'; }
     else if (now - s.shotStart >= dur) { s.shotStart = null; s.usedBlockId = s.shotBlockId; s.endsTime++; s.lastEnd = { t: now, why: 'tempo' }; endedByTime = true; reason = `sniper: tiro de ${Math.round(dur / 60e3)} min sem bloco, recuo (kill switch); sem novo tiro neste bloco`; }
@@ -183,8 +185,8 @@ export function sniperDecide(prev, { now, blockT, blockId = null, edge, cfg, dif
     const which = [g.dif ? `dificuldade ${f1(diffDropPct)}% abaixo da média de 12 blocos (gatilho ${f1(dLim)}%)` : '', g.fee ? `mempool ${f1(feeX)} vezes a média do dia (gatilho ${f1(fLim)})` : '', g.age ? `último bloco há ${Math.round(age)} min (gatilho ${ageMin})` : ''].filter(Boolean);
     const okEdge = isFinite(edge) && edge >= minE, used = s.usedBlockId !== null && s.usedBlockId === id;
     // efeito estilingue: depois do recuo por bloco novo, o novo bloco pode receber o tiro no mesmo ciclo
-    if (which.length && okEdge && !used && !endedByTime) { s.shotStart = now; s.shotBlockId = id; s.shots++; s.shotWhy = ['dif', 'fee', 'age'].filter((k) => g[k]); s.shotEdge = edge; reason = (reason ? reason + '; ' : '') + `sniper: ${which.join(' e ')}; margem do tiro ${f1(edge)}% (limite ${f1(minE)}%): tiro no bloco ${id}`; }
-    else if (!reason) reason = which.length && used ? `sniper: já atirou no bloco ${id}; espera a virada para o próximo` : which.length && !okEdge ? `sniper: gatilho ativo (${which.join(' e ')}), mas margem ${isFinite(edge) ? f1(edge) : '—'}% abaixo do limite ${f1(minE)}%; em espera` :
+    if (which.length && okEdge && !used && !endedByTime) { s.shotStart = now; s.shotBlockId = id; s.shots++; s.shotWhy = ['dif', 'fee', 'age'].filter((k) => g[k]); s.shotEdge = edge; reason = (reason ? reason + '; ' : '') + `sniper: ${which.join(' e ')}; margem do tiro ${f1(edge)}% (limite ${f1(minE)}%): tiro mirando ${tgt}`; }
+    else if (!reason) reason = which.length && used ? `sniper: já atirou mirando ${tgt}; espera ele sair para o próximo tiro` : which.length && !okEdge ? `sniper: gatilho ativo (${which.join(' e ')}), mas margem ${isFinite(edge) ? f1(edge) : '—'}% abaixo do limite ${f1(minE)}%; em espera` :
       `sniper: em espera (dificuldade ${diffDropPct === null || !isFinite(diffDropPct) ? 'sem dado' : diffDropPct >= 0 ? f1(diffDropPct) + '% abaixo' : f1(-diffDropPct) + '% acima'} da média de 12 blocos, gatilho ${f1(dLim)}% abaixo; mempool ${feeX === null || !isFinite(feeX) ? 'juntando 2 h de leituras' : f1(feeX) + ' vezes a média'}, gatilho ${f1(fLim)} vezes${cfg.sniperUseAge ? `; último bloco há ${age === null ? '—' : Math.round(age)} min, gatilho ${ageMin}` : ''})`;
   }
   return { shot: !!s.shotStart, state: s, reason, ageMin: age, diffDropPct, feeX };
