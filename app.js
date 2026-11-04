@@ -1171,6 +1171,7 @@ function renderAI(){
   $('aibar_p').style.width=Math.round((A.progress||0)*100)+'%';
   // Fácil (persistência) acerta quase sempre: não vira "confiável", mostra só o acerto. Difícil: confiável com 20+ e 60%+.
   var conf=function(r){if(r.hard===false)return '<span class="chip">persistência · '+(r.n?'acerto '+pctp(r.rate*100,0)+' em '+r.n:'sem histórico')+'</span>';
+    if(r.blocked)return '<span class="chip bad">não recomendado · acerto '+Math.round((r.rate||0)*100)+'% em '+r.n+'</span>';
     return r.trusted?'<span class="chip ok">confiável · '+r.n+' conferidas</span>':'<span class="chip">em teste · '+(r.n||0)+' conferidas</span>'};
   var dueTxt=function(o){var ms=o.due-Date.now();return ms>0?'confere em '+FDI.dur(ms):'conferindo'};
   var h='<div class="row between"><div class="eyebrow">Copiloto IA</div><span class="chip">Nível '+A.level.n+' · '+esc(A.level.name)+'</span></div>'+
@@ -1314,6 +1315,7 @@ function renderLive(){
   var ordTxt=mine.length?'<span style="font-weight:600">'+nf(got,1)+'</span> de '+nf(lim,0)+' PH/s chegando · saldo da ordem '+avail.toFixed(6).replace('.',',')+' BTC'+(bu?' ('+usd(avail*bu)+')':''):'<span class="bad" style="font-weight:600">sem ordem aberta</span>';
   var balTxt=bal===null||bal===undefined?'—':bal.toFixed(6).replace('.',',')+' BTC'+(bu?' ('+usd(bal*bu)+')':'');
   var warn=!mine.length&&cfg.mode==='active'?(bal!==null&&bal<0.00101?'Sem saldo para abrir ordem: deposite pelo menos 0,00101 BTC na NiceHash.':!cfg.poolId?'Escolha o pool no Robô para o robô abrir ordem.':!cfg.autoCreate?'"Criar ordem sozinho" está desligado.':'O robô abre a ordem no próximo ciclo.'):'';
+  var planTxt=S.planOn?'<div class="note" style="margin-top:6px"><b>Plano para o saldo: aplicado</b> (ele definiu valor da ordem, stop-loss e limite diário; é diferente do Sniper, que decide quando entrar). <button class="sm" id="bp_undo">Desfazer o plano</button></div>':'';
   var btn=function(k,v,lab,on){return '<button class="sm'+(on?' pri':'')+'" data-qcfg="'+k+'" data-qv="'+v+'"'+(on?' aria-pressed="true"':'')+'>'+lab+'</button>'};
   var ctl='<div class="row" style="gap:6px;margin-top:8px;flex-wrap:wrap"><span class="note">Robô:</span>'+btn('mode','off','Desligado',cfg.mode==='off')+btn('mode','observe','Observar',cfg.mode==='observe')+btn('mode','active','Ativo',cfg.mode==='active')+
     '<span class="note" style="margin-left:6px">Sniper:</span>'+btn('sniper','1','Ligado',!!cfg.sniper)+btn('sniper','0','Desligado',!cfg.sniper)+'</div>';
@@ -1324,7 +1326,7 @@ function renderLive(){
     '<div class="box" style="margin:0"><small class="eyebrow">Ordem do robô</small><div>'+ordTxt+'</div></div></div>'+
     (warn?'<p class="note" style="margin:6px 0 0"><b class="warn">'+esc(warn)+'</b></p>':'')+
     (E&&Date.now()-E.t<6*3600e3?'<p class="note" style="margin:6px 0 0">'+hhmm(new Date(E.t))+' · '+esc(E.text)+'</p>':'')+
-    ctl+(L0?'<p class="note" style="margin:4px 0 0">Último tiro real: '+hhmm(new Date(L0.start))+' mirando o bloco '+(L0.h+1)+' · '+esc(L0.order||'')+' · recebeu até '+nf(L0.maxPH||0,1)+' de '+nf(L0.ph||0,0)+' PH/s · '+(L0.end?(L0.endWhy==='bloco'?'terminou com bloco novo':'terminou pelo prazo')+' em '+nf(L0.mins,1)+' min':'em andamento')+'</p>':'');
+    ctl+planTxt+(L0?'<p class="note" style="margin:4px 0 0">Último tiro real: '+hhmm(new Date(L0.start))+' mirando o bloco '+(L0.h+1)+' · '+esc(L0.order||'')+' · recebeu até '+nf(L0.maxPH||0,1)+' de '+nf(L0.ph||0,0)+' PH/s · '+(L0.end?(L0.endWhy==='bloco'?'terminou com bloco novo':'terminou pelo prazo')+' em '+nf(L0.mins,1)+' min':'em andamento')+'</p>':'');
 }
 document.addEventListener('click',function(e){var b=e.target.closest&&e.target.closest('[data-qcfg]');if(!b)return;
   var k=b.getAttribute('data-qcfg'),v=b.getAttribute('data-qv'),body={};body[k]=k==='sniper'?v==='1':v;
@@ -1470,8 +1472,10 @@ function renderBPlan(){
 document.addEventListener('click',function(e){
   var id=e.target.id;if(id!=='bp_go'&&id!=='bp_undo')return;
   if(id==='bp_go'&&!confirm('Aplicar o plano? O robô vai para Ativo com a regra relativa e pode gastar todo o valor da ordem.'))return;
+  if(id==='bp_undo'&&!confirm('Desfazer o Plano para o saldo e voltar à configuração de antes dele?'))return;
   var b=e.target;b.disabled=true;
-  apiCall('POST',id==='bp_go'?'/balanceplan/apply':'/balanceplan/undo',{}).then(function(){$('bp_msg').textContent='Feito. Atualizando…';loadOps()},function(er){b.disabled=false;$('bp_msg').textContent='Não deu: '+er.message});
+  var msg=function(t){var m=$('bp_msg');if(m)m.textContent=t;else if(/Não deu/.test(t))alert(t)};
+  apiCall('POST',id==='bp_go'?'/balanceplan/apply':'/balanceplan/undo',{}).then(function(){msg('Feito. Atualizando…');loadOps()},function(er){b.disabled=false;msg('Não deu: '+er.message)});
 });
 // Teste do robô: modo Ativo com limites mínimos, para ver na NiceHash real o robô criar, ajustar, parar no stop-loss e esperar.
 // Cartões dos testes (robô e calibração) podem ser ocultados: viram uma linha com o resumo. Fica salvo neste aparelho.

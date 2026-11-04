@@ -287,6 +287,10 @@ export function analysis(snap, ai) {
   if (ag.length) { out.push(`Outras moedas: ${ag.map((a) => a.label + ' ' + f(a.edge, 1) + '%').join(', ')} compensam em pool PPS (ordem manual).`); for (const a of ag.slice(0, 2)) recs.push({ area: 'outras', text: `${a.label}: ordem manual na NiceHash para pool PPS enquanto a margem ficar positiva.`, type: 'algo_go' }); }
   for (let i = 0; i < out.length; i++) out[i] = plain(out[i]);
   for (const r of recs) { r.text = plain(r.text); const rel = reliability(ai, r.type); r.conf = rel.conf; r.trusted = rel.trusted; r.n = rel.n; r.hard = !!TYPES[r.type].hard; r.rate = rel.n ? (ai.stats[r.type].hits / rel.n) : null; }
+  // Autocrítica: tipo de previsão com 8+ conferidas e acerto abaixo de 40% não vira recomendação; fica marcado com o placar.
+  for (const r of recs) if (r.n >= 8 && r.rate !== null && r.rate < 0.4) { r.blocked = true; r.text = plain(`Não recomendado pelo histórico (acertou ${Math.round(r.rate * 100)}% em ${r.n}): `) + r.text; }
+  const weak = Object.keys((ai && ai.stats) || {}).filter((k) => TYPES[k] && ai.stats[k].n >= 8 && ai.stats[k].hits / ai.stats[k].n < 0.4);
+  if (weak.length) out.push(plain(`Onde a IA ainda erra (não use como sinal): ${weak.map((k) => `${TYPES[k].label} (${ai.stats[k].hits} de ${ai.stats[k].n})`).join('; ')}.`));
   return { level: L, lines: out, recs };
 }
 
