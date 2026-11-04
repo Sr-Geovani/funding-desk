@@ -32,7 +32,7 @@ export function normAddr(a) {
   return String(a || '').trim().toLowerCase().replace(/^bitcoincash:/, '');
 }
 
-export const DEFAULT_HASKOIN = 'https://api.haskoin.com/bch';
+export const DEFAULT_HASKOIN = ['https://api.haskoin.com/bch', 'https://api.blockchain.info/haskoin-store/bch'];
 // Dificuldade a partir do campo "bits" do cabeçalho do bloco (alvo compacto).
 export function bitsToDifficulty(bits) {
   const exp = bits >>> 24, mant = bits & 0xffffff;
@@ -44,34 +44,40 @@ export function createChain({ base = DEFAULT_BCH_REST, haskoin = null, priceUrl 
     if (!r.ok) throw new Error('HTTP ' + r.status + ' em ' + u.replace(/\?.*/, ''));
     return r.json();
   }
+  const haskoinList = () => (Array.isArray(haskoin) ? haskoin : haskoin ? [haskoin] : []);
+  const srcName = (u) => (/blockchain\.info/.test(u) ? 'blockchain.com' : /haskoin\.com/.test(u) ? 'haskoin' : u.replace(/^https?:\/\//, '').split('/')[0]);
   return {
-    // Altura, dificuldade e horário do último bloco. A Haskoin vem primeiro: em 04/11 ela mostrou o bloco 975877
-    // ~2,5 min antes da ActorForth (que também deu HTTP 522 por horas). Se uma falhar, usa a outra.
+    // Altura, dificuldade e horário do último bloco. Pergunta ao mesmo tempo a todas as instâncias da Haskoin (pública e
+    // do blockchain.com) e fica com o bloco mais novo; a ActorForth fica de reserva (em 04/11 ela atrasou ~2,5 min e deu
+    // HTTP 522 por horas). `seen` traz a altura que cada fonte mostrou, para medir qual vê o bloco primeiro.
     info: async () => {
-      const fails = [];
-      if (haskoin) {
+      const fails = [], hs = haskoinList();
+      const got = await Promise.all(hs.map(async (u) => {
         try {
-          const b = await get(haskoin + '/block/best?notx=true');
-          if (b.height > 0 && b.bits) return { height: b.height, difficulty: bitsToDifficulty(b.bits), time: b.time * 1000, src: 'haskoin' };
-          fails.push('haskoin: sem dados');
-        } catch (e) { fails.push('haskoin: ' + (e.message || e)); }
-      }
+          const b = await get(u + '/block/best?notx=true');
+          if (b.height > 0 && b.bits) return { height: b.height, difficulty: bitsToDifficulty(b.bits), time: b.time * 1000, src: srcName(u) };
+          fails.push(srcName(u) + ': sem dados');
+        } catch (e) { fails.push(srcName(u) + ': ' + (e.message || e)); }
+        return null;
+      }));
+      const ok = got.filter(Boolean).sort((a, b) => b.height - a.height);
+      if (ok.length) return Object.assign({}, ok[0], { seen: Object.fromEntries(ok.map((x) => [x.src, x.height])) });
       try {
         const d = await get(base + '/blockchain/getBlockchainInfo');
-        return { height: d.blocks, difficulty: d.difficulty, src: 'actorforth' };
+        return { height: d.blocks, difficulty: d.difficulty, src: 'actorforth', seen: { actorforth: d.blocks } };
       } catch (e) { fails.push(e.message || String(e)); throw new Error(fails.join('; ')); }
     },
     mempool: async () => { const d = await get(base + '/blockchain/getMempoolInfo'); return { tx: d.size, bytes: d.bytes }; },
     // Quem recebeu a recompensa do bloco: saídas da transação coinbase.
     coinbase: async (height) => {
-      if (haskoin) {
+      for (const hk of haskoinList()) {
         try {
-          const a = await get(haskoin + '/block/height/' + height + '?notx=false'), b = Array.isArray(a) ? a[0] : a;
-          const tx = await get(haskoin + '/transaction/' + b.tx[0]);
+          const a = await get(hk + '/block/height/' + height + '?notx=false'), b = Array.isArray(a) ? a[0] : a;
+          const tx = await get(hk + '/transaction/' + b.tx[0]);
           const outs = (tx.outputs || []).map((o) => ({ value: (o.value || 0) / 1e8, addrs: o.address ? [normAddr(o.address)] : [] }));
           return { height, hash: b.hash, time: b.time * 1000, difficulty: bitsToDifficulty(b.bits), txid: b.tx[0], outs, size: b.size, txs: (b.tx || []).length,
             tag: tagFrom(tx.inputs && tx.inputs[0] && tx.inputs[0].sigscript) };
-        } catch (e) { /* cai para a ActorForth */ }
+        } catch (e) { /* tenta a próxima instância e depois a ActorForth */ }
       }
       const b = await get(base + '/block/detailsByHeight/' + height);
       const tx = await get(base + '/transaction/details/' + b.tx[0]);

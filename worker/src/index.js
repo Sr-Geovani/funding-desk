@@ -100,7 +100,7 @@ function nhClient(env, fetchFn) {
   return createClient({ base, key: env.NH_API_KEY, secret: env.NH_API_SECRET, org: env.NH_ORG_ID, algorithm: env.NH_ALGO || DEFAULT_ALGO, fetchFn: fetchFn || fetch });
 }
 function chainClient(env, fetchFn) {
-  return createChain({ base: env.BCH_REST || DEFAULT_BCH_REST, haskoin: env.HASKOIN_URL === 'off' ? null : (env.HASKOIN_URL || (env.BCH_REST ? null : DEFAULT_HASKOIN)), priceUrl: env.PRICE_URL || DEFAULT_PRICE_URL, fetchFn: fetchFn || fetch });
+  return createChain({ base: env.BCH_REST || DEFAULT_BCH_REST, haskoin: env.HASKOIN_URL === 'off' ? null : (env.HASKOIN_URL ? env.HASKOIN_URL.split(',') : (env.BCH_REST ? null : DEFAULT_HASKOIN)), priceUrl: env.PRICE_URL || DEFAULT_PRICE_URL, fetchFn: fetchFn || fetch });
 }
 function hasKeys(env) { return !!(env.NH_API_KEY && env.NH_API_SECRET && env.NH_ORG_ID); }
 
@@ -1085,6 +1085,16 @@ export async function blockWatch(env, opts = {}) {
       if (lock.ev !== ev) { await run({ ev, evAt: clock() }); last = { ev }; continue; }
     }
     const r = await settle(chain.info()); polls++;
+    if (r.ok && r.v.seen) { // registra a primeira vez que cada fonte mostrou cada bloco (lastro de qual é a mais rápida)
+      const w = await kvGet(env, 'watch', {}), race = w.race && w.race.h >= r.v.height - 1 ? w.race : { h: r.v.height, first: {} };
+      let ch = false;
+      for (const [src, h] of Object.entries(r.v.seen)) if (h > (race.h || 0) || (h === race.h && !race.first[src])) {
+        if (h > race.h) { race.h = h; race.first = {}; race.blockT = null; }
+        race.first[src] = clock(); ch = true;
+      }
+      if (r.v.time && r.v.height === race.h) race.blockT = r.v.time;
+      if (ch) await kvPut(env, 'watch', Object.assign(w, { race }));
+    }
     if (r.ok && r.v.height > known) {
       seen = r.v.height;
       const lock = await kvGet(env, 'watch', {}); // outra execução já disparou este bloco: não repete

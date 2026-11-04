@@ -700,7 +700,20 @@ setInterval(function(){if(document.visibilityState==='visible')freshen()},30000)
 // Quando nasce um bloco, mostra na hora e atualiza o resto (servidor, rede e registro de blocos) logo em seguida.
 // Se o fluxo cair, confere o último bloco a cada 20 s. Só leitura de dados públicos.
 var tipLive={h:0,t:0,seenAt:0,mode:''},tipCtl=null,tipRetry=5000,tipPollT=null;
-function tipBest(){return fetch('https://api.haskoin.com/bch/block/best?notx=true',{cache:'no-store'}).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json()})}
+var TIP_SRC=['https://api.haskoin.com/bch','https://api.blockchain.info/haskoin-store/bch'];
+function tipGet(u){return fetch(u,{cache:'no-store'}).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json()})}
+// pergunta às duas instâncias da Haskoin ao mesmo tempo e fica com o bloco mais novo
+function tipBest(){return Promise.all(TIP_SRC.map(function(u){return tipGet(u+'/block/best?notx=true').then(function(b){b._src=u;return b},function(){return null})})).then(function(a){a=a.filter(Boolean).sort(function(x,y){return y.height-x.height});if(!a.length)throw new Error('sem fonte');return a[0]})}
+// coloca o bloco novo no topo da lista de blocos na hora (provisório até o servidor gravar o contexto dele)
+function tipAddBlock(b){
+  var base=b._src||TIP_SRC[0];
+  tipGet(base+'/block/height/'+b.height+'?notx=false').then(function(a){var x=Array.isArray(a)?a[0]:a;return tipGet(base+'/transaction/'+x.tx[0]).then(function(tx){return [x,tx]})}).then(function(r){
+    var x=r[0],tx=r[1],tag=FDM.coinbaseTag(tx.inputs&&tx.inputs[0]&&tx.inputs[0].sigscript),rw=(tx.outputs||[]).reduce(function(a,o){return a+(o.value||0)},0)/1e8;
+    var e=(x.bits>>>24),m=x.bits&0xffffff,D=(0xffff*Math.pow(256,0x1d-3))/(m*Math.pow(256,e-3)),p=/\/([^/]{3,30})\//.exec(tag),prev=blk.list[0];
+    if(!blk.list.some(function(z){return z.h===x.height})){blk.list.unshift({h:x.height,t:x.time*1000,dt:prev&&prev.h===x.height-1?Math.round((x.time*1000-prev.t)/1000):null,pool:p?p[1].trim():(tag||'desconhecido').slice(0,24),solo:/solo/i.test(tag),tag:tag,reward:rw,fees:Math.max(0,rw-3.125),txs:(x.tx||[]).length,size:x.size,D:D,netPH:Math.round(D*4294967296/600/1e15),live:true});try{renderBlocksLog()}catch(er){}}
+    if(!mine.blocks.some(function(z){return z.height===x.height})){mine.blocks.unshift({height:x.height,time:x.time*1000,difficulty:D,tag:tag,txs:(x.tx||[]).length,size:x.size});try{renderNetCard();renderMine()}catch(er){}}
+  }).catch(function(){});
+}
 function tipCheck(){
   return tipBest().then(function(b){
     if(!(b&&b.height>0))return;
@@ -716,6 +729,7 @@ function tipNew(b){
   el.innerHTML='<b>Bloco '+b.height+' minerado agora</b> <span class="note">(horário do bloco há '+(lag<90?lag+' s':nf(lag/60,0)+' min')+')</span><br><span class="note">Atualizando servidor, rede e Sniper…</span>';el.hidden=false;
   clearTimeout(el._t);el._t=setTimeout(function(){el.hidden=true},12000);
   try{renderNetCard();renderMine()}catch(e){}
+  tipAddBlock(b);
   // o servidor roda a decisão do Sniper pelo vigia dele; o painel busca de novo para mostrar o resultado
   [6000,20000,45000].forEach(function(ms){setTimeout(function(){if(settings.apiUrl)loadOps()},ms)});
   setTimeout(loadMining,4000);
@@ -738,7 +752,7 @@ function tipStream(){
     if(document.visibilityState==='visible'){setTimeout(tipStream,tipRetry);tipRetry=Math.min(60000,tipRetry*2)}
   });
 }
-function tipStart(){tipCheck();tipStream();if(!tipPollT)tipPollT=setInterval(function(){if(document.visibilityState==='visible'&&tipLive.mode!=='ao vivo')tipCheck()},20000)}
+function tipStart(){tipCheck();tipStream();if(!tipPollT)tipPollT=setInterval(function(){if(document.visibilityState==='visible')tipCheck()},10000)}
 document.addEventListener('visibilitychange',function(){if(document.visibilityState==='visible')tipStart();else if(tipCtl){tipCtl.abort();tipCtl=null}});
 function freshen(){
   var now=Date.now(),opsTab=!$('mine-ops').hidden&&!$('tab-mine').hidden;
@@ -1112,10 +1126,10 @@ function renderEntry(){
   var SNc=ops.status.config||{},SNs=ops.status.state.sniper||{},PS=ops.status.state.paperSniper||{},lbt=ops.status.state.lastBlockT;
   // mesma fonte do cartão da Rede: o bloco mais recente entre o Blockchair (lido pelo celular) e o servidor
   var Lv=null;try{Lv=live()}catch(e){}var cbt=Lv&&Lv.st&&Lv.st.last?Lv.st.last.time:0,newest=Math.max(lbt||0,cbt||0,tipLive.t||0)||null,sAge=newest?(Date.now()-newest)/60e3:null;
-  var srvAge=lbt?(Date.now()-lbt)/60e3:null,lagNote=newest&&lbt&&newest>lbt+60e3?'O servidor ainda não viu o bloco mais novo: a decisão do ciclo usou o bloco de '+nf(srvAge,0)+' min atrás.':'',WT=ops.status.watch||null,watchNote=WT&&WT.firedAt?'Vigia de bloco: confere a rede a cada '+nf((WT.every||6e3)/1e3,0)+' s entre os ciclos e decide na hora em que o bloco vira (último disparo: bloco '+WT.firedH+' às '+hhmm(new Date(WT.firedAt))+'). ':'Vigia de bloco: confere a rede a cada 6 s entre os ciclos e decide na hora em que o bloco vira. ',tickAt=ops.status.state.lastTick;
+  var srvAge=lbt?(Date.now()-lbt)/60e3:null,lagNote=newest&&lbt&&newest>lbt+60e3?'O servidor ainda não viu o bloco mais novo: a decisão do ciclo usou o bloco de '+nf(srvAge,0)+' min atrás.':'',WT=ops.status.watch||null,watchNote=WT&&WT.firedAt?'Vigia de bloco: confere a rede a cada '+nf((WT.every||6e3)/1e3,0)+' s entre os ciclos e decide na hora em que o bloco vira (último disparo: bloco '+WT.firedH+' às '+hhmm(new Date(WT.firedAt))+'). ':'Vigia de bloco: confere a rede a cada 6 s entre os ciclos e decide na hora em que o bloco vira. ',raceNote=(function(R){if(!R||!R.first)return '';var ks=Object.keys(R.first).sort(function(a,b){return R.first[a]-R.first[b]});return ks.length?'Quem mostrou o bloco '+R.h+' primeiro: '+ks.map(function(k){var d=R.blockT?Math.round((R.first[k]-R.blockT)/1000):null;return k+' às '+new Date(R.first[k]).toLocaleTimeString('pt-BR')+(d!==null?' ('+(d<90?d+' s':nf(d/60,1)+' min')+' após o horário do bloco)':'')}).join('; ')+'. ':''})(WT&&WT.race),tickAt=ops.status.state.lastTick;
   var snHTML=SNc.sniper?'<div class="box" style="margin:0 0 8px"><b>Modo Sniper '+(SNc.mode==='active'?'ligado (robô em Ativo)':'ligado (robô em Observar: só simula)')+'</b>'+
     (function(){var I=ops.status.state.snInfo||{},bch=(ops.status.state.market||{}).bchUsd||0;return '<div class="kv" style="margin-top:4px"><div><small>Dificuldade do bloco em mineração × média de 12</small><span class="'+(I.diffDropPct!==null&&I.diffDropPct>=(SNc.sniperDiffDropPct||0.5)?'warn':'')+'">'+(I.diffDropPct!==null&&I.diffDropPct!==undefined?(I.diffDropPct>=0?nf(I.diffDropPct,2)+'% abaixo':nf(-I.diffDropPct,2)+'% acima'):'—')+'</span><div class="note">gatilho: '+nf(SNc.sniperDiffDropPct||10,1)+'% abaixo</div></div><div><small>Mempool × média do dia</small><span class="'+(I.feeX>=(SNc.sniperFeeX||3)?'warn':'')+'">'+(I.feeX?nf(I.feeX,1)+' vezes':'—')+'</span><div class="note">gatilho: '+nf(SNc.sniperFeeX||3,1)+' vezes · '+(I.mpBytes!==null&&I.mpBytes!==undefined?nf(I.mpBytes/1000,1)+' KB, taxas de ~'+usd((I.feeBchMin||0)*bch,2):'—')+'</div></div></div>'})()+'<div class="kv" style="margin-top:4px"><div><small>Último bloco há</small><span class="'+(sAge!==null&&sAge>(SNc.sniperAgeMin||20)?'warn':'')+'">'+(sAge!==null?nf(sAge,0)+' min':'—')+'</span></div><div><small>Gatilho</small><span>'+nf(SNc.sniperAgeMin||20,0)+' min · margem a partir de '+pct(SNc.sniperMinEdge===undefined?-7:SNc.sniperMinEdge,1)+'</span></div><div><small>Agora</small><span>'+((SNs.shotStart||PS.shot)?'<b class="warn">tiro: '+nf(SNc.sniperPh||25,0)+' PH/s</b>':'espera: '+nf(SNc.sniperIdlePh===undefined?1:SNc.sniperIdlePh,0)+' PH/s')+'</span></div></div>'+
-    '<div class="note" style="margin-top:4px">'+(lagNote?'<b class="warn">'+lagNote+'</b> ':'')+watchNote+'Decisão do último ciclo do servidor ('+(tickAt?hhmm(new Date(tickAt)):'—')+'): '+esc(PS.reason||'')+'. Tiros: '+((SNs.shots||(PS.sn&&PS.sn.shots))||0)+' (encerrados por bloco '+((SNs.endsBlock||(PS.sn&&PS.sn.endsBlock))||0)+', por prazo '+((SNs.endsTime||(PS.sn&&PS.sn.endsTime))||0)+'). A cartilha abaixo continua mostrando a leitura por margem, que fica de lado enquanto o Sniper estiver ligado.</div>'+snLogHTML(ops.status.state.snLog)+'</div>':'';
+    '<div class="note" style="margin-top:4px">'+(lagNote?'<b class="warn">'+lagNote+'</b> ':'')+watchNote+raceNote+'Decisão do último ciclo do servidor ('+(tickAt?hhmm(new Date(tickAt)):'—')+'): '+esc(PS.reason||'')+'. Tiros: '+((SNs.shots||(PS.sn&&PS.sn.shots))||0)+' (encerrados por bloco '+((SNs.endsBlock||(PS.sn&&PS.sn.endsBlock))||0)+', por prazo '+((SNs.endsTime||(PS.sn&&PS.sn.endsTime))||0)+'). A cartilha abaixo continua mostrando a leitura por margem, que fica de lado enquanto o Sniper estiver ligado.</div>'+snLogHTML(ops.status.state.snLog)+'</div>':'';
   el.innerHTML=snHTML+(stale?'<div class="box" style="margin:0 0 8px"><b class="warn">Configuração alterada</b>A cartilha e o copiloto são recalculados pelo servidor a cada 3 min: os textos abaixo ainda usam a regra anterior e se atualizam no próximo ciclo.</div>':'')+(rtOn?'<div class="box" style="margin:0 0 8px"><b class="warn">Teste do robô em andamento</b>A margem mínima está temporariamente em −5% para o teste; por isso o veredito pode dizer "Entrar" com margem negativa. Ele volta à sua regra quando o teste terminar.</div>':'')+'<div class="row between"><div class="eyebrow">Cartilha de entrada · '+E.okCount+' de '+E.scored+' a favor</div><span class="chip '+V[0]+'">'+V[1]+'</span></div>'+
     '<div class="lead">'+esc(E.title)+'</div><p class="why" style="margin:0 0 8px">'+esc(E.text)+'</p>'+
     ctx24HTML(E)+
@@ -1255,7 +1269,7 @@ var blk={list:[],sum:null,at:0,err:null};
 function loadBlocksLog(force){
   if(!settings.apiUrl){renderBlocksLog();return}
   if(!force&&Date.now()-blk.at<120000){renderBlocksLog();return}
-  apiCall('GET','/blocks').then(function(r){blk.list=r.blocks||[];blk.sum=r.summary;blk.snFreq=r.snFreq||null;blk.luck=r.luck||null;renderLuck();blk.at=Date.now();blk.err=null;renderBlocksLog()},function(e){blk.err=e.message;renderBlocksLog()});
+  apiCall('GET','/blocks').then(function(r){var sv=r.blocks||[],top=sv.length?sv[0].h:0;blk.list=blk.list.filter(function(z){return z.live&&z.h>top}).concat(sv);blk.sum=r.summary;blk.snFreq=r.snFreq||null;blk.luck=r.luck||null;renderLuck();blk.at=Date.now();blk.err=null;renderBlocksLog()},function(e){blk.err=e.message;renderBlocksLog()});
 }
 function hhU(t){return hhmm(t)+' ('+utcHM(t)+' UTC)'}
 // Placar da sorte: quem estivesse ligado o tempo todo com X PH/s, quantos blocos teria achado e com qual resultado;
@@ -1301,7 +1315,7 @@ function renderBlocksLog(){
   $('bl_msg').textContent='Mais novo primeiro. Toque num bloco para ver o contexto daquele momento.';
   $('bl_list').innerHTML='<div class="stack" style="gap:0">'+L.slice(0,40).map(function(b){
     var gap=b.dt===null||b.dt===undefined?'':(b.dt<60?'<1 min':FDI.dur(b.dt*1000));
-    var head='<b class="mono">'+b.h+'</b> <span class="note">'+hhmm(b.t)+'</span> · <b>'+esc(b.pool)+'</b>'+(b.solo?' <span class="chip ok">solo</span>':'')+(b.mine?' <span class="chip ok">seu</span>':'')+(b.dd!==undefined&&b.dd!==null&&b.dd>=snLim()?' <span class="chip warn">gatilho Sniper</span>':'')+(b.simWon?' <span class="chip ok">seria seu</span>':'')+
+    var head='<b class="mono">'+b.h+'</b> <span class="note">'+hhmm(b.t)+'</span> · <b>'+esc(b.pool)+'</b>'+(b.solo?' <span class="chip ok">solo</span>':'')+(b.mine?' <span class="chip ok">seu</span>':'')+(b.live?' <span class="chip">ao vivo · contexto em instantes</span>':'')+(b.dd!==undefined&&b.dd!==null&&b.dd>=snLim()?' <span class="chip warn">gatilho Sniper</span>':'')+(b.simWon?' <span class="chip ok">seria seu</span>':'')+
       (gap?' <span class="note">· '+gap+(b.dt>1800?' <span class="warn">(lento)</span>':'')+'</span>':'');
     var line=(b.txs?b.txs+' tx · ':'')+(b.size?nf(b.size/1000,1)+' KB · ':'')+(isFinite(b.reward)?b.reward.toFixed(4).replace('.',',')+' BCH':'—')+(b.usd?' ('+usd(b.usd,0)+')':'')+(b.edge!==undefined&&b.edge!==null?' · margem '+pct(b.edge,1):'')+(b.dd!==undefined&&b.dd!==null?' · dificuldade seguinte '+(b.dd>=0?nf(b.dd,2)+'% abaixo':nf(-b.dd,2)+'% acima')+' da média':'');
     var det=['Hora: '+dt2(b.t),'Taxas das transações: '+(+b.fees||0).toFixed(5).replace('.',',')+' BCH'+(b.poolFeePct!==null&&b.poolFeePct!==undefined?' · fatia do pool: '+nf(b.poolFeePct,1)+'%':''),

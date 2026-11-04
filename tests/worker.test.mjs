@@ -1542,7 +1542,11 @@ test('04/11: fonte de reserva da rede, pool não some ao salvar vazio e Sniper s
   const fetchFn = async (u) => (String(u).startsWith('https://p/') ? new Response('erro', { status: 522 }) : new Response(JSON.stringify({ height: 975876, bits: 402795778, time: 1793785448 })));
   const ch = createChain({ base: 'https://p', haskoin: 'https://r', fetchFn });
   const i = await ch.info();
-  assert.equal(i.height, 975876); assert.equal(i.src, 'haskoin'); assert.equal(i.time, 1793785448000);
+  assert.equal(i.height, 975876); assert.equal(i.src, 'r'); assert.equal(i.time, 1793785448000);
+  // duas instâncias da Haskoin: fica com a que já mostra o bloco mais novo e registra o que cada uma viu
+  const f3 = async (u) => new Response(JSON.stringify({ height: String(u).includes('api.haskoin.com') ? 975881 : 975882, bits: 402795778, time: 1793790182 }));
+  const i3 = await createChain({ base: 'https://p', haskoin: ['https://api.haskoin.com/bch', 'https://api.blockchain.info/haskoin-store/bch'], fetchFn: f3 }).info();
+  assert.equal(i3.height, 975882); assert.equal(i3.src, 'blockchain.com'); assert.deepEqual(i3.seen, { 'blockchain.com': 975882, haskoin: 975881 });
   // Haskoin fora: usa a ActorForth
   const f2 = async (u) => (String(u).startsWith('https://r/') ? new Response('x', { status: 500 }) : new Response(JSON.stringify({ blocks: 975876, difficulty: 5e11 })));
   const i2 = await createChain({ base: 'https://p', haskoin: 'https://r', fetchFn: f2 }).info();
