@@ -1818,33 +1818,51 @@ function renderBrain(){
     {k:'Funding',c:fp&&fp.netUsd>0?'g':'b',on:!!(S.fundPaper&&S.fundPaper.open&&S.fundPaper.open.length),v:fp?usd(fp.netUsd):'—'},
     {k:'Rendimentos',c:yBest>=12?'g':yBest>0?'w':'n',on:true,v:yBest?pct(yBest,1)+' a.a.':'—'},
     {k:'Copiloto',c:weak?'w':'g',on:true,v:ai.rate?pctp(ai.rate*100,0)+' acerto':'—'}];
-  var cx=160,cy=110,R=82,svg='<svg viewBox="0 -4 320 240" role="img" aria-label="Cérebro do Jarbas: estado de cada frente">'+
-    '<circle class="ring" cx="160" cy="110" r="38" fill="none" stroke="var(--line,#9994)" stroke-width="1.5" stroke-dasharray="3 7"/>'+
-    '<circle class="ring2" cx="160" cy="110" r="48" fill="none" stroke="var(--line,#9993)" stroke-width="1" stroke-dasharray="1 9"/>';
-  N.forEach(function(n,i){var a=-Math.PI/2+i*2*Math.PI/N.length,x=cx+R*1.55*Math.cos(a),y=cy+R*Math.sin(a);n.x=x;n.y=y;
-    svg+='<line x1="'+cx+'" y1="'+cy+'" x2="'+x.toFixed(1)+'" y2="'+y.toFixed(1)+'" stroke="'+C(n.c)+'" stroke-width="1.6" class="'+(n.on?'flow':'idle')+'"/>'});
-  svg+='<g class="core"><circle cx="160" cy="110" r="26" fill="var(--panel2,#2224)" stroke="var(--acc,#b5e655)" stroke-width="2"/><text x="160" y="114" text-anchor="middle" font-size="11" font-weight="700" fill="currentColor">Jarbas</text></g>';
-  N.forEach(function(n){svg+='<g'+(n.on?' class="pulse"':'')+'><circle cx="'+n.x.toFixed(1)+'" cy="'+n.y.toFixed(1)+'" r="9" fill="'+C(n.c)+'"/></g>'+
-    '<text x="'+n.x.toFixed(1)+'" y="'+(n.y+(n.y<cy?-14:22)).toFixed(1)+'" text-anchor="middle" font-size="9.5" fill="currentColor">'+n.k+'</text>'+
-    '<text x="'+n.x.toFixed(1)+'" y="'+(n.y+(n.y<cy?-4:32)).toFixed(1)+'" text-anchor="middle" font-size="8.5" fill="currentColor" opacity=".7">'+n.v+'</text>'});
+  // desenho do cérebro (vista lateral): contorno, sulcos, neurônios que disparam e sinapses correndo; cada frente é uma
+  // região ligada ao núcleo, com a cor do estado (linha correndo = frente ativa)
+  var NEU=[[95,70],[120,52],[150,44],[180,40],[210,46],[238,62],[255,88],[88,100],[118,88],[148,76],[178,72],[208,80],[234,98],[100,130],[130,118],[160,108],[192,110],[222,126],[248,128],[120,150],[155,142],[188,146],[218,152]];
+  var SYN=[[0,1],[1,2],[2,3],[3,4],[4,5],[5,6],[0,7],[7,8],[8,9],[9,10],[10,11],[11,12],[12,6],[1,8],[2,9],[3,10],[4,11],[7,13],[13,14],[14,15],[15,16],[16,17],[17,18],[12,18],[8,14],[9,15],[10,16],[11,17],[13,19],[19,20],[20,21],[21,22],[14,20],[15,20],[16,21],[17,22],[18,22]];
+  var REG=[{n:2,lx:150,ly:14,a:'middle'},{n:5,lx:300,ly:52,a:'end'},{n:12,lx:308,ly:112,a:'end'},{n:22,lx:290,ly:196,a:'end'},{n:19,lx:40,ly:196,a:'start'},{n:7,lx:12,ly:96,a:'start'}];
+  var svg='<svg viewBox="0 0 320 210" role="img" aria-label="Cérebro do Jarbas: estado de cada frente">'+
+    '<path class="shell" d="M62,118 C42,92 54,52 90,42 C106,22 146,16 166,28 C188,14 232,20 246,44 C276,50 290,82 274,106 C288,128 270,160 244,162 C232,180 202,184 186,170 C170,184 136,184 120,170 C96,180 66,166 70,146 C54,140 52,128 62,118 Z"/>'+
+    '<path class="gyri" d="M90,62 C110,72 130,58 150,66 M170,50 C190,64 214,52 230,70 M84,96 C104,90 120,104 140,94 C160,84 176,98 196,92 C216,86 232,100 252,94 M92,128 C112,120 132,134 152,124 C172,116 192,130 214,122 C232,116 246,128 262,122 M118,154 C138,146 158,158 178,150 C196,144 212,154 228,148"/>'+
+    '<path class="gyri" d="M238,164 C250,176 270,176 278,164 M196,172 C198,186 206,196 214,200"/>';
+  SYN.forEach(function(e,k){var a=NEU[e[0]],b=NEU[e[1]];svg+='<line class="syn" x1="'+a[0]+'" y1="'+a[1]+'" x2="'+b[0]+'" y2="'+b[1]+'" stroke="var(--acc,#b5e655)" stroke-width="1" style="animation-delay:-'+((k*0.37)%1.8).toFixed(2)+'s"/>'});
+  N.forEach(function(n,i){var r=REG[i],q=NEU[r.n];svg+='<line x1="'+q[0]+'" y1="'+q[1]+'" x2="'+r.lx+'" y2="'+(r.ly-4)+'" stroke="'+C(n.c)+'" stroke-width="1.4" class="'+(n.on?'flow':'idle')+'"/>'+
+    '<circle cx="'+q[0]+'" cy="'+q[1]+'" r="5.5" fill="'+C(n.c)+'"'+(n.on?' class="pulse"':'')+'/>'+
+    '<text x="'+r.lx+'" y="'+r.ly+'" text-anchor="'+r.a+'" font-size="9.5" font-weight="600" fill="currentColor">'+n.k+'</text><text x="'+r.lx+'" y="'+(r.ly+10)+'" text-anchor="'+r.a+'" font-size="8.5" fill="currentColor" opacity=".7">'+n.v+'</text>'});
+  NEU.forEach(function(q,k){svg+='<circle class="neu" cx="'+q[0]+'" cy="'+q[1]+'" r="2.4" fill="var(--acc,#b5e655)" style="animation-delay:-'+((k*0.61)%2.6).toFixed(2)+'s"/>'});
   svg+='</svg>';
+  // o que ele está "pensando": uma frase por frente, girando a cada 4 s
+  var TH=[];
+  TH.push(isFinite(m.edgeAtBidPct)?'Olhando o BCH: margem '+pct(m.edgeAtBidPct,1)+(m.edgeAtBidPct>=0?'. Janela aberta, rara.':'. Cada US$100 de aluguel voltam ~US$'+nf(100+m.edgeAtBidPct,0)+': não compensa.'):'Esperando o preço do aluguel do BCH.');
+  if(ppsBest)TH.push('Varrendo '+AM.length+' algoritmos: o melhor agora é '+ppsBest.label+' ('+(ppsBest.coins||[]).join('+')+') com '+pct(ppsBest.edgePct,1)+(ppsBest.thin?', mas o mercado é pequeno demais para comprar.':ppsBest.edgePct>=enter?'. Entrando na simulação.':'. Entra a partir de '+pct(enter,0)+'.'));
+  if(X)TH.push('Monero como real: '+(X.resultUsd>=0?'+':'')+usd(X.resultUsd||0)+' até agora, '+(X.on?'minerando.':'esperando a margem passar de '+pct(enter,0)+'.'));
+  if(fp)TH.push('Funding: '+fp.wins+' de '+fp.closed+' operações positivas. O spread some em horas; só observo.');
+  if(yBest)TH.push('Rendimento em dólar mais alto: '+pct(yBest,1)+' ao ano; o CDI paga '+pct((S.fronts&&S.fronts.cdi)||13.65,2)+' em reais.');
+  if(weak)TH.push('Me corrigindo: '+weak+' tipos de previsão erram muito e não viram sugestão.');
+  if(S.snLog&&S.snLog[0])TH.push('Último tiro do Sniper mirou o bloco '+(S.snLog[0].h+1)+': '+(S.snLog[0].end?'terminou por '+(S.snLog[0].endWhy==='bloco'?'bloco novo':'prazo'):'em andamento')+'.');
+  window.FD_think=TH;
   // oportunidades agora (todas as frentes, em ordem)
   var SC=S.scan||{},MR=SC.mrr||{};AM=AM.concat((SC.extra||[]).filter(function(x){return !AM.some(function(y){return y.algo===x.algo})}));
   var opp=AM.filter(function(a){return isFinite(a.edgePct)}).map(function(a){var pp=a.algo==='RANDOMXMONERO'?X:P[a.algo];var solo=a.algo==='SHA256ASICBOOST';
-    return {n:a.label+' ('+(a.coins||[]).join('+')+')'+(solo?' · solo':' · PPS'),e:solo?m.edgeAtBidPct:a.edgePct,act:solo?((m.edgeAtBidPct>=0)?'compensa (loteria)':'não compensa'):a.edgePct>100?'dado suspeito (mercado sem ordens)':(a.thin&&a.edgePct>=0?'livro raso: mercado pequeno demais para comprar':a.edgePct>=enter?'ENTRAR':a.edgePct>=0?'perto: entra a partir de '+pct(enter,0):'não compensa'),res:pp?pp.resultUsd:null,on:pp&&pp.on,win:pp&&pp.win,mrr:MR[a.algo]}}).sort(function(a,b){return (b.e>100?-1e9:b.e)-(a.e>100?-1e9:a.e)});
-  var oppH=opp.map(function(o){var cl=o.act==='ENTRAR'?'good':/perto/.test(o.act)?'warn':'';return '<div class="opp-row"><span>'+esc(o.n)+(o.on?' <span class="chip ok">operando (sim.)</span>':'')+'</span><span class="'+cl+'" style="font-weight:600">'+pct(o.e,1)+'</span><span class="note '+cl+'">'+esc(o.act)+'</span><span class="note">'+(o.res!==null&&o.res!==undefined?'resultado '+(o.res>=0?'+':'')+usd(o.res):'')+'</span>'+((o.win&&o.win.n7d)||o.mrr?'<span class="note" style="grid-column:1/-1">'+(o.win&&o.win.n7d?'janelas: '+nf(o.win.perDay,1)+' por dia, duram ~'+nf(o.win.medMin||0,0)+' min':'')+(o.mrr&&isFinite(o.mrr.lowEdgePct)?(o.win&&o.win.n7d?' · ':'')+'MiningRigRentals: '+pct(o.mrr.lowEdgePct,1)+' no menor preço':'')+'</span>':'')+'</div>'}).join('');
+    return {n:a.label+' ('+(a.coins||[]).join('+')+')'+(solo?' · solo':' · PPS'),e:solo?m.edgeAtBidPct:a.edgePct,act:solo?((m.edgeAtBidPct>=0)?'compensa (loteria)':'não compensa'):a.edgePct>100?'dado suspeito (mercado sem ordens)':(a.thin&&a.edgePct>=0?'margem boa, mas o mercado inteiro gasta só ~'+usd(a.marketUsdDay||0,0)+'/dia: pequeno demais para comprar':a.edgePct>=enter?'ENTRAR':a.edgePct>=0?'perto: entra a partir de '+pct(enter,0):'não compensa: US$100 de aluguel voltam US$'+nf(100+a.edgePct,0)),res:pp?pp.resultUsd:null,on:pp&&pp.on,win:pp&&pp.win,mrr:MR[a.algo]}}).sort(function(a,b){return (b.e>100?-1e9:b.e)-(a.e>100?-1e9:a.e)});
+  var oppH=opp.map(function(o){var cl=o.act==='ENTRAR'?'good':/perto/.test(o.act)?'warn':'';return '<div class="opp-row"><span>'+esc(o.n)+(o.on?' <span class="chip ok">operando (sim.)</span>':'')+'</span><span class="'+cl+'" style="font-weight:600">'+pct(o.e,1)+'</span><span class="note '+cl+'">'+esc(o.act)+'</span><span class="note">'+(o.res!==null&&o.res!==undefined?'resultado '+(o.res>=0?'+':'')+usd(o.res):'')+'</span>'+((o.win&&o.win.n7d)||o.mrr?'<span class="note" style="grid-column:1/-1">'+(o.win&&o.win.n7d?'janelas: '+(o.win.perDay!==null&&o.win.perDay!==undefined?nf(o.win.perDay,1)+' por dia':o.win.n7d+' em '+nf(o.win.obsH||0,0)+' h de observação')+', duram ~'+nf(o.win.medMin||0,0)+' min':'')+(o.mrr&&isFinite(o.mrr.lowEdgePct)?(o.win&&o.win.n7d?' · ':'')+'na MiningRigRentals: margem '+pct(o.mrr.lowEdgePct,1)+(o.mrr.lowEdgePct<0?' (mais caro que a receita: US$100 de aluguel voltam US$'+nf(100+o.mrr.lowEdgePct,0)+')':' (mais barato que a receita)'):'')+'</span>':'')+'</div>'}).join('');
   var YL=(S.market2&&S.market2.yields)||{},YN={bfx:'Empréstimo Bitfinex',basis:'Base BTC',ethena:'Ethena',hlp:'Hyperliquid HLP',aaveUsdc:'Aave USDC',aaveUsdt:'Aave USDT',sUsds:'Sky sUSDS',stEth:'Lido stETH',jitoSol:'Jito SOL'};
   var yH=Object.keys(FR).map(function(k){return {k:YN[k]||k,r:FR[k].rate}}).concat(Object.keys(YL).map(function(k){return {k:YN[k]||k,r:YL[k]&&YL[k].apy}})).filter(function(x){return isFinite(x.r)}).sort(function(a,b){return b.r-a.r}).map(function(x){return esc(x.k)+' '+pct(x.r,1)}).join(' · ');
   var acts=(ops.log||[]).slice(-40).reverse().filter(function(x){return /simulado|acao|ia|bloco/.test(x.kind)}).slice(0,6);
-  el.innerHTML='<div class="row between" style="align-items:baseline"><h2 style="margin:0">Cérebro</h2><span class="note">'+(J.telegram?'<span class="chip ok">Jarbas no Telegram</span>':'<span class="chip">Telegram: Ajustes</span>')+'</span></div>'+svg+
+  el.innerHTML='<div class="row between" style="align-items:baseline"><h2 style="margin:0">Cérebro</h2><span class="note">'+(J.telegram?'<span class="chip ok">Jarbas no Telegram</span>':'<span class="chip">Telegram: Ajustes</span>')+'</span></div>'+svg+'<p class="note think" id="brainThink" aria-live="polite"><b>Pensando agora:</b> '+esc(TH[0]||'')+'</p>'+
     '<div class="kv" style="margin-top:2px"><div><small>Dinheiro real</small><span style="font-size:15px">gasto '+usd(realSpent,0)+'</span><div class="note">'+((S.myBlocks||[]).length)+' blocos</div></div><div><small>Moedas PPS (como real)</small><span class="'+(ppsRes>0?'good':ppsRes<0?'bad':'')+'" style="font-size:15px">'+(ppsRes>=0?'+':'')+usd(ppsRes)+'</span><div class="note">'+ppsAll.length+' algoritmos acompanhados</div></div></div>'+
-    '<div class="eyebrow" style="margin:10px 0 4px">Oportunidades agora</div><div class="stack" style="gap:6px">'+(oppH||'<p class="note">O mapa de moedas atualiza a cada 15 min.</p>')+'</div>'+
+    '<div class="eyebrow" style="margin:10px 0 4px">Oportunidades agora</div><p class="note" style="margin:0 0 6px">A porcentagem é a margem: quanto a moeda paga acima (+) ou abaixo (−) do que custa o aluguel, já com as taxas. +5% = cada US$100 de aluguel voltam US$105.</p><div class="stack" style="gap:6px">'+(oppH||'<p class="note">O mapa de moedas atualiza a cada 15 min.</p>')+'</div>'+
     (yH?'<p class="note" style="margin:6px 0 0">Rendimentos ao ano em dólar: '+yH+'. CDI em reais: '+pct((S.fronts&&S.fronts.cdi)||13.65,2)+' (sem risco de cripto; em dólar some a variação do câmbio).</p>':'')+
     (acts.length?'<details style="margin-top:8px" open><summary>Atividade agora</summary><div class="stack" style="gap:2px;margin-top:4px">'+acts.map(function(x){return '<div class="note">'+hhmm(new Date(x.t))+' · '+esc(x.text)+'</div>'}).join('')+'</div></details>':'')+
     '<p class="note" style="margin:6px 0 0">Converse com o Jarbas no Telegram: /status, /monero, /bch, /funding, /saldo, /copiloto, /relatorio.</p>';
 }
+var thinkI=0,thinkT=null;
+function thinkStart(){if(thinkT)return;thinkT=setInterval(function(){var el=$('brainThink'),T=window.FD_think||[];if(!el||!T.length||document.visibilityState!=='visible'||$('tab-home').hidden)return;
+  el.classList.add('fade');setTimeout(function(){thinkI=(thinkI+1)%T.length;el.innerHTML='<b>Pensando agora:</b> '+esc(T[thinkI]);el.classList.remove('fade')},350)},4000)}
 function renderHome(){
-  try{renderBrain()}catch(e){}
+  try{renderBrain();thinkStart()}catch(e){}
   renderLink();
   var rows=VENUES.map(function(v){
     var s=state.src[v];

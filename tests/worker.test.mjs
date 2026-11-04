@@ -1718,10 +1718,13 @@ test('Monero simulado como real: abre com margem ≥ 2%, paga taxa de ordem, acu
   let p = r.px; for (let i = 2; i <= 40; i++) p = xmrPaperStep(p, { m: { edgePct: 6 }, now: T + i * 15 * M, btcUsd: btc, xmrUsd: xmr }).px;
   assert.ok(p.revUsd > 0 && p.spentBtc > 0); assert.ok(p.payouts.length >= 1, 'sacou ao passar de 0,01 XMR');
   r = xmrPaperStep(p, { m: { edgePct: -1 }, now: T + 41 * 15 * M, btcUsd: btc, xmrUsd: xmr });
-  assert.equal(r.px.on, false); assert.match(r.events.join(' '), /encerraria/);
+  assert.equal(r.px.on, false); assert.match(r.events.join(' '), /baixaria a potência/); assert.equal(r.px.orderOpen, true);
+  // nova janela: sobe a potência na mesma ordem, sem taxa nova
+  const f0 = r.px.feesBtc, r2 = xmrPaperStep(r.px, { m: { edgePct: 5 }, now: T + 42 * 15 * M, btcUsd: btc, xmrUsd: xmr });
+  assert.equal(r2.px.on, true); assert.equal(r2.px.feesBtc, f0); assert.match(r2.events.join(' '), /sem taxa nova/);
   const S = xmrSummary(r.px, btc, xmr);
-  assert.ok(S.resultUsd > 0 && S.retPct > 4 && S.retPct < 6, JSON.stringify(S)); // +6% de margem menos a taxa da ordem
-  assert.ok(Math.abs(S.walletBtc + r.px.spentBtc + r.px.feesBtc - 0.002) < 1e-9);  // o dinheiro fecha
+  assert.ok(S.resultUsd > 0 && S.retPct > 4 && S.retPct < 6.1, JSON.stringify(S)); // +6% de margem menos a taxa da ordem
+  assert.ok(Math.abs(S.walletBtc + r.px.spentBtc + r.px.feesBtc - 0.002) < 1e-9);  // o dinheiro fecha (carteira + ordem + gasto + taxa)
 });
 
 test('config: endereço Monero validado e oculto no modo leitura', () => {

@@ -65,6 +65,11 @@ section[hidden],[hidden]{display:none!important}
 .brain .core{transform-box:fill-box;transform-origin:center;animation:bpulse 3.5s ease-in-out infinite}
 @keyframes bspin{to{transform:rotate(360deg)}}@keyframes bflow{to{stroke-dashoffset:-20}}@keyframes bpulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.12);opacity:.8}}
 @media (prefers-reduced-motion:reduce){.brain .ring,.brain .ring2,.brain .flow,.brain .pulse,.brain .core{animation:none}}
+.brain .neu{animation:nfire 2.6s ease-in-out infinite}.brain .syn{stroke-dasharray:3 5;animation:bflow 1.8s linear infinite;opacity:.55}
+.brain .gyri{fill:none;stroke:currentColor;opacity:.18;stroke-width:1.2}.brain .shell{fill:var(--panel2,#8881);stroke:var(--acc,#b5e655);stroke-width:1.6}
+.brain .think{min-height:2.6em;transition:opacity .35s}.brain .think.fade{opacity:0}
+@keyframes nfire{0%,100%{opacity:.25;r:2.2}45%{opacity:1;r:3.6}55%{opacity:.9}}
+@media (prefers-reduced-motion:reduce){.brain .neu,.brain .syn{animation:none}}
 .opp-row{display:grid;grid-template-columns:1fr auto;gap:2px 8px;align-items:baseline}
 .banner{background:var(--panel2);border:1px solid var(--warn);color:var(--fg);border-radius:10px;padding:10px 12px;font-size:13px}
 .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
