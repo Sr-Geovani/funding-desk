@@ -58,7 +58,7 @@ function paperOpen(paper, key, kind, apr, days, now, exp, rules) {
   paper.open.push(o); return o;
 }
 
-export function labStep(prev, { now, deribit, p2p, boros, pendle, aaveApy, ptax, cdiPct, rules = LAB_RULES }) {
+export function labStep(prev, { now, deribit, p2p, boros, pendle, aaveApy, ptax, cdiPct, errs, rules = LAB_RULES }) {
   const L = prev && prev.since ? JSON.parse(JSON.stringify(prev)) : { since: now, series: [], counts: {}, paper: { open: [], closed: [] } };
   const events = [];
   const B = basisOf(deribit, now, rules), P = p2p ? p2pOf(p2p.sell, p2p.buy, ptax) : null, BO = borosOf(boros, rules), PE = pendleOf(pendle || [], aaveApy, now, rules);
@@ -76,7 +76,8 @@ export function labStep(prev, { now, deribit, p2p, boros, pendle, aaveApy, ptax,
   L.paper.closed = L.paper.closed.slice(-50);
   L.series.push([now, bBest ? bBest.netApr : null, P ? P.spreadPct : null, P ? P.premPtaxPct : null, boRecv ? boRecv.gapPp : null, peBest ? peBest.apy : null, aaveApy]);
   if (L.series.length > rules.keepSeries) L.series.splice(0, L.series.length - rules.keepSeries);
-  L.now = { at: now, basis: B.slice(0, 6), p2p: P, boros: BO.sort((a, b) => Math.abs(b.gapPp) - Math.abs(a.gapPp)).slice(0, 10), pendle: PE.slice(0, 8), aaveApy, cdiPct };
+  L.now = { at: now, basis: B.slice(0, 6), p2p: P, boros: BO.sort((a, b) => Math.abs(b.gapPp) - Math.abs(a.gapPp)).slice(0, 10), pendle: PE.slice(0, 8), aaveApy, cdiPct, errs: errs && Object.keys(errs).length ? errs : null,
+    pendleRaw: (pendle || []).map(([c, j]) => c + ':' + (j && j.markets ? j.markets.length : 'vazio')).join(' ') };
   L.lastTs = now;
   return { lab: L, events };
 }
