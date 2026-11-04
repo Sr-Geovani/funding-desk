@@ -5,7 +5,7 @@
 // - Agendamento (cron): robô de mineração. Começa em modo "observe" (só registra o que faria).
 import { createClient, NH_HOSTS, DEFAULT_ALGO } from './nicehash.js';
 import { createChain, paidTo, DEFAULT_BCH_REST, DEFAULT_HASKOIN, DEFAULT_PRICE_URL } from './chain.js';
-import { DEFAULT_CONFIG, sanitizeConfig, parseBook, computeMarket, sizeMarket, decide, limitsFromEnv, sniperDecide } from './bot.js';
+import { DEFAULT_CONFIG, sanitizeConfig, parseBook, computeMarket, sizeMarket, decide, limitsFromEnv, sniperDecide, orderAmount } from './bot.js';
 import { fundingSnapshot, runAlerts } from './alerts.js';
 import { paperStep, realStep, execStep, execSummary } from './paper.js';
 import { fundPaperStep, fundPaperSummary, alertScoreStep, alertScoreSummary } from './paperfund.js';
@@ -228,7 +228,9 @@ export async function tick(env, opts = {}) {
   const feeX = mpBytes !== null && mpAvg > 0 ? mpBytes / mpAvg : null;
   const snMetrics = { diffDropPct, feeX };
   const snInfo = { at: now, dNow, dTip: tipD, tipDt, dAvg, diffDropPct, mpBytes, mpAvg, feeX, feeBchMin: mpBytes !== null ? mpBytes * 1e-8 : null };
-  const dec = decide({ cfg, mkt, orders, state, now, units, limits, blockEvent, weekLossUsd, blockT: lastNetBlockT, blockId: lastNetHeight, snMetrics });
+  // saldo da carteira a cada ciclo (para criar a ordem com o máximo disponível e reabastecer quando entra saldo)
+  const balR = hasKeys(env) ? await settle(nh.balance()) : null, walletBtc = balR && balR.ok ? +(balR.v.available || 0) : null;
+  const dec = decide({ cfg, mkt, orders, state, now, units, limits, blockEvent, weekLossUsd, blockT: lastNetBlockT, blockId: lastNetHeight, snMetrics, walletBtc });
   if (dec.state.weekStop && !state.weekStop) await notify(env, `limite de perda semanal atingido (perda real de US$${weekLossUsd.toFixed(2).replace('.', ',')} em 7 dias; limite US$${cfg.weeklyLossUsd}). Robô encerrou as ordens e não cria novas até a perda da semana baixar.`, fetchFn);
 
   // Simulação (só no modo Observar) e resultado real (ordens gerenciadas + blocos).
@@ -366,6 +368,7 @@ export async function tick(env, opts = {}) {
     try {
       if (a.type === 'cancel') await nh.cancelOrder(a.id);
       if (a.type === 'update') await nh.updateOrder(a.id, { priceEH: a.priceEH, limitPH: a.limitPH });
+      if (a.type === 'refill') await nh.refillOrder(a.id, a.amountBtc);
       if (a.type === 'create') {
         const o = await nh.createOrder(a);
         a.id = o.id;
@@ -373,19 +376,38 @@ export async function tick(env, opts = {}) {
         await kvPut(env, 'config', saveCfg());
       }
       results.push(Object.assign({ executed: true }, a));
-      if (a.type !== 'update') await notify(env, plain(`${a.type === 'cancel' ? 'ordem encerrada' : 'ordem criada'}: ${a.reason}`), fetchFn);
+      if (a.type !== 'update') await notify(env, plain(`${a.type === 'cancel' ? 'ordem encerrada' : a.type === 'refill' ? 'ordem reabastecida' : 'ordem criada'}: ${a.reason}`), fetchFn);
     } catch (e) {
       results.push(Object.assign({ executed: false, error: String(e.message || e) }, a));
       errors.push(`${a.type} ${a.id || ''}: ${e.message || e}`);
     }
   }
 
+  // Registro de cada tiro (para conferir atraso e entrega): gatilho, horário do bloco, atraso, potência recebida, fim.
+  let snLog = Array.isArray(state.snLog) ? state.snLog.slice(-99) : [];
+  if (cfg.sniper) {
+    const a0 = state.sniper || {}, a1 = dec.state.sniper || {}, mine = orders.filter((o) => o.alive && (cfg.managed || []).includes(o.id));
+    const got = mine.reduce((x, o) => x + (o.speedPH || 0), 0), cr = results.find((r) => r.type === 'create'), up = results.find((r) => r.type === 'update' && /tiro/.test(r.reason || ''));
+    if (a1.shotStart && a1.shotStart !== a0.shotStart) {
+      const why = a1.shotWhy || [], ageMin = cfg.sniperAgeMin === undefined ? 15 : cfg.sniperAgeMin;
+      const due = why.includes('age') && !why.includes('dif') && !why.includes('fee') && lastNetBlockT ? lastNetBlockT + ageMin * 60e3 : lastNetBlockT; // quando o gatilho passou a valer
+      snLog.push({ start: now, h: a1.shotBlockId, blockT: lastNetBlockT, why, edge: a1.shotEdge !== undefined && isFinite(a1.shotEdge) ? +a1.shotEdge.toFixed(2) : null,
+        lagS: due ? Math.round((now - due) / 1000) : null, by: opts.watch ? 'vigia' : 'ciclo', ph: Math.min(cfg.sniperPh || 25, limits.maxLimitPh),
+        order: mine.length || (cr && cr.executed) ? (up && up.error) || (cr && cr.error) ? 'erro: ' + ((up && up.error) || cr.error).slice(0, 80) : (up || cr) ? 'ajustada' : 'sem ajuste' : 'sem ordem',
+        priceEH: up ? up.priceEH : cr ? cr.priceEH : null, gotPH: got, maxPH: got });
+    }
+    const L = snLog[snLog.length - 1];
+    if (L && !L.end && L.start === (a1.shotStart || a0.shotStart)) {
+      L.maxPH = Math.max(L.maxPH || 0, got);
+      if (!a1.shotStart) { L.end = now; L.endWhy = (a1.endsBlock || 0) > (a0.endsBlock || 0) ? 'bloco' : 'prazo'; L.mins = +((now - L.start) / 60e3).toFixed(1); }
+    }
+  }
   // MODO_SNIPER: avisa no Telegram cada tiro e cada recuo (são ajustes da ordem, que não geram o aviso de criar/encerrar)
   if (cfg.sniper && cfg.mode === 'active' && hasKeys(env)) {
     const a0 = state.sniper || {}, a1 = dec.state.sniper || {}, executed = results.some((r) => r.executed && r.type !== 'cancel'), fx = (x) => String(x).replace('.', ',');
     const shotPh = Math.min(cfg.sniperPh || 25, limits.maxLimitPh), idlePh = cfg.sniperIdlePh === undefined ? 1 : cfg.sniperIdlePh;
     const hasOrder = orders.some((o) => o.alive && (cfg.managed || []).includes(o.id)) || results.some((r) => r.executed && r.type === 'create');
-    const whyNo = !cfg.poolId ? 'nenhum pool escolhido (Mineração → Robô → Pool para ordens novas)' : !cfg.autoCreate ? '"criar ordem sozinho" desligado' : (results.find((r) => r.type === 'create' && r.error) || {}).error || 'a ordem anterior acabou e a nova ainda não foi criada';
+    const whyNo = !cfg.poolId ? 'nenhum pool escolhido (Mineração → Robô → Pool para ordens novas)' : !cfg.autoCreate ? '"criar ordem sozinho" desligado' : orderAmount(cfg, units, limits, walletBtc) === null ? `saldo insuficiente na NiceHash (${walletBtc === null ? 'sem leitura' : walletBtc.toFixed(6).replace('.', ',') + ' BTC'}; uma ordem precisa de pelo menos 0,00101 BTC)` : (results.find((r) => r.type === 'create' && r.error) || {}).error || 'a ordem anterior acabou e a nova ainda não foi criada';
     if (!a0.shotStart && a1.shotStart && !hasOrder) await notify(env, plain(`Sniper: gatilho de tiro no bloco ${a1.shotBlockId}, mas sem ordem aberta: nada foi comprado. Motivo: ${whyNo}.`), fetchFn);
     else if (!a0.shotStart && a1.shotStart) await notify(env, plain(`Sniper: tiro de ${shotPh} PH/s${executed ? '' : ' (ordem ainda sem ajuste confirmado)'}. ${(results.find((r) => /sniper/.test(r.reason || '')) || {}).reason || ''}. Recua no bloco novo ou em ${cfg.sniperShotMin || 4} min. Tiro nº ${a1.shots || 1}.`), fetchFn);
     else if (a0.shotStart && !a1.shotStart && hasOrder) {
@@ -643,10 +665,11 @@ export async function tick(env, opts = {}) {
   // Conta da NiceHash (saldo e pools) a cada 15 min, para o plano de ação saber o que trava.
   let acct = state.acct || null;
   if (hasKeys(env) && (!acct || now - (acct.at || 0) >= 15 * 60e3)) {
-    const [bal, pl] = await Promise.all([nh.balance(), nh.pools()].map(settle));
-    acct = { at: now, balanceBtc: bal.ok ? +(bal.v.available || 0) : (acct ? acct.balanceBtc : null),
+    const [pl] = await Promise.all([nh.pools()].map(settle));
+    acct = { at: now, balanceBtc: walletBtc !== null ? walletBtc : (acct ? acct.balanceBtc : null),
       pools: pl.ok ? ((pl.v && pl.v.list) || []).map((p) => ({ id: p.id, name: p.name, algorithm: p.algorithm })) : (acct ? acct.pools : []) };
   }
+  if (acct && walletBtc !== null) { acct.balanceBtc = walletBtc; acct.balAt = now; } // saldo sempre o do ciclo
   const plan = actionPlan({ cfg, limits, mkt: mkt.ok ? Object.assign({}, mkt, { bookTotalPH: book ? book.totalPH : 0 }) : mkt, acct,
     fund: ((funding && funding.best) || []), algoMap, capital: cfg.alertCapital || 1000, pools: FDR.POOLS });
   const mempool = mpR.ok ? Object.assign({ at: now }, mpR.v) : state.mempool || null;
@@ -660,7 +683,7 @@ export async function tick(env, opts = {}) {
     sniper: paperSniper ? { shot: paperSniper.shot, reason: paperSniper.reason } : null, fund: { passing: ((funding && funding.best) || []).length, sim: fundPaper ? fundPaperSummary(fundPaper, FD.DEFAULT_FEES) : null } });
 
   const next = Object.assign({}, dec.state, alertState, {
-    lastTick: now, verified: Object.fromEntries(Object.entries(verified).filter(([, x]) => now - x.at <= 6 * 3600e3)), ai: br.ai, aiAnalysis, plan, acct, algoMap, mempool, stable24, pairStats, msig, darr, recentBlocks, nhWeek, paper, paperBurst, paperPlan, paperAlways, paperSniper, dHist, tHist, mpHist, snInfo, hashMkts, fronts, frontsPaper, ltStreak, fundPaperLT, market2, aiPanorama, entryCheck, calib, robotTest, luck24, balPlan, minEdgeNow: { value: cfg.minEdgePct, relative: !!cfg.minEdgeRel, base: cfg.minEdgeRel ? cfg.minEdgeBase : cfg.minEdgePct, sniper: !!cfg.sniper }, aiReport: aiRep, mktMargin, asertF, execLog, bestScen, paperArchive, paperPriceV: 2, blockBuf, blockFlush, lastBlockT, real, fundPaper, alertScore, algoPaper, algoTs, aiScores, fundPaperAI, fhistHour, lastHeight: state.lastHeight, poolFix1: state.poolFix1, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig, errNotified,
+    lastTick: now, verified: Object.fromEntries(Object.entries(verified).filter(([, x]) => now - x.at <= 6 * 3600e3)), ai: br.ai, aiAnalysis, plan, acct, algoMap, mempool, stable24, pairStats, msig, darr, recentBlocks, nhWeek, paper, paperBurst, paperPlan, paperAlways, paperSniper, dHist, tHist, mpHist, snInfo, snLog, hashMkts, fronts, frontsPaper, ltStreak, fundPaperLT, market2, aiPanorama, entryCheck, calib, robotTest, luck24, balPlan, minEdgeNow: { value: cfg.minEdgePct, relative: !!cfg.minEdgeRel, base: cfg.minEdgeRel ? cfg.minEdgeBase : cfg.minEdgePct, sniper: !!cfg.sniper }, aiReport: aiRep, mktMargin, asertF, execLog, bestScen, paperArchive, paperPriceV: 2, blockBuf, blockFlush, lastBlockT, real, fundPaper, alertScore, algoPaper, algoTs, aiScores, fundPaperAI, fhistHour, lastHeight: state.lastHeight, poolFix1: state.poolFix1, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig, errNotified,
     market: mkt.ok ? { breakEvenEH: mkt.breakEvenEH, capEH: mkt.capEH, fillEH: mkt.fillEH, medianEH: mkt.medianEH, bidEH: mkt.bidEH,
       edgeAtBidPct: mkt.edgeAtBidPct, green: mkt.green, D: mkt.D, bookTotalPH: book ? book.totalPH : 0, bchUsd: mkt.bchUsd, btcUsd: mkt.btcUsd, costPerBlockUsd: mkt.costPerBlockUsd,
       hashpriceNet: mkt.hashpriceNet, blockNetUsd: mkt.blockNetUsd, phDaysPerBlock: mkt.phDaysPerBlock, market: mkt.market } : { ok: false, reason: mkt.reason },
@@ -771,7 +794,7 @@ async function api(req, env, url, fetchFn) {
       telegram: !!(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID), creds: credStatus(env), limits, config: cfg,
       state: { lastTick: state.lastTick, lastHeight: state.lastHeight, market: state.market, myBlocks: state.myBlocks || [], dailyUsd: state.dailyUsd || 0,
         errors: state.errors || [], edgeHist: state.edgeHist || [], alerts: (state.alerts || []).slice(-30).reverse(),
-        paper: state.paper || null, paperBurst: state.paperBurst || null, paperPlan: state.paperPlan || null, paperAlways: state.paperAlways || null, paperSniper: state.paperSniper || null, sniper: state.sniper || null, snInfo: state.snInfo || null, paperArchive: state.paperArchive || null, entryCheck: state.entryCheck || null, calib: state.calib || null, minEdgeNow: state.minEdgeNow || null, luck24: state.luck24 || null, balPlan: state.balPlan || null, planOn: !!state.planBackup, calibPrev: state.calibPrev || null, robotTest: state.robotTest || null, aiReport: state.aiReport || null, mktMargin: state.mktMargin || null, asertF: state.asertF || null, exec: execSummary(state.execLog), bestScen: state.bestScen || null, hashMkts: state.hashMkts || null, fronts: state.fronts || null, frontsPaper: state.frontsPaper || null, market2: state.market2 || null, aiPanorama: state.aiPanorama || null,
+        paper: state.paper || null, paperBurst: state.paperBurst || null, paperPlan: state.paperPlan || null, paperAlways: state.paperAlways || null, paperSniper: state.paperSniper || null, sniper: state.sniper || null, snInfo: state.snInfo || null, snLog: (state.snLog || []).slice(-40).reverse(), wallet: state.acct ? { btc: state.acct.balanceBtc, at: state.acct.balAt || state.acct.at } : null, paperArchive: state.paperArchive || null, entryCheck: state.entryCheck || null, calib: state.calib || null, minEdgeNow: state.minEdgeNow || null, luck24: state.luck24 || null, balPlan: state.balPlan || null, planOn: !!state.planBackup, calibPrev: state.calibPrev || null, robotTest: state.robotTest || null, aiReport: state.aiReport || null, mktMargin: state.mktMargin || null, asertF: state.asertF || null, exec: execSummary(state.execLog), bestScen: state.bestScen || null, hashMkts: state.hashMkts || null, fronts: state.fronts || null, frontsPaper: state.frontsPaper || null, market2: state.market2 || null, aiPanorama: state.aiPanorama || null,
         fundPaperLT: state.fundPaperLT ? { summary: fundPaperSummary(state.fundPaperLT, LT_FEES), open: state.fundPaperLT.open, closed: state.fundPaperLT.closed.slice(-50).reverse() } : null, opLog: (state.opLog || []).slice(-20).reverse(), real: state.real ? Object.assign({}, state.real, { paid: undefined }) : null,
         fundPaper: state.fundPaper ? { summary: fundPaperSummary(state.fundPaper, FD.DEFAULT_FEES), open: state.fundPaper.open, closed: state.fundPaper.closed.slice(-100).reverse() } : null,
         algoPaper: state.algoPaper || null,
@@ -917,9 +940,9 @@ async function api(req, env, url, fetchFn) {
     if (st.calib && !st.calib.done) return json({ error: 'espere o teste de calibração terminar' }, 400);
     const poolId = body.poolId || cfg.poolId; if (!poolId) return json({ error: 'escolha o pool (Mineração → Robô → Pool para ordens novas)' }, 400);
     const u = await nh.units(), now = Date.now(), hours = Math.max(0.5, Math.min(+body.hours || 2, 4));
-    const keys = ['mode', 'sniper', 'minEdgePct', 'minEdgeMode', 'targetPh', 'sessionBudgetUsd', 'stopCooldownH', 'dailyBudgetUsd', 'orderAmountBtc', 'autoCreate', 'onBlock', 'poolId'];
+    const keys = ['mode', 'sniper', 'minEdgePct', 'minEdgeMode', 'targetPh', 'sessionBudgetUsd', 'stopCooldownH', 'dailyBudgetUsd', 'orderAmountBtc', 'orderAmountMax', 'autoCreate', 'onBlock', 'poolId'];
     const backup = Object.fromEntries(keys.map((k) => [k, cfg[k]]));
-    const test = { mode: 'active', sniper: false, minEdgeMode: 'fixo', minEdgePct: -5, targetPh: 10, sessionBudgetUsd: 8, stopCooldownH: 0.25, dailyBudgetUsd: 20, orderAmountBtc: u.minOrderBtc, autoCreate: true, onBlock: 'cancel', poolId };
+    const test = { mode: 'active', sniper: false, minEdgeMode: 'fixo', minEdgePct: -5, targetPh: 10, sessionBudgetUsd: 8, stopCooldownH: 0.25, dailyBudgetUsd: 20, orderAmountBtc: u.minOrderBtc, orderAmountMax: false, autoCreate: true, onBlock: 'cancel', poolId };
     await kvPut(env, 'config', Object.assign({}, cfg, test));
     st.robotTest = { start: now, until: now + hours * 3600e3, backup, test, events: [], checks: {}, ids: [] };
     st.stopUntil = null; st.sess = null;
@@ -1036,16 +1059,36 @@ export async function blockWatch(env, opts = {}) {
   if (!cfg.sniper || !env.FD_KV) return { fired: false, why: 'sniper desligado' };
   const chain = chainClient(env, fetchFn), state = await kvGet(env, 'state', {}), known = state.lastHeight || 0;
   let polls = 0, seen = known;
+  // Também dispara o ciclo na hora dos eventos de tempo do Sniper (antes só no ciclo de 3 min, com até ~4 min de atraso):
+  // bloco passou do gatilho de atraso (ainda sem tiro neste bloco) e tiro chegou ao prazo (kill switch).
+  const sn = state.sniper || {}, bt = state.lastBlockT || null, ageMs = (cfg.sniperAgeMin === undefined ? 15 : cfg.sniperAgeMin) * 60e3, durMs = (cfg.sniperShotMin === undefined ? 7 : cfg.sniperShotMin) * 60e3;
+  const timeEvent = () => {
+    const t = clock();
+    if (sn.shotStart && t >= sn.shotStart + durMs + 2e3) return 'prazo:' + sn.shotStart;
+    if (!sn.shotStart && cfg.sniperUseAge && bt && t >= bt + ageMs + 2e3 && sn.shotBlockId !== known && sn.usedBlockId !== known) return 'atraso:' + known;
+    return null;
+  };
   while (clock() - start <= budget) {
+    const ev = timeEvent();
+    if (ev) {
+      const lock = await kvGet(env, 'watch', {});
+      if (lock.ev !== ev) {
+        const t0 = clock();
+        await kvPut(env, 'watch', Object.assign(lock, { at: t0, ev, evAt: t0, firedAt: t0, tookMs: null }));
+        await tick(env, { fetchFn, watch: true });
+        await kvPut(env, 'watch', Object.assign(await kvGet(env, 'watch', {}), { at: clock(), tookMs: clock() - t0 }));
+        return { fired: true, ev, polls };
+      }
+    }
     const r = await settle(chain.info()); polls++;
     if (r.ok && r.v.height > known) {
       seen = r.v.height;
       const lock = await kvGet(env, 'watch', {}); // outra execução já disparou este bloco: não repete
       if (lock.firedH >= seen && clock() - (lock.firedAt || 0) < 150e3) return { fired: false, why: 'já disparado', h: seen };
       const t0 = clock();
-      await kvPut(env, 'watch', { at: t0, h: seen, firedH: seen, firedAt: t0, polls, every });
+      await kvPut(env, 'watch', Object.assign(lock, { at: t0, h: seen, firedH: seen, firedAt: t0, polls, every, tookMs: null }));
       await tick(env, { fetchFn, watch: true });
-      await kvPut(env, 'watch', { at: clock(), h: seen, firedH: seen, firedAt: t0, polls, every, tookMs: clock() - t0 });
+      await kvPut(env, 'watch', Object.assign(await kvGet(env, 'watch', {}), { at: clock(), h: seen, firedH: seen, firedAt: t0, polls, every, tookMs: clock() - t0 }));
       return { fired: true, h: seen, polls };
     }
     if (clock() - start + every > budget) break;

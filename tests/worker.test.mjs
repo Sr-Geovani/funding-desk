@@ -1578,3 +1578,42 @@ test('integração: Sniper sem ordem aberta avisa que nada foi comprado e por qu
     assert.ok(!sent.some((x) => /Sniper: tiro de/.test(x)), JSON.stringify(sent));
   } finally { t.server.close(); }
 });
+
+test('saldo: ordem nova com o máximo disponível, reabastece quando entra saldo e não tenta com saldo insuficiente', async () => {
+  const { orderAmount } = await import('../worker/src/bot.js');
+  const units = { minLimitPH: 1, priceDownStepEH: 0.002, minOrderBtc: 0.001 }, limits = { maxLimitPh: 100, maxOrderBtc: 0.01 };
+  const cfg = Object.assign({}, DEFAULT_CONFIG, { orderAmountMax: true });
+  assert.equal(orderAmount(cfg, units, limits, 0.0031), 0.00309);
+  assert.equal(orderAmount(cfg, units, limits, 0.05), 0.01);           // teto do servidor
+  assert.equal(orderAmount(cfg, units, limits, 0.0005), null);         // abaixo do mínimo: não tenta
+  assert.equal(orderAmount(Object.assign({}, cfg, { orderAmountMax: false, orderAmountBtc: 0.002 }), units, limits, 0.0031), 0.002);
+  assert.equal(orderAmount(Object.assign({}, cfg, { orderAmountMax: false, orderAmountBtc: 0.002 }), units, limits, 0.0015), null);
+  const mk = { ok: true, green: false, bidEH: 0.43, capEH: 0.40, breakEvenEH: 0.41, edgeAtBidPct: -4.6, fillEH: 0.428, fillTopEH: 0.428, btcUsd: 77000, market: 'BTC' };
+  const base = Object.assign({}, cfg, { sniper: true, autoCreate: true, poolId: 'p', managed: ['o1'] }), T = Date.UTC(2026, 10, 4, 12);
+  const r = decide({ cfg: base, mkt: mk, orders: [{ id: 'o1', alive: true, priceEH: 0.43, limitPH: 1, paidBtc: 0, availableBtc: 0.0004 }], now: T, units, limits, blockT: T - 2 * 60e3, blockId: 1, walletBtc: 0.0021 });
+  const rf = r.actions.find((a) => a.type === 'refill'); assert.ok(rf, JSON.stringify(r.actions)); assert.equal(rf.amountBtc, 0.00209);
+  const c = decide({ cfg: Object.assign({}, base, { managed: [] }), mkt: mk, orders: [], now: T, units, limits, blockT: T - 2 * 60e3, blockId: 1, walletBtc: 0.0004 });
+  assert.ok(!c.actions.some((a) => a.type === 'create')); assert.ok(c.notes.some((n) => /saldo insuficiente/.test(n)));
+  const c2 = decide({ cfg: Object.assign({}, base, { managed: [] }), mkt: mk, orders: [], now: T, units, limits, blockT: T - 2 * 60e3, blockId: 1, walletBtc: 0.0025 });
+  assert.equal(c2.actions.find((a) => a.type === 'create').amountBtc, 0.00249);
+});
+
+test('integração: vigia dispara o tiro por atraso na hora e o registro do tiro mostra o atraso', async () => {
+  const t = await setup();
+  try {
+    await tick(t.env);
+    await t.call('PUT', '/api/config', { mode: 'active', payoutAddress: 'bitcoincash:q' + 'a'.repeat(41), sniper: true, sniperUseAge: true, sniperAgeMin: 15, sniperMinEdge: -20, sniperShotMin: 7 });
+    const st = JSON.parse(await t.env.FD_KV.get('state')); st.lastBlockT = Date.now() - 15 * 60e3 - 20e3; await t.env.FD_KV.put('state', JSON.stringify(st));
+    let off = 0; const W = { clock: () => Date.now() + off, sleep: async (d) => { off += d; } };
+    const r = await blockWatch(t.env, W);
+    assert.equal(r.fired, true); assert.match(r.ev, /^atraso:/);
+    const s2 = JSON.parse(await t.env.FD_KV.get('state'));
+    assert.ok(s2.sniper.shotStart, JSON.stringify(s2.sniper));
+    const L = s2.snLog[s2.snLog.length - 1];
+    assert.equal(L.by, 'vigia'); assert.deepEqual(L.why, ['age']); assert.ok(L.lagS >= 0 && L.lagS < 60, JSON.stringify(L));
+    // o mesmo evento não dispara de novo
+    off = 0; assert.equal((await blockWatch(t.env, W)).fired, false);
+    const b = (await t.call('GET', '/api/status')).body;
+    assert.ok(b.state.snLog.length >= 1);
+  } finally { t.server.close(); }
+});

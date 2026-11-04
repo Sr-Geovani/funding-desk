@@ -31,6 +31,7 @@ export const DEFAULT_CONFIG = {
   relFloorPct: -2,          // regra relativa: nunca entra com margem abaixo deste piso      // perda máxima em 7 dias (gasto − recebido, resultado real); ao atingir, encerra tudo e avisa (0 = desligado)
   autoCreate: false,        // criar ordem quando o sinal ficar verde e não houver ordem gerenciada
   orderAmountBtc: 0.002,
+  orderAmountMax: true,      // ordem nova com todo o saldo disponível na NiceHash (e reabastece a ordem quando entra saldo); falso = valor fixo acima
   managed: [],              // ids das ordens que o robô pode alterar ou cancelar
   alerts: true,             // alertas de entrada/saída/risco (funding e mineração) a cada ciclo, com Telegram
   fundStable24: true,       // funding: só "Compensa" com 24 h seguidas acima do empate (regra validada em 90 dias)
@@ -78,6 +79,7 @@ export function sanitizeConfig(input = {}, prev = DEFAULT_CONFIG, limits = limit
   num('targetPh', 0, limits.maxLimitPh); num('minPh', 0, limits.maxLimitPh);
   num('sessionBudgetUsd', 0, limits.maxDailyUsd); num('dailyBudgetUsd', 0, limits.maxDailyUsd); num('stopCooldownH', 0, 72); num('weeklyLossUsd', 0, limits.maxDailyUsd * 7);
   num('orderAmountBtc', 0, limits.maxOrderBtc);
+  if (input.orderAmountMax !== undefined) c.orderAmountMax = !!input.orderAmountMax;
   if (input.autoCreate !== undefined) c.autoCreate = !!input.autoCreate;
   if (input.alerts !== undefined) c.alerts = !!input.alerts;
   if (input.fundStable24 !== undefined) c.fundStable24 = !!input.fundStable24;
@@ -181,14 +183,27 @@ export function sniperDecide(prev, { now, blockT, blockId = null, edge, cfg, dif
     const which = [g.dif ? `dificuldade ${f1(diffDropPct)}% abaixo da média de 12 blocos (gatilho ${f1(dLim)}%)` : '', g.fee ? `mempool ${f1(feeX)} vezes a média do dia (gatilho ${f1(fLim)})` : '', g.age ? `último bloco há ${Math.round(age)} min (gatilho ${ageMin})` : ''].filter(Boolean);
     const okEdge = isFinite(edge) && edge >= minE, used = s.usedBlockId !== null && s.usedBlockId === id;
     // efeito estilingue: depois do recuo por bloco novo, o novo bloco pode receber o tiro no mesmo ciclo
-    if (which.length && okEdge && !used && !endedByTime) { s.shotStart = now; s.shotBlockId = id; s.shots++; reason = (reason ? reason + '; ' : '') + `sniper: ${which.join(' e ')}; margem do tiro ${f1(edge)}% (limite ${f1(minE)}%): tiro no bloco ${id}`; }
+    if (which.length && okEdge && !used && !endedByTime) { s.shotStart = now; s.shotBlockId = id; s.shots++; s.shotWhy = ['dif', 'fee', 'age'].filter((k) => g[k]); s.shotEdge = edge; reason = (reason ? reason + '; ' : '') + `sniper: ${which.join(' e ')}; margem do tiro ${f1(edge)}% (limite ${f1(minE)}%): tiro no bloco ${id}`; }
     else if (!reason) reason = which.length && used ? `sniper: já atirou no bloco ${id}; espera a virada para o próximo` : which.length && !okEdge ? `sniper: gatilho ativo (${which.join(' e ')}), mas margem ${isFinite(edge) ? f1(edge) : '—'}% abaixo do limite ${f1(minE)}%; em espera` :
       `sniper: em espera (dificuldade ${diffDropPct === null || !isFinite(diffDropPct) ? 'sem dado' : diffDropPct >= 0 ? f1(diffDropPct) + '% abaixo' : f1(-diffDropPct) + '% acima'} da média de 12 blocos, gatilho ${f1(dLim)}% abaixo; mempool ${feeX === null || !isFinite(feeX) ? 'juntando 2 h de leituras' : f1(feeX) + ' vezes a média'}, gatilho ${f1(fLim)} vezes${cfg.sniperUseAge ? `; último bloco há ${age === null ? '—' : Math.round(age)} min, gatilho ${ageMin}` : ''})`;
   }
   return { shot: !!s.shotStart, state: s, reason, ageMin: age, diffDropPct, feeX };
 }
 
-export function decide({ cfg, mkt, orders, state = {}, now, units, limits = limitsFromEnv(), blockEvent = null, weekLossUsd = 0, blockT = null, blockId = null, snMetrics = {} }) {
+// Valor da ordem nova: com orderAmountMax, todo o saldo livre menos a taxa de ordem nova (0,00001 BTC), até o limite do
+// servidor; sem ele, o valor fixo. null = saldo não cobre o mínimo da NiceHash (não tenta criar e ser recusada).
+export const NEW_ORDER_FEE_BTC = 0.00001;
+const sat = (x) => Math.floor(Math.round(x * 1e10) / 100) / 1e8; // arredonda para baixo em satoshis, sem erro de ponto flutuante
+export function orderAmount(cfg, units, limits, walletBtc) {
+  const min = units.minOrderBtc || 0.001;
+  if (cfg.orderAmountMax && walletBtc !== null && walletBtc !== undefined) {
+    const a = sat(Math.min(walletBtc - NEW_ORDER_FEE_BTC, limits.maxOrderBtc));
+    return a >= min ? a : null;
+  }
+  const a = Math.max(min, Math.min(cfg.orderAmountBtc, limits.maxOrderBtc));
+  return walletBtc !== null && walletBtc !== undefined && walletBtc < a + NEW_ORDER_FEE_BTC ? null : a;
+}
+export function decide({ cfg, mkt, orders, state = {}, now, units, limits = limitsFromEnv(), blockEvent = null, weekLossUsd = 0, blockT = null, blockId = null, snMetrics = {}, walletBtc = null }) {
   const st = JSON.parse(JSON.stringify(state || {}));
   st.lastDecrease = st.lastDecrease || {}; st.lastPriceChange = st.lastPriceChange || {}; st.dayStart = st.dayStart || {};
   const actions = [], notes = [];
@@ -294,12 +309,18 @@ export function decide({ cfg, mkt, orders, state = {}, now, units, limits = limi
     }
   }
 
-  if (SN && mktShot && cfg.autoCreate && !managed.length && mkt.ok && !dailyHit && cfg.poolId && !blockEvent) {
-    const amount = Math.max(units.minOrderBtc, Math.min(cfg.orderAmountBtc, limits.maxOrderBtc));
+  const amount = orderAmount(cfg, units, limits, walletBtc);
+  const canCreate = cfg.autoCreate && !managed.length && mkt.ok && !dailyHit && cfg.poolId && !blockEvent;
+  if (canCreate && amount === null) notes.push(`saldo insuficiente na NiceHash para ordem nova (${walletBtc === null ? '—' : walletBtc.toFixed(6).replace('.', ',')} BTC; mínimo ${(units.minOrderBtc || 0.001) + NEW_ORDER_FEE_BTC} BTC)`);
+  // saldo que entrou na carteira vai para a ordem gerenciada (reabastecer), para usar sempre o máximo disponível
+  if (cfg.orderAmountMax && managed.length && walletBtc > 0.0002 + NEW_ORDER_FEE_BTC && !dailyHit) {
+    const o = managed[0], add = sat(Math.min(walletBtc - NEW_ORDER_FEE_BTC, Math.max(0, limits.maxOrderBtc - (o.availableBtc || 0))));
+    if (add >= 0.0002) actions.push({ type: 'refill', id: o.id, amountBtc: add, reason: `saldo livre de ${walletBtc.toFixed(6).replace('.', ',')} BTC: reabastecendo a ordem com ${add.toFixed(6).replace('.', ',')} BTC` });
+  }
+  if (SN && mktShot && canCreate && amount !== null) {
     actions.push({ type: 'create', priceEH: mktShot.bidEH, limitPH: SN.shot ? Math.min(cfg.sniperPh || 25, limits.maxLimitPh) : Math.max(minPh, cfg.sniperIdlePh === undefined ? 1 : cfg.sniperIdlePh), amountBtc: amount, poolId: cfg.poolId,
       market: mkt.market, reason: 'sniper: ordem de espera criada. ' + SN.reason });
-  } else if (!SN && cfg.autoCreate && !managed.length && mkt.ok && mkt.green && !dailyHit && cfg.poolId && !blockEvent) {
-    const amount = Math.max(units.minOrderBtc, Math.min(cfg.orderAmountBtc, limits.maxOrderBtc));
+  } else if (!SN && canCreate && amount !== null && mkt.green) {
     actions.push({ type: 'create', priceEH: mkt.bidEH, limitPH: target, amountBtc: amount, poolId: cfg.poolId,
       market: mkt.market, reason: `sinal verde sem ordem ativa: criando (margem ${mkt.edgeAtBidPct.toFixed(1).replace('.', ',')}%)` });
   }
