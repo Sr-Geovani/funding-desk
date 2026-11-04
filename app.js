@@ -1418,6 +1418,15 @@ document.addEventListener('click',function(e){
   apiCall('POST',id==='bp_go'?'/balanceplan/apply':'/balanceplan/undo',{}).then(function(){$('bp_msg').textContent='Feito. Atualizando…';loadOps()},function(er){b.disabled=false;$('bp_msg').textContent='Não deu: '+er.message});
 });
 // Teste do robô: modo Ativo com limites mínimos, para ver na NiceHash real o robô criar, ajustar, parar no stop-loss e esperar.
+// Cartões dos testes (robô e calibração) podem ser ocultados: viram uma linha com o resumo. Fica salvo neste aparelho.
+function hideGet(k){try{return localStorage.getItem('fd_hide_'+k)==='1'}catch(e){return false}}
+function hideSet(k,v){try{if(v)localStorage.setItem('fd_hide_'+k,'1');else localStorage.removeItem('fd_hide_'+k)}catch(e){}}
+function hideWrap(k,title,sum,html){
+  if(hideGet(k))return '<div class="row" style="justify-content:space-between;align-items:center;gap:8px"><span class="note"><b>'+esc(title)+'</b> (oculto)'+(sum?' · '+esc(sum):'')+'</span><button class="sm" data-unhide="'+k+'">Mostrar</button></div>';
+  return '<div style="float:right;margin:0 0 4px 8px"><button class="sm" data-hide="'+k+'">Ocultar</button></div>'+html;
+}
+document.addEventListener('click',function(e){var b=e.target.closest&&e.target.closest('[data-hide],[data-unhide]');if(!b)return;
+  var k=b.getAttribute('data-hide')||b.getAttribute('data-unhide');hideSet(k,!!b.getAttribute('data-hide'));renderRTest();renderExec()});
 function renderRTest(){
   var el=$('o_rtest');if(!el)return;var st=ops.status,S=st&&st.state,cfg=(st&&st.config)||{};if(!S){el.innerHTML='';return}
   var T=S.robotTest,C=S.calib,h='<h2 style="margin:0 0 4px">Teste do robô (modo Ativo, limites mínimos)</h2>';
@@ -1440,7 +1449,8 @@ function renderRTest(){
       '<p class="note" style="margin:6px 0 0">'+(all?'<b class="good">Todos os mecanismos funcionaram na NiceHash real.</b> O robô está pronto; falta só a fase de observação mostrar uma faixa de entrada comprovada.':'<b class="warn">Nem tudo foi exercitado.</b> Os itens sem ✓ não aconteceram no tempo do teste (por exemplo, o stop-loss não chegou a US$15 ou o preço não precisou de ajuste). Me mande este resultado: dá para repetir com outro prazo.')+'</p></div>'+
       '<button id="rt_again">Fazer outro teste</button>';
   }
-  el.innerHTML=h;
+  var sumR=!T?'não iniciado':!T.done?'em andamento':'concluído em '+dt2(T.start)+(CK.every(function(c){return T.checks&&T.checks[c[0]]})?', todos os mecanismos ok':'');
+  el.innerHTML=hideWrap('rtest','Teste do robô',sumR,h);
 }
 document.addEventListener('click',function(e){
   var id=e.target.id;if(['rt_go','rt_stop','rt_again','rt_fast'].indexOf(id)<0)return;
@@ -1477,7 +1487,8 @@ function renderExec(){
       '<button id="cal_again">Fazer outro teste</button>';
   }
   if(X&&X.orders&&X.orders.length)h+='<details style="margin-top:8px"><summary>Ordens registradas</summary><div class="stack" style="gap:4px;margin-top:4px">'+X.orders.map(function(o){return '<div class="note">'+dt2(o.created)+' · '+nf(o.limitPH,1)+' PH/s a '+o.priceEH.toFixed(4).replace('.',',')+(o.alive?' · ativa':'')+' · hash em '+(o.toHashMin!==null?nf(o.toHashMin,0)+' min':'—')+' · entrega '+(o.delivered!==null?pctp(o.delivered*100,0):'—')+'</div>'}).join('')+'</div></details>';
-  el.innerHTML=h;
+  var sumC=!C?'não iniciado':!C.done?'em andamento':'concluído em '+dt2(C.start)+(C.result&&C.result.paidUsd!==undefined?', gasto real '+usd(C.result.paidUsd||0):'');
+  el.innerHTML=hideWrap('calib','Teste de calibração',sumC,h);
 }
 document.addEventListener('click',function(e){
   var id=e.target.id;if(['cal_go','cal_stop','cal_again'].indexOf(id)<0)return;
