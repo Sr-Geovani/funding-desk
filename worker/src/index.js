@@ -995,6 +995,15 @@ async function api(req, env, url, fetchFn) {
   const need = () => { if (!hasKeys(env)) throw Object.assign(new Error('NiceHash não conectada: cadastre as chaves em Ajustes → Conectar contas'), { status: 412 }); };
 
   if (p === '/readtoken' && m === 'GET') return json({ token: await readToken(env) });
+  // Pendle entregue pela tarefa de hora em hora do GitHub (a API do Pendle limita o IP da Cloudflare): só nome, rede, vencimento, taxa e liquidez
+  if (p === '/lab/pendle' && m === 'POST') {
+    const L = Array.isArray(body.markets) ? body.markets.slice(0, 400) : null;
+    if (!L || !L.length) return json({ error: 'sem mercados' }, 400);
+    const g = {};
+    for (const x of L) { const c = String(x.chain || 'rede').slice(0, 20); (g[c] || (g[c] = { markets: [] })).markets.push({ name: String(x.name || '').slice(0, 40), expiry: String(x.expiry || ''), details: { impliedApy: +x.impliedApy || 0, liquidity: +x.liquidity || 0 } }); }
+    await kvPut(env, 'pendleFeed', { at: Date.now(), lists: Object.entries(g), via: 'github' });
+    return json({ ok: true, markets: L.length });
+  }
   if (p === '/status' && m === 'GET') {
     const [cfg, state, watch] = await Promise.all([getConfig(env), kvGet(env, 'state', {}), kvGet(env, 'watch', null)]);
     return json({ watch, version: VERSION, algo: nh.algorithm, nhEnv: env.NH_BASE ? 'personalizado' : (env.NH_ENV === 'prod' ? 'produção' : 'teste'), keys: hasKeys(env),
@@ -1404,7 +1413,7 @@ export default {
         const CH = { 1: 'Ethereum', 42161: 'Arbitrum', 8453: 'Base', 56: 'BNB', 5000: 'Mantle', 146: 'Sonic', 999: 'HyperEVM', 9745: 'Plasma', 10: 'Optimism', 143: 'Monad', 196: 'X Layer' };
         let pendle = null;
         if (pa && Array.isArray(pa.markets)) { const g = {}; for (const m of pa.markets) { const id = +(m.chainId || String(m.pt || '').split('-')[0]) || 0, c = CH[id] || ('rede ' + id); (g[c] || (g[c] = { markets: [] })).markets.push({ name: m.name, expiry: m.expiry, details: { impliedApy: m.details && m.details.impliedApy, liquidity: m.details && m.details.liquidity } }); } pendle = { at: Date.now(), lists: Object.entries(g) }; }
-        else if (prevLab && prevLab.pendleCache && Date.now() - prevLab.pendleCache.at < 6 * 3600e3) pendle = prevLab.pendleCache;
+        else { const feed = await kvGet(e2, 'pendleFeed', null); if (feed && Date.now() - feed.at < 3 * 3600e3) { pendle = feed; delete errs.pendle; } else if (prevLab && prevLab.pendleCache && Date.now() - prevLab.pendleCache.at < 6 * 3600e3) pendle = prevLab.pendleCache; }
         const lr = labStep(prevLab, { now: Date.now(), deribit: [].concat((db && db.result) || [], (de && de.result) || []), p2p: ps && pb ? { sell: ps.result && ps.result.items, buy: pb.result && pb.result.items } : null,
           boros: bo, pendle: pendle ? pendle.lists : [], pendleCache: pendle, aaveApy: y.aaveUsdc && isFinite(y.aaveUsdc.apy) ? y.aaveUsdc.apy : null,
           ptax: st.fronts && st.fronts.brl && st.fronts.brl.ptax, cdiPct: st.fronts && st.fronts.cdi, errs, bfx: bx, bfxCandles: bxc });

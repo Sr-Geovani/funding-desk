@@ -1836,3 +1836,14 @@ test('PPS: estado antigo com ordem aberta não cobra a taxa de novo e entra com 
   const r = xmrPaperStep(old, { m: { edgePct: 4.3, marketUsdDay: 4384 }, now: T, btcUsd: 77000, xmrUsd: 300 });
   assert.equal(r.px.on, true, r.events.join(' | ')); assert.match(r.events.join(' '), /sem taxa nova/);
 });
+
+test('laboratório: rota que recebe o Pendle da tarefa do GitHub exige o token completo e guarda só o necessário', async () => {
+  const env = { FD_KV: memoryKV(), PANEL_TOKEN: 'token-de-teste-com-mais-de-24-chars' };
+  const call = (tok, body) => worker.fetch(new Request('https://api.example/api/lab/pendle', { method: 'POST', headers: { Authorization: 'Bearer ' + tok, 'content-type': 'application/json' }, body: JSON.stringify(body) }), env, {});
+  assert.equal((await call('errado-errado-errado-errado', { markets: [{ name: 'sUSDS' }] })).status, 401);
+  assert.equal((await call(env.PANEL_TOKEN, { markets: [] })).status, 400);
+  const r = await call(env.PANEL_TOKEN, { markets: [{ name: 'sUSDS', chain: 'Ethereum', expiry: '2026-11-25T00:00:00.000Z', impliedApy: 0.06, liquidity: 4e6, extra: 'x'.repeat(50) }] });
+  assert.equal(r.status, 200); assert.equal((await r.json()).markets, 1);
+  const raw = await env.FD_KV.get('pendleFeed');
+  assert.ok(raw && !/xxxxx/.test(raw), 'campos extras não são guardados');
+});

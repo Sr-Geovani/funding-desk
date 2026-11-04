@@ -1,0 +1,35 @@
+name: Pendle para o laboratório (de hora em hora)
+# A API pública do Pendle limita por IP e nega o IP da Cloudflare (dividido com muitos sites). Esta tarefa lê os mercados
+# ativos (dado público) e entrega ao backend só nome, rede, vencimento, taxa fixa e liquidez. O log é público: nada de
+# token ou endereço do backend é impresso.
+on:
+  schedule:
+    - cron: '23 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  pendle:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ler o Pendle e entregar ao backend
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PANEL_TOKEN: ${{ secrets.PANEL_TOKEN }}
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$PANEL_TOKEN"
+          if [ -z "$PANEL_TOKEN" ] || [ -z "$CLOUDFLARE_API_TOKEN" ]; then echo "::warning::segredos ausentes; pulando"; exit 0; fi
+          T=$(printf '%s' "$CLOUDFLARE_API_TOKEN" | tr -d '[:space:]'); echo "::add-mask::$T"
+          A=$(printf '%s' "$CLOUDFLARE_ACCOUNT_ID" | tr -d '[:space:]'); echo "::add-mask::$A"
+          SUB=$(curl -sS -H "Authorization: Bearer $T" "https://api.cloudflare.com/client/v4/accounts/$A/workers/subdomain" | jq -r '.result.subdomain // empty')
+          [ -n "$SUB" ] || { echo "::warning::subdomínio não encontrado"; exit 0; }
+          echo "::add-mask::$SUB"
+          curl -sS --retry 3 --retry-delay 20 -f -A 'funding-desk/1.0' 'https://api-v2.pendle.finance/core/v1/markets/all?isActive=true' -o all.json
+          jq -c '{markets: [.markets[] | {name, expiry,
+            chain: ({"1":"Ethereum","42161":"Arbitrum","8453":"Base","56":"BNB","5000":"Mantle","146":"Sonic","999":"HyperEVM","9745":"Plasma","10":"Optimism","143":"Monad","196":"X Layer"}[((.chainId // (.pt | split("-")[0])) | tostring)] // ("rede " + ((.chainId // (.pt | split("-")[0])) | tostring))),
+            impliedApy: .details.impliedApy, liquidity: .details.liquidity}]}' all.json > body.json
+          echo "mercados: $(jq '.markets | length' body.json)"
+          curl -sS -f -X POST -H "Authorization: Bearer $PANEL_TOKEN" -H 'Content-Type: application/json' --data @body.json \
+            "https://funding-desk-api.$SUB.workers.dev/api/lab/pendle" | jq -c '{ok, markets}'
