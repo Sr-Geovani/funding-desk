@@ -49,12 +49,17 @@ export function xmrPaperStep(px, { m, now, btcUsd, xmrUsd, rules = XMR_RULES }) 
   }
 }
 
+const now0 = (p) => p.lastTs || Date.now();
 // Resumo para o painel e o relatório: resultado em dólar (receita do pool contra o gasto em BTC e taxas).
 export function xmrSummary(p, btcUsd, xmrUsd) {
   if (!p) return null;
   const costUsd = (p.spentBtc + p.feesBtc) * (btcUsd || 0), resUsd = p.revUsd - costUsd;
   const days = Math.max(1 / 24, (p.lastTs - p.since) / 864e5);
-  return { since: p.since, on: p.on, edgeNow: p.edgeNow, hoursOn: p.hoursOn, runs: p.runs.length + (p.run ? 1 : 0), spentUsd: costUsd, revUsd: p.revUsd, resultUsd: resUsd,
+  // janelas: quantas e quanto duram (para saber se dá para pegar e com que frequência aparecem)
+  const R = p.runs.filter((r) => r.end > now0(p) - 7 * 864e5), mins = R.map((r) => (r.end - r.start) / 60e3).sort((a, b) => a - b);
+  const win = { n7d: R.length, perDay: R.length / Math.min(7, Math.max(1 / 24, (p.lastTs - p.since) / 864e5)), medMin: mins.length ? mins[mins.length >> 1] : null,
+    avgEdgePct: R.length ? R.reduce((a, r) => a + r.edgePct, 0) / R.length : null };
+  return { win, since: p.since, on: p.on, edgeNow: p.edgeNow, hoursOn: p.hoursOn, runs: p.runs.length + (p.run ? 1 : 0), spentUsd: costUsd, revUsd: p.revUsd, resultUsd: resUsd,
     retPct: costUsd > 0 ? resUsd / costUsd * 100 : null, perDayUsd: resUsd / days, walletBtc: p.walletBtc + p.orderBtc, poolXmr: p.poolXmr, paidXmr: p.paidXmr,
     paidUsd: xmrUsd ? p.paidXmr * xmrUsd : null, payouts: p.payouts.length, lastRuns: p.runs.slice(-5).reverse(), run: p.run };
 }

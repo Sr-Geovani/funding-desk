@@ -111,7 +111,7 @@ function miningMap(wtm, books, opts) {
   var pps = (opts.ppsFeePct === undefined ? 4 : opts.ppsFeePct) / 100, loss = (opts.lossPct === undefined ? 2.5 : opts.lossPct) / 100;
   var coins = wtmCoins(wtm).concat(opts.extra || []), minVol = opts.minVolBtc === undefined ? 10 : opts.minVolBtc;
   function liquid(c) { return c.exchange_rate_vol === undefined || c.exchange_rate_vol === null || +c.exchange_rate_vol >= minVol; }
-  return ALGOS.map(function (a) {
+  return (opts.algos || ALGOS).map(function (a) {
     var all = coins.filter(function (c) { return c.algorithm === a.wtm; })
       .map(function (c) { return { coin: c.tag, name: c.name || c.tag, rev: coinRevenueBtc(c), raw: coinRevenueRaw(c), liquid: liquid(c) }; })
       .filter(function (c) { return c.rev > 0; }).sort(function (x, y) { return y.rev - x.rev; });

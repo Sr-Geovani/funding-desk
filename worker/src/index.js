@@ -14,6 +14,7 @@ import FDR from '../../radar.js';
 import { algoPaperStep } from './paperalgo.js';
 import { xmrPaperStep, xmrSummary, XMR_RULES } from './paperxmr.js';
 import { brainContext, ruleReply, aiReply, reportText } from './jarbas.js';
+import { runScan } from './scan.js';
 import { braiinsOf, mrrOf, stratumCheck } from './hashmarkets.js';
 import { macroOf, marketPanorama } from './panorama.js';
 import { entryChecklist } from './entry.js';
@@ -672,7 +673,8 @@ export async function tick(env, opts = {}) {
       // Mesma operação "como real" para todos os algoritmos de pool PPS (cada um com a sua carteira virtual): pega toda
       // janela que abre, em qualquer moeda, e mostra quanto teria rendido de verdade.
       ppsOps = Object.assign({}, ppsOps || {});
-      for (const mm of map.filter((x) => x.pps && x.algo !== 'RANDOMXMONERO')) {
+      const scanNow = await kvGet(env, 'scan', null), extraMap = scanNow && now - scanNow.at < 40 * 60e3 ? scanNow.extra || [] : [];
+      for (const mm of map.filter((x) => x.pps && x.algo !== 'RANDOMXMONERO').concat(extraMap)) {
         const r2 = xmrPaperStep(ppsOps[mm.algo], { m: mm, now, btcUsd: prices.v.btcUsd, xmrUsd: null,
           rules: Object.assign({}, XMR_RULES, cfg.xmrSimBtc > 0 ? { walletBtc: cfg.xmrSimBtc } : {}, isFinite(cfg.xmrEnterPct) ? { enterPct: cfg.xmrEnterPct } : {}) });
         ppsOps[mm.algo] = Object.assign(r2.px, { label: mm.label, coins: mm.coins });
@@ -936,6 +938,7 @@ async function jarbasContext(env, now) {
   const [state, cfg] = await Promise.all([kvGet(env, 'state', {}), getConfig(env)]);
   const st = Object.assign({}, state, { xmrSum: xmrSummary(state.paperXmr, (state.market || {}).btcUsd, state.xmrUsd),
     fundPaperSum: state.fundPaper ? fundPaperSummary(state.fundPaper, FD.DEFAULT_FEES) : null, ppsSum: Object.entries(state.ppsOps || {}).map(([k, v]) => Object.assign(xmrSummary(v, (state.market || {}).btcUsd, null), { label: v.label })), alertScoreSum: state.alertScore ? alertScoreSummary(state.alertScore) : null });
+  st.scan = await kvGet(env, 'scan', null);
   return { ctx: brainContext(st, cfg, now), cfg };
 }
 // Mensagem recebida no Telegram (webhook). Só o chat cadastrado conversa e manda ações.
@@ -985,7 +988,7 @@ async function api(req, env, url, fetchFn) {
         paper: state.paper || null, paperBurst: state.paperBurst || null, paperPlan: state.paperPlan || null, paperAlways: state.paperAlways || null, paperSniper: state.paperSniper || null, sniper: state.sniper || null, snInfo: state.snInfo || null, snLog: (state.snLog || []).slice(-40).reverse(), jarbas: { telegram: !!(state.tgHook && state.tgHook.ok), hookErr: state.tgHook && !state.tgHook.ok ? state.tgHook.err : null, lastReport: state.dailyRep || null }, orderEnds: (state.orderEnds || []).slice(-10).reverse(), wallet: state.acct ? { btc: state.acct.balanceBtc, at: state.acct.balAt || state.acct.at } : null, paperArchive: state.paperArchive || null, entryCheck: state.entryCheck || null, calib: state.calib || null, minEdgeNow: state.minEdgeNow || null, luck24: state.luck24 || null, balPlan: state.balPlan || null, planOn: !!state.planBackup, calibPrev: state.calibPrev || null, robotTest: state.robotTest || null, aiReport: state.aiReport || null, mktMargin: state.mktMargin || null, asertF: state.asertF || null, exec: execSummary(state.execLog), bestScen: state.bestScen || null, hashMkts: state.hashMkts || null, fronts: state.fronts || null, frontsPaper: state.frontsPaper || null, market2: state.market2 || null, aiPanorama: state.aiPanorama || null,
         fundPaperLT: state.fundPaperLT ? { summary: fundPaperSummary(state.fundPaperLT, LT_FEES), open: state.fundPaperLT.open, closed: state.fundPaperLT.closed.slice(-50).reverse() } : null, opLog: (state.opLog || []).slice(-20).reverse(), real: state.real ? Object.assign({}, state.real, { paid: undefined }) : null,
         fundPaper: state.fundPaper ? { summary: fundPaperSummary(state.fundPaper, FD.DEFAULT_FEES), open: state.fundPaper.open, closed: state.fundPaper.closed.slice(-100).reverse() } : null,
-        algoPaper: state.algoPaper || null, xmr: xmrSummary(state.paperXmr, (state.market || {}).btcUsd, state.xmrUsd), xmrUsd: state.xmrUsd || null, ppsOps: Object.fromEntries(Object.entries(state.ppsOps || {}).map(([k, v]) => [k, Object.assign(xmrSummary(v, (state.market || {}).btcUsd, null), { label: v.label, coins: v.coins })])), algoMapNow: state.algoMap || [],
+        algoPaper: state.algoPaper || null, xmr: xmrSummary(state.paperXmr, (state.market || {}).btcUsd, state.xmrUsd), xmrUsd: state.xmrUsd || null, ppsOps: Object.fromEntries(Object.entries(state.ppsOps || {}).map(([k, v]) => [k, Object.assign(xmrSummary(v, (state.market || {}).btcUsd, null), { label: v.label, coins: v.coins })])), algoMapNow: state.algoMap || [], scan: await (async () => { const sc = await kvGet(env, 'scan', null); return sc ? { at: sc.at, extra: sc.extra, mrr: sc.mrr, err: sc.err } : null; })(),
         fundPaperAI: state.fundPaperAI ? { summary: fundPaperSummary(state.fundPaperAI, FD.DEFAULT_FEES), open: state.fundPaperAI.open, closed: state.fundPaperAI.closed.slice(-100).reverse() } : null,
         aiScores: state.aiScores || {}, stable24: Object.keys(state.stable24 || {}), pairStats: state.pairStats || {},
         ai: state.ai ? Object.assign({ xp: state.ai.xp, since: state.ai.since, stats: state.ai.stats, ctrl: (state.ai.ctrl || {}).stats || {}, unscoredBy: state.ai.unscored || {}, open: state.ai.open.slice(-30).reverse(), done: state.ai.done.slice(-60).reverse() }, levelOf(state.ai)) : null,
@@ -1365,6 +1368,12 @@ export default {
       if (w.firedAt && !w.tookMs && Date.now() - w.firedAt < 45e3) await new Promise((r) => setTimeout(r, 25e3));
       return tick(env);
     };
-    ctx.waitUntil(min % 3 === 0 ? full().catch(fail('ciclo')) : blockWatch(env).catch(fail('vigia de bloco')));
+    // minutos 1, 16, 31 e 46: varredura de oportunidades (mais algoritmos e MiningRigRentals), numa chamada só dela
+    const scan = async () => {
+      const e2 = await withCreds(env), cfg = await getConfig(e2), st = await kvGet(e2, 'state', {});
+      const r = await runScan({ env: e2, now: Date.now(), cfg, btcUsd: (st.market || {}).btcUsd || null });
+      await kvPut(e2, 'scan', r);
+    };
+    ctx.waitUntil(min % 3 === 0 ? full().catch(fail('ciclo')) : min % 15 === 1 ? scan().catch(fail('varredura')) : blockWatch(env).catch(fail('vigia de bloco')));
   }
 };

@@ -22,7 +22,9 @@ export const TYPES = {
   btc_retarget: { label: 'DARR depois do reajuste do BTC', h: null, cool: 24 * 12, base: 0.6, hard: true },
   fund_go: { label: 'Entrada de funding paga as taxas em 3 dias', h: 72, cool: 24, base: 0.4, hard: true },
   fund_spike: { label: 'Pico de funding some em 24 h', h: 24, cool: 24, base: 0.7, hard: false },
-  algo_go: { label: 'Outra moeda segue compensando por 6 h', h: 6, cool: 12, base: 0.5, hard: false }
+  algo_go: { label: 'Outra moeda segue compensando por 6 h', h: 6, cool: 12, base: 0.5, hard: false },
+  // 04/11: as janelas das outras moedas duram ~30 min; a previsão de 6 h errava 2 de 3. A nova olha 1 h (a de 6 h fica no histórico).
+  algo_go1: { label: 'Outra moeda segue compensando por 1 h', h: 1, cool: 3, base: 0.5, hard: false }
 };
 const xpOf = (type, hit, trusted) => (!hit ? 0 : TYPES[type] && TYPES[type].hard ? XP.hard + (trusted ? XP.trusted : 0) : XP.easy);
 const H = 3600e3;
@@ -82,7 +84,7 @@ function check(o, snap, now) {
     if (!isFinite(snap.darr)) return {};
     return { hit: Math.abs(snap.darr / o.pred - 1) <= 0.03, value: snap.darr, beat: isFinite(o.naive) ? Math.abs(snap.darr - o.pred) < Math.abs(snap.darr - o.naive) : null };
   }
-  if (o.type === 'algo_go') { const a = (snap.algos || []).find((x) => x.k === o.key); return a && isFinite(a.edge) ? { hit: a.edge > 0, value: a.edge } : {}; }
+  if (o.type === 'algo_go' || o.type === 'algo_go1') { const a = (snap.algos || []).find((x) => x.k === o.key); return a && isFinite(a.edge) ? { hit: a.edge > 0, value: a.edge } : {}; }
   if (o.type === 'fund_spike') { const sp = spreadOf(snap.rows, o.key); return sp !== null ? { hit: sp < o.s0 / 2, value: sp } : {}; }
   if (o.type === 'fund_go') {
     // acompanhada pela própria IA (pagamentos reais de funding − 4 execuções maker + deslize), sem depender de alerta
@@ -177,7 +179,7 @@ export function brainStep(prev, snap) {
     if (hit !== null) r.check = ({ mine_buy: `margem 1 h depois: ${f(value, 1)}%`, mine_wait: `${hit ? 'o robô compraria' : 'o robô não compraria'} no período; maior margem ${f(value, 1)}% (precisava ${o.minEdge}%)`,
       mine_avoid: `${hit ? 'o robô não compraria' : 'o robô compraria'} no período; maior margem ${f(value, 1)}% (mínimo ${o.minEdge}%)`, mine_close: `dificuldade variou ${f(value, 2)}%`,
       btc_retarget: `DARR depois: ${f(value, 3)} (previsto ${f(o.pred, 3)}${isFinite(o.naive) ? '; sem a previsão, ficaria em ' + f(o.naive, 3) + (c.beat ? ': a previsão chegou mais perto' : ': a previsão não ajudou') : ''})`,
-      algo_go: `margem 6 h depois: ${f(value, 1)}%`, fund_spike: `diferença 24 h depois: ${f(value, 0)}% a.a. (era ${f(o.s0, 0)}%)`, fund_go: `resultado em 3 dias, já com as taxas: US$${f(value, 2)}` })[o.type] || '';
+      algo_go: `margem 6 h depois: ${f(value, 1)}%`, algo_go1: `margem 1 h depois: ${f(value, 1)}%`, fund_spike: `diferença 24 h depois: ${f(value, 0)}% a.a. (era ${f(o.s0, 0)}%)`, fund_go: `resultado em 3 dias, já com as taxas: US$${f(value, 2)}` })[o.type] || '';
     if (hit !== null) {
       const s = ai.stats[o.type] || (ai.stats[o.type] = { n: 0, hits: 0, xp: 0 });
       s.n++; if (hit) s.hits++;
@@ -245,7 +247,7 @@ export function brainStep(prev, snap) {
     if (sp >= 60 && !(snap.stable24 || {})[key]) spikes.push([key, sp]);
   }
   for (const [key, sp] of spikes.sort((a, b) => b[1] - a[1]).slice(0, 2)) add('fund_spike', key, `o pico de ${key.split('|')[0]} (${f(sp, 0)}% a.a. entre ${key.split('|').slice(1).join(' e ')}) cai pela metade em 24 h`, { s0: sp, why: `${f(sp, 0)}% a.a. é pico (≥ 60%) e não ficou 24 h estável; no histórico, diferenças assim voltam em ~18 h.` });
-  for (const a of (snap.algos || []).filter((x) => x.level === 'go' && isFinite(x.edge) && x.edge <= 100)) add('algo_go', a.k, `${a.label} segue com margem positiva daqui a 6 h (agora ${f(a.edge, 1)}%)`, { why: `margem ${f(a.edge, 1)}% = receita por hash ÷ aluguel típico − 1, já com taxas; livro com ordens suficientes.` });
+  for (const a of (snap.algos || []).filter((x) => x.level === 'go' && isFinite(x.edge) && x.edge <= 100)) add('algo_go1', a.k, `${a.label} segue com margem positiva daqui a 1 h (agora ${f(a.edge, 1)}%)`, { why: `margem ${f(a.edge, 1)}% = receita por hash ÷ aluguel típico − 1, já com taxas; livro com ordens suficientes.` });
   for (const k of Object.keys(ai.last)) if (now - ai.last[k] > 30 * 24 * H) delete ai.last[k];
   return { ai, events };
 }
@@ -284,7 +286,7 @@ export function analysis(snap, ai) {
   out.push(nf ? `Funding: ${nf} oportunidade${nf > 1 ? 's' : ''} passa${nf > 1 ? 'm' : ''} na regra validada (24 h estável, ordem limite).` : 'Funding: nenhuma oportunidade passa na regra validada agora (24 h estável + ordem limite + meia-vida).');
   for (const fo of (snap.fund || []).slice(0, 2)) recs.push({ area: 'funding', text: `${fo.coin}: short ${fo.key.split('|')[1]}, long ${fo.key.split('|')[2]} com ordem limite (~US$${f((fo.netUsd || 0), 2)} projetado em 3 dias).`, type: 'fund_go' });
   const ag = (snap.algos || []).filter((x) => x.level === 'go' && isFinite(x.edge) && x.edge <= 100);
-  if (ag.length) { out.push(`Outras moedas: ${ag.map((a) => a.label + ' ' + f(a.edge, 1) + '%').join(', ')} compensam em pool PPS (ordem manual).`); for (const a of ag.slice(0, 2)) recs.push({ area: 'outras', text: `${a.label}: ordem manual na NiceHash para pool PPS enquanto a margem ficar positiva.`, type: 'algo_go' }); }
+  if (ag.length) { out.push(`Outras moedas: ${ag.map((a) => a.label + ' ' + f(a.edge, 1) + '%').join(', ')} compensam em pool PPS (ordem manual).`); for (const a of ag.slice(0, 2)) recs.push({ area: 'outras', text: `${a.label}: ordem manual na NiceHash para pool PPS enquanto a margem ficar positiva.`, type: 'algo_go1' }); }
   for (let i = 0; i < out.length; i++) out[i] = plain(out[i]);
   for (const r of recs) { r.text = plain(r.text); const rel = reliability(ai, r.type); r.conf = rel.conf; r.trusted = rel.trusted; r.n = rel.n; r.hard = !!TYPES[r.type].hard; r.rate = rel.n ? (ai.stats[r.type].hits / rel.n) : null; }
   // Autocrítica: tipo de previsão com 8+ conferidas e acerto abaixo de 40% não vira recomendação; fica marcado com o placar.

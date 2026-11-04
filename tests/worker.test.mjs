@@ -930,13 +930,13 @@ test('IA: cria previsões dos sinais, confere no prazo e ganha XP', () => {
   const T0 = Date.UTC(2026, 9, 31, 12), H = 36e5;
   const base = { now: T0, edge: 1.5, green: false, minEdge: 3, darr: 1.05, D: 5e11, mom: { vsEmaPct: 3 }, ret: null, win: { last6h: 30, bigShare6h: 0.5, bigShare24h: 0.5 }, fund: [], rows: {}, stable24: {}, algos: [{ k: 'SCRYPT', label: 'Scrypt', edge: 8, level: 'go' }], scoreDone: [] };
   let r = brainStep(null, base);
-  assert.deepEqual(r.ai.open.map((o) => o.type).sort(), ['algo_go', 'mine_wait']);
+  assert.deepEqual(r.ai.open.map((o) => o.type).sort(), ['algo_go1', 'mine_wait']);
   assert.match(r.events[0], /IA prevê/);
   // margem passa do mínimo antes de 6 h → acerto; Scrypt segue positivo em 6 h → acerto
   r = brainStep(r.ai, Object.assign({}, base, { now: T0 + 2 * H, edge: 3.5, green: true }));
   r = brainStep(r.ai, Object.assign({}, base, { now: T0 + 6 * H + 1, edge: 1, green: false }));
   const done = r.ai.done.filter((d) => d.hit !== null);
-  assert.ok(done.some((d) => d.type === 'mine_wait' && d.hit) && done.some((d) => d.type === 'algo_go' && d.hit), JSON.stringify(done));
+  assert.ok(done.some((d) => d.type === 'mine_wait' && d.hit) && done.some((d) => d.type === 'algo_go1' && d.hit), JSON.stringify(done));
   assert.ok(r.ai.xp > 0);
   // a compra feita às 2 h (mine_buy) é conferida 1 h depois: margem 1% ≥ 0 → acerto
   assert.ok(r.ai.done.some((d) => d.type === 'mine_buy' && d.hit));
@@ -1789,4 +1789,16 @@ test('operação PPS não entra em livro raso e sai se o livro ficar raso', asyn
   assert.equal(r.px.on, false); assert.match(r.events.join(' '), /livro é raso/);
   r = xmrPaperStep(r.px, { m: { edgePct: 9 }, now: T + 900e3, btcUsd: 77000 }); assert.equal(r.px.on, true);
   r = xmrPaperStep(r.px, { m: { edgePct: 9, thin: true }, now: T + 1800e3, btcUsd: 77000 }); assert.equal(r.px.on, false);
+});
+
+test('varredura: MRR convertida por hash e comparada com a receita; janelas das operações PPS', async () => {
+  const { mrrMap } = await import('../worker/src/scan.js');
+  const info = { data: [{ name: 'randomx', display: 'RandomX', suggested_price: { amount: '0.0001', unit: 'kh*day' }, stats: { prices: { lowest: { amount: '0.00008', unit: 'kh*day' } }, available: { rigs: '10', hash: { hash: '2', unit: 'mh' } }, rented: { hash: { hash: '', unit: 'mh' } } } }] };
+  const r = mrrMap(info, { RANDOMXMONERO: 0.0001 / 1e3 * 1.05 }); // receita 5% acima do preço sugerido
+  assert.ok(Math.abs(r.RANDOMXMONERO.sugEdgePct - 5) < 1e-9); assert.ok(Math.abs(r.RANDOMXMONERO.lowEdgePct - 31.25) < 1e-9); assert.equal(r.RANDOMXMONERO.availH, 2e6);
+  const { xmrPaperStep, xmrSummary } = await import('../worker/src/paperxmr.js');
+  const T = Date.UTC(2026, 10, 4, 14); let p = null;
+  for (let i = 0; i < 12; i++) p = xmrPaperStep(p, { m: { edgePct: i % 4 < 2 ? 5 : -1 }, now: T + i * 15 * 60e3, btcUsd: 77000 }).px;
+  const S = xmrSummary(p, 77000, null);
+  assert.equal(S.win.n7d, 3); assert.equal(Math.round(S.win.medMin), 30);
 });
