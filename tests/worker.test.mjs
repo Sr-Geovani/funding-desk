@@ -1540,9 +1540,13 @@ test('04/11: fonte de reserva da rede, pool não some ao salvar vazio e Sniper s
   // bits do bloco 975876 (Haskoin) = dificuldade 505.326.272.678 (fonte principal)
   assert.ok(Math.abs(bitsToDifficulty(402795778) / 505326272678.3747 - 1) < 1e-6);
   const fetchFn = async (u) => (String(u).startsWith('https://p/') ? new Response('erro', { status: 522 }) : new Response(JSON.stringify({ height: 975876, bits: 402795778, time: 1793785448 })));
-  const ch = createChain({ base: 'https://p', backup: 'https://r', fetchFn });
+  const ch = createChain({ base: 'https://p', haskoin: 'https://r', fetchFn });
   const i = await ch.info();
-  assert.equal(i.height, 975876); assert.equal(i.src, 'reserva'); assert.equal(i.time, 1793785448000);
+  assert.equal(i.height, 975876); assert.equal(i.src, 'haskoin'); assert.equal(i.time, 1793785448000);
+  // Haskoin fora: usa a ActorForth
+  const f2 = async (u) => (String(u).startsWith('https://r/') ? new Response('x', { status: 500 }) : new Response(JSON.stringify({ blocks: 975876, difficulty: 5e11 })));
+  const i2 = await createChain({ base: 'https://p', haskoin: 'https://r', fetchFn: f2 }).info();
+  assert.equal(i2.src, 'actorforth'); assert.equal(i2.height, 975876);
   await assert.rejects(createChain({ base: 'https://p', fetchFn }).info()); // sem reserva: erro como antes
   // pool: campo vazio não apaga; clearPool apaga
   const cur = Object.assign({}, DEFAULT_CONFIG, { poolId: 'pool-1' });

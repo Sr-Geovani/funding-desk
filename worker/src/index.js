@@ -4,7 +4,7 @@
 //   e guardadas cifradas no KV (ENC_KEY), ou como segredos do Worker. Nunca voltam para o painel.
 // - Agendamento (cron): robô de mineração. Começa em modo "observe" (só registra o que faria).
 import { createClient, NH_HOSTS, DEFAULT_ALGO } from './nicehash.js';
-import { createChain, paidTo, DEFAULT_BCH_REST, DEFAULT_BCH_BACKUP, DEFAULT_PRICE_URL } from './chain.js';
+import { createChain, paidTo, DEFAULT_BCH_REST, DEFAULT_HASKOIN, DEFAULT_PRICE_URL } from './chain.js';
 import { DEFAULT_CONFIG, sanitizeConfig, parseBook, computeMarket, sizeMarket, decide, limitsFromEnv, sniperDecide } from './bot.js';
 import { fundingSnapshot, runAlerts } from './alerts.js';
 import { paperStep, realStep, execStep, execSummary } from './paper.js';
@@ -100,7 +100,7 @@ function nhClient(env, fetchFn) {
   return createClient({ base, key: env.NH_API_KEY, secret: env.NH_API_SECRET, org: env.NH_ORG_ID, algorithm: env.NH_ALGO || DEFAULT_ALGO, fetchFn: fetchFn || fetch });
 }
 function chainClient(env, fetchFn) {
-  return createChain({ base: env.BCH_REST || DEFAULT_BCH_REST, backup: env.BCH_BACKUP === 'off' ? null : (env.BCH_BACKUP || (env.BCH_REST ? null : DEFAULT_BCH_BACKUP)), priceUrl: env.PRICE_URL || DEFAULT_PRICE_URL, fetchFn: fetchFn || fetch });
+  return createChain({ base: env.BCH_REST || DEFAULT_BCH_REST, haskoin: env.HASKOIN_URL === 'off' ? null : (env.HASKOIN_URL || (env.BCH_REST ? null : DEFAULT_HASKOIN)), priceUrl: env.PRICE_URL || DEFAULT_PRICE_URL, fetchFn: fetchFn || fetch });
 }
 function hasKeys(env) { return !!(env.NH_API_KEY && env.NH_API_SECRET && env.NH_ORG_ID); }
 
