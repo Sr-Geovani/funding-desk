@@ -57,3 +57,26 @@ export async function runScan({ env, fetchFn, now, cfg, btcUsd }) {
   return { at: now, extra: extra.map((m) => ({ algo: m.algo, label: m.label, coins: m.coins, edgePct: m.edgePct, level: m.level, thin: !!m.thin, marketUsdDay: m.marketUsdDay, pps: true, unit: m.unit, revBtcPerH: m.revBtcPerH, rentBtcPerH: m.rentBtcPerH })),
     mrr: mrr.ok ? mrrMap(mrr.v, rev) : {}, err };
 }
+
+// Histórico de preço do hash na NiceHash (diário, desde 2019): onde o preço de hoje fica no último ano. Alugar quando o
+// hash está barato contra o próprio histórico é a regra de quem compra hash (como no "forward curve" do Hashrate Index).
+// Um algoritmo por varredura (rodízio) para não pesar no ciclo.
+export const HIST_ALGOS = ['SHA256ASICBOOST', 'RANDOMXMONERO', 'EQUIHASH', 'SCRYPT', 'KAWPOW', 'X11', 'ETCHASH', 'KHEAVYHASH', 'AUTOLYKOS', 'OCTOPUS', 'NEXAPOW', 'BEAMV3', 'EAGLESONG', 'ALEPHIUM'];
+export function priceHistStats(rows, now) {
+  const R = (rows || []).filter((r) => Array.isArray(r) && r[2] > 0).map((r) => [r[0] * 1000, +r[2]]).filter((r) => r[0] > now - 366 * 864e5);
+  if (R.length < 30) return null;
+  const last = R[R.length - 1][1], v = R.map((r) => r[1]).sort((a, b) => a - b), med = v[v.length >> 1];
+  const d30 = R.filter((r) => r[0] > now - 31 * 864e5), m30 = d30.length ? d30.reduce((a, r) => a + r[1], 0) / d30.length : null;
+  return { at: now, days: R.length, pct: v.filter((x) => x <= last).length / v.length * 100, vsMedPct: (last / med - 1) * 100, vs30Pct: m30 ? (last / m30 - 1) * 100 : null,
+    min: v[0], max: v[v.length - 1], spark: R.filter((_, i) => i % 7 === 0 || i === R.length - 1).map((r) => +(r[1] / med).toFixed(3)) };
+}
+export async function scanHistory({ env, fetchFn, now, prev }) {
+  const f = fetchFn || fetch, H = Object.assign({}, prev || {});
+  const next = HIST_ALGOS.slice().sort((a, b) => ((H[a] && H[a].at) || 0) - ((H[b] && H[b].at) || 0))[0];
+  if (H[next] && now - H[next].at < 3 * 3600e3) return H;
+  try {
+    const r = await f((env.NH_BASE || 'https://api2.nicehash.com').replace(/\/$/, '') + '/main/api/v2/public/algo/history?algorithm=' + next, { headers: { accept: 'application/json' } });
+    if (r.ok) { const st = priceHistStats(await r.json(), now); H[next] = st || { at: now, empty: true }; }
+  } catch (e) { H[next] = Object.assign({}, H[next] || {}, { at: now, err: String(e.message || e) }); }
+  return H;
+}

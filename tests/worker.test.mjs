@@ -1819,3 +1819,12 @@ test('PPS como arbitragem: só entra se a janela paga a taxa e manda o lucro de 
   r = xmrPaperStep(p, { m: { edgePct: -1, marketUsdDay: 50000 }, now: T + 5 * 15 * M, btcUsd: 77000 });
   assert.match(r.events.join(' '), /Resultado desta operação: gasto US\$[\d,]+ \+ taxa US\$0,77, receita US\$[\d,]+, (lucro|prejuízo) .* em 75 min\. Acumulado/);
 });
+
+test('lastro: preço do hash de hoje contra o último ano (percentil e mediana)', async () => {
+  const { priceHistStats } = await import('../worker/src/scan.js');
+  const now = Date.UTC(2026, 10, 4), rows = [];
+  for (let i = 300; i >= 0; i--) rows.push([Math.floor((now - i * 864e5) / 1000), 1e9, i === 0 ? 0.5 : 1 + (i % 10) / 100]);
+  const s = priceHistStats(rows, now);
+  assert.ok(s.pct < 1, JSON.stringify(s)); assert.ok(s.vsMedPct < -45); assert.equal(s.days, 301);
+  assert.equal(priceHistStats(rows.slice(-5), now), null); // pouco histórico: sem conclusão
+});

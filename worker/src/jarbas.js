@@ -31,6 +31,7 @@ export function brainContext(state, cfg, now) {
       miningRigRentals: Object.entries((s.scan && s.scan.mrr) || {}).map(([k, v]) => ({ algo: k, margemPrecoSugeridoPct: v.sugEdgePct === null ? null : +v.sugEdgePct.toFixed(1), margemMenorPrecoPct: v.lowEdgePct === null ? null : +v.lowEdgePct.toFixed(1), maquinas: v.availRigs })),
       rendimentos: Object.assign({}, Object.fromEntries(Object.entries((s.frontsPaper && s.frontsPaper.f) || {}).map(([k, v]) => [k, v.rate]).filter(([, r]) => isFinite(r))),
         Object.fromEntries(Object.entries((s.market2 && s.market2.yields) || {}).map(([k, v]) => [k, v && v.apy]).filter(([, r]) => isFinite(r))), { cdiReaisAnual: s.fronts && s.fronts.cdi }),
+      lastro: { margemHoraAHora: s.marginLastro || {}, precoHashVsAno: Object.fromEntries(Object.entries((s.scan && s.scan.hist) || {}).filter(([, h]) => h && isFinite(h.pct)).map(([k, h]) => [k, { percentil: Math.round(h.pct), vsMedianaPct: +h.vsMedPct.toFixed(1), dias: h.days }])) },
       monero: X ? { resultadoUsd: +X.resultUsd.toFixed(2), retornoPct: X.retPct !== null ? +X.retPct.toFixed(1) : null, horasLigado: +X.hoursOn.toFixed(1), ligadoAgora: X.on, margemAgoraPct: X.edgeNow, xmrRecebido: +X.paidXmr.toFixed(4) } : null,
       funding: fp ? { operacoes: fp.closed, positivas: fp.wins, resultadoUsd: +(fp.netUsd || 0).toFixed(2), taxasUsd: fp.feesUsd, fundingRecebidoUsd: fp.fundingUsd, horasMedias: fp.avgHours } : null,
       placarSinaisFunding: sc ? { sinais: sc.scored, acertos: sc.hits, projetadoUsd: +(sc.projUsd || 0).toFixed(2), realUsd: +(sc.realUsd || 0).toFixed(2) } : null,
@@ -42,7 +43,7 @@ export function brainContext(state, cfg, now) {
 }
 
 const HELP = 'Sou o Jarbas, o sócio que acompanha a operação. Pergunte do jeito que quiser ou use:\n' +
-  '/status – resumo de tudo\n/oportunidades – onde entrar agora\n/rendimentos – juros e CDI\n/mrr – preços da MiningRigRentals\n/bch – mineração BCH e Sniper\n/monero – operação Monero (PPS)\n/funding – funding e placar dos sinais\n/saldo – dinheiro real e carteira\n/copiloto – onde a IA acerta e erra\n/relatorio – relatório do dia\n' +
+  '/status – resumo de tudo\n/placar – resultado e lastro de cada frente\n/oportunidades – onde entrar agora\n/rendimentos – juros e CDI\n/mrr – preços da MiningRigRentals\n/bch – mineração BCH e Sniper\n/monero – operação Monero (PPS)\n/funding – funding e placar dos sinais\n/saldo – dinheiro real e carteira\n/copiloto – onde a IA acerta e erra\n/relatorio – relatório do dia\n' +
   '/modo observar | ativo | desligado – muda o modo do robô\n/sniper ligar | desligar';
 
 function reportText(c) {
@@ -78,6 +79,16 @@ export function ruleReply(text, c) {
   if (snp) { const on = /ligar|ligado|on/.test(snp[1]) && !/desl/.test(snp[1]); return { text: `Feito: Sniper ${on ? 'ligado' : 'desligado'}.`, action: { sniper: on } }; }
   if (/^\/(start|ajuda|help)|^ajuda/.test(t)) return { text: HELP };
   if (/relat/.test(t) || /^\/status|como estamos|resumo|status/.test(t)) return { text: reportText(c) };
+  if (/placar|lastro|hist[oó]ric/.test(t)) { const S = c.simulacoes, Lm = S.lastro.margemHoraAHora || {}, Hp = S.lastro.precoHashVsAno || {};
+    const ln = [`Placar das frentes (real e simulado):`, `• BCH solo, real: gasto ${money(c.dinheiroReal.gastoTotalUsd)}, ${c.dinheiroReal.blocos} blocos. Margem em 7 dias: média ${pc(c.bch.margem7d && c.bch.margem7d.media)}, positiva em ${c.bch.margem7d ? Math.round(c.bch.margem7d.positivaPctDoTempo) : '—'}% do tempo.`];
+    if (S.sniper) ln.push(`• Sniper, simulado: gasto ${money(S.sniper.gastoUsd)}, valor esperado ${money(S.sniper.valorEsperadoUsd)}.`);
+    const pr = (S.ppsComoReal || []).reduce((a, x) => a + x.resultadoUsd, 0) + (S.monero ? S.monero.resultadoUsd : 0); ln.push(`• Moedas PPS, como real: ${money(pr)}.`);
+    if (S.funding) ln.push(`• Funding, simulado: ${S.funding.operacoes} operações, ${S.funding.positivas} positivas, ${money(S.funding.resultadoUsd)}.`);
+    const lk = Object.entries(Lm).filter(([, v]) => v.horas >= 6).sort((a, b) => b[1].acima2Pct - a[1].acima2Pct).slice(0, 4);
+    if (lk.length) ln.push('Lastro (margem hora a hora): ' + lk.map(([k, v]) => `${k} acima de +2% em ${Math.round(v.acima2Pct)}% das ${v.horas} h`).join('; ') + '.');
+    const hk = Object.entries(Hp).sort((a, b) => a[1].percentil - b[1].percentil).slice(0, 4);
+    if (hk.length) ln.push('Preço do hash hoje contra o último ano: ' + hk.map(([k, v]) => `${k} no percentil ${v.percentil} (${pc(v.vsMedianaPct)} da mediana)`).join('; ') + '.');
+    return { text: ln.join('\n') }; }
   if (/rendiment|cdi|juros|stable/.test(t)) { const Y = c.simulacoes.rendimentos || {}; const ks = Object.keys(Y).filter((k) => k !== 'cdiReaisAnual').sort((a, b) => Y[b] - Y[a]); return { text: 'Rendimentos ao ano (dólar): ' + ks.map((k) => `${k} ${pc(Y[k])}`).join(', ') + (Y.cdiReaisAnual ? `. CDI em reais: ${pc(Y.cdiReaisAnual)} (sem risco de cripto).` : '.') }; }
   if (/mrr|rig ?rentals|miningrig/.test(t)) { const M = c.simulacoes.miningRigRentals || []; return { text: M.length ? 'MiningRigRentals (aluguel por máquina, mínimo de algumas horas):\n' + M.sort((a, b) => (b.margemMenorPrecoPct ?? -1e9) - (a.margemMenorPrecoPct ?? -1e9)).map((x) => `• ${x.algo}: ${pc(x.margemMenorPrecoPct)} no menor preço, ${pc(x.margemPrecoSugeridoPct)} no sugerido (${x.maquinas} máquinas)`).join('\n') : 'A varredura da MRR roda a cada 15 min.' }; }
   if (/oportunidad|onde entrar|o que fazer/.test(t)) { const O = c.simulacoes.oportunidades || []; return { text: O.length ? 'Oportunidades agora (margem já com taxas):\n' + O.map((o) => `• ${o.algo} (${o.moedas.join('+')}, ${o.tipo}): ${pc(o.margemPct)}${o.tipo === 'PPS' ? (o.livroRaso && o.margemPct >= 0 ? ' → livro raso, não dá para comprar' : o.margemPct >= 2 ? ' → ENTRAR' : o.margemPct >= 0 ? ' → perto' : '') : ''}`).join('\n') : 'O mapa de moedas atualiza a cada 15 min.' }; }
