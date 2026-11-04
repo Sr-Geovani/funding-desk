@@ -1852,7 +1852,32 @@ function renderBrain(){
     placarHTML(S,cfg)+'<button class="sm pri" data-go="mine:pps" style="margin-top:8px">Ver o mapa das moedas PPS</button><div class="eyebrow" style="margin:10px 0 4px">Oportunidades agora</div><p class="note" style="margin:0 0 6px">A porcentagem é a margem: quanto a moeda paga acima (+) ou abaixo (−) do que custa o aluguel, já com as taxas. +5% = cada US$100 de aluguel voltam US$105.</p><div class="stack" style="gap:6px">'+(oppH||'<p class="note">O mapa de moedas atualiza a cada 15 min.</p>')+'</div>'+
     (yH?'<p class="note" style="margin:6px 0 0">Rendimentos ao ano em dólar: '+yH+'. CDI em reais: '+pct((S.fronts&&S.fronts.cdi)||13.65,2)+' (sem risco de cripto; em dólar some a variação do câmbio).</p>':'')+
     (acts.length?'<details style="margin-top:8px" open><summary>Atividade agora</summary><div class="stack" style="gap:2px;margin-top:4px">'+acts.map(function(x){return '<div class="note">'+hhmm(new Date(x.t))+' · '+esc(x.text)+'</div>'}).join('')+'</div></details>':'')+
-    '<p class="note" style="margin:6px 0 0">Converse com o Jarbas no Telegram: /status, /monero, /bch, /funding, /saldo, /copiloto, /relatorio.</p>';
+    '<p class="note" style="margin:6px 0 0">Converse com o Jarbas no Telegram: /status, /monero, /bch, /funding, /saldo, /copiloto, /laboratorio, /relatorio.</p>';
+}
+// Laboratório de novas frentes (30 dias, papel): base, P2P USDT/BRL, Boros e Pendle PT × Aave, contra o CDI.
+function renderLab(){
+  var el=$('h_lab');if(!el)return;var S=ops.status&&ops.status.state,L=S&&S.lab;if(!L||!L.now){el.hidden=true;return}el.hidden=false;
+  var N=L.now,cdi=N.cdiPct||(S.fronts&&S.fronts.cdi)||13.65,h=L.hitPct||{},a=L.avg||{};
+  var p1=function(x){return x===null||x===undefined||!isFinite(x)?'—':pctp(x,1)},hit=function(x){return x===null||x===undefined?'—':nf(x,0)+'% do tempo'};
+  var b=(N.basis||[])[0],P=N.p2p,BO=(N.boros||[]).filter(function(x){return x.liquid&&!x.spread}),bo=BO.slice().sort(function(x,y){return y.gapPp-x.gapPp})[0],bp=BO.slice().sort(function(x,y){return x.gapPp-y.gapPp})[0];
+  var PE=N.pendle||[],peB=PE.filter(function(x){return x.blue}),peX=PE.filter(function(x){return !x.blue});
+  var row=function(t,v,n,cls){return '<tr><td>'+t+'</td><td class="'+(cls||'')+'">'+v+'</td><td class="note">'+n+'</td></tr>'};
+  var rows=[
+    row('Base spot × futuro (Deribit)',b?p1(b.netApr)+' ao ano':'—',b?esc(b.inst)+', '+nf(b.days,0)+' dias, já com 0,3% de custo. Regra: ≥10%. Bate a regra '+hit(h.basis):'sem dado',b&&b.netApr>=cdi?'good':'bad'),
+    row('P2P USDT/BRL (Bybit)',P?'compra R$'+nf(P.ask,3)+' · venda R$'+nf(P.bid,3):'—',P?'diferença '+pctp(P.spreadPct,2)+'; comprar e vender na hora dá '+pct(P.crossPct,2)+' (sem arbitragem para quem só aceita anúncios). Ágio sobre o PTAX '+pct(P.premPtaxPct||0,2):'sem dado',P&&P.crossPct>=0.8?'good':'bad'),
+    row('Boros: receber fixo',bo?p1(bo.fixed)+' fixo × '+p1(bo.floating)+' flutuante':'—',bo?esc(bo.sym)+' ('+esc(bo.venue||'')+'), diferença '+(bo.gapPp>=0?'+':'')+nf(bo.gapPp,1)+' p.p. Regra: ≥5 p.p. Bate '+hit(h.borosRecebeFixo):'sem mercado líquido',bo&&bo.gapPp>=5?'good':''),
+    row('Boros: pagar fixo',bp?p1(bp.fixed)+' fixo × '+p1(bp.floating)+' flutuante':'—',bp?esc(bp.sym)+': trava o custo e recebe o flutuante; ganha só se o funding continuar alto. Bate '+hit(h.borosPagaFixo):'sem mercado líquido',''),
+    row('Pendle PT (primeira linha)',peB[0]?p1(peB[0].apy)+' fixo':'—',peB.length?peB.slice(0,3).map(function(x){return esc(x.name)+' '+p1(x.apy)+' por '+x.days+' d ('+esc(x.chain)+')'}).join(' · ')+'. Aave paga '+p1(N.aaveApy)+'. Regra: ≥2 p.p. acima da Aave. Bate '+hit(h.pendle):'sem mercado',peB[0]&&peB[0].gapPp>=2?'good':'')
+  ];
+  var paper=L.paper||{},po=paper.open||[],pc=paper.closed||[];
+  el.innerHTML='<div class="eyebrow">Laboratório de novas frentes · 30 dias, só papel</div><div class="lead">Nenhuma vira operação real por taxa anunciada, só com lucro líquido repetido</div>'+
+    '<p class="note" style="margin:6px 0 8px">Coleta a cada 15 min desde '+new Date(L.since).toLocaleDateString('pt-BR')+' ('+nf(L.days||0,1)+' dias, '+L.samples+' leituras). Referência: CDI '+pctp(cdi,2)+' ao ano em reais. Taxas em dólar, ao ano.</p>'+
+    '<div class="scroll"><table style="font-size:12px"><tr><th>Frente</th><th>Agora</th><th>Leitura</th></tr>'+rows.join('')+'</table></div>'+
+    (peX.length?'<p class="note" style="margin:6px 0 0">Exóticas (juros altos = prêmio de risco do emissor; fora do papel): '+peX.slice(0,4).map(function(x){return esc(x.name)+' '+p1(x.apy)}).join(' · ')+'.</p>':'')+
+    '<p class="note" style="margin:6px 0 0">Médias do período: base '+p1(a.basisNetApr)+' · diferença P2P '+p1(a.p2pSpreadPct)+' · Pendle primeira linha '+p1(a.pendleApy)+' · Aave '+p1(a.aaveApy)+'.</p>'+
+    '<div class="eyebrow" style="margin:10px 0 4px">Posições em papel (US$500 cada, retorno travado até o vencimento)</div>'+
+    (po.length||pc.length?'<div class="stack" style="gap:2px">'+po.map(function(o){return '<div class="note">Aberta: '+esc(o.kind)+' · '+p1(o.apr)+' ao ano · trava '+usd(o.lockedUsd)+' · vence '+new Date(o.exp).toLocaleDateString('pt-BR')+'</div>'}).concat(pc.map(function(o){return '<div class="note">Vencida: '+esc(o.kind)+' · +'+usd(o.resultUsd||0)+'</div>'})).join('')+'</div>':'<p class="note" style="margin:0">Nenhuma ainda: nada passou da regra (e do CDI) até agora.</p>')+
+    '<p class="note" style="margin:6px 0 0">No Telegram: /laboratorio.</p>';
 }
 // Placar das frentes com lastro: resultado real/simulado, histórico e veredito (como um relatório de mesa).
 function placarHTML(S,cfg){
@@ -1981,6 +2006,7 @@ function thinkStart(){if(thinkT)return;thinkT=setInterval(function(){var el=$('b
   el.classList.add('fade');setTimeout(function(){thinkI=(thinkI+1)%T.length;el.innerHTML='<b>Pensando agora:</b> '+esc(T[thinkI]);el.classList.remove('fade')},350)},4000)}
 function renderHome(){
   try{renderBrain();thinkStart()}catch(e){console.error('cérebro',e)}
+  try{renderLab()}catch(e){console.error('laboratório',e)}
   renderLink();
   var rows=VENUES.map(function(v){
     var s=state.src[v];

@@ -31,19 +31,21 @@ export function brainContext(state, cfg, now) {
       miningRigRentals: Object.entries((s.scan && s.scan.mrr) || {}).map(([k, v]) => ({ algo: k, margemPrecoSugeridoPct: v.sugEdgePct === null ? null : +v.sugEdgePct.toFixed(1), margemMenorPrecoPct: v.lowEdgePct === null ? null : +v.lowEdgePct.toFixed(1), maquinas: v.availRigs })),
       rendimentos: Object.assign({}, Object.fromEntries(Object.entries((s.frontsPaper && s.frontsPaper.f) || {}).map(([k, v]) => [k, v.rate]).filter(([, r]) => isFinite(r))),
         Object.fromEntries(Object.entries((s.market2 && s.market2.yields) || {}).map(([k, v]) => [k, v && v.apy]).filter(([, r]) => isFinite(r))), { cdiReaisAnual: s.fronts && s.fronts.cdi }),
+      laboratorioRef: true,
       lastro: { margemHoraAHora: s.marginLastro || {}, precoHashVsAno: Object.fromEntries(Object.entries((s.scan && s.scan.hist) || {}).filter(([, h]) => h && isFinite(h.pct)).map(([k, h]) => [k, { percentil: Math.round(h.pct), vsMedianaPct: +h.vsMedPct.toFixed(1), dias: h.days }])) },
       monero: X ? { resultadoUsd: +X.resultUsd.toFixed(2), retornoPct: X.retPct !== null ? +X.retPct.toFixed(1) : null, horasLigado: +X.hoursOn.toFixed(1), ligadoAgora: X.on, margemAgoraPct: X.edgeNow, xmrRecebido: +X.paidXmr.toFixed(4) } : null,
       funding: fp ? { operacoes: fp.closed, positivas: fp.wins, resultadoUsd: +(fp.netUsd || 0).toFixed(2), taxasUsd: fp.feesUsd, fundingRecebidoUsd: fp.fundingUsd, horasMedias: fp.avgHours } : null,
       placarSinaisFunding: sc ? { sinais: sc.scored, acertos: sc.hits, projetadoUsd: +(sc.projUsd || 0).toFixed(2), realUsd: +(sc.realUsd || 0).toFixed(2) } : null,
       outrasMoedas: Object.entries((s.algoPaper && s.algoPaper.algos) || {}).filter(([, a]) => a.spendUsd > 0).map(([k, a]) => ({ algo: a.label || k, gastoUsd: +a.spendUsd.toFixed(2), retornoPct: +((a.revUsd / a.spendUsd - 1) * 100).toFixed(1), margemAgoraPct: isFinite(a.edgeNow) ? +a.edgeNow.toFixed(1) : null }))
     },
+    laboratorio: s.lab || null,
     copiloto: { nivel: ai.level && ai.level.name, acertoGeralPct: ai.rate ? Math.round(ai.rate * 100) : null, porTipo: stats, manchete: s.aiReport && s.aiReport.headline },
     erros: (s.errors || []).slice(0, 3)
   };
 }
 
 const HELP = 'Sou o Jarbas, o sócio que acompanha a operação. Pergunte do jeito que quiser ou use:\n' +
-  '/status – resumo de tudo\n/placar – resultado e lastro de cada frente\n/oportunidades – onde entrar agora\n/rendimentos – juros e CDI\n/mrr – preços da MiningRigRentals\n/bch – mineração BCH e Sniper\n/monero – operação Monero (PPS)\n/funding – funding e placar dos sinais\n/saldo – dinheiro real e carteira\n/copiloto – onde a IA acerta e erra\n/relatorio – relatório do dia\n' +
+  '/status – resumo de tudo\n/laboratorio – novas frentes (base, P2P, Boros, Pendle)\n/placar – resultado e lastro de cada frente\n/oportunidades – onde entrar agora\n/rendimentos – juros e CDI\n/mrr – preços da MiningRigRentals\n/bch – mineração BCH e Sniper\n/monero – operação Monero (PPS)\n/funding – funding e placar dos sinais\n/saldo – dinheiro real e carteira\n/copiloto – onde a IA acerta e erra\n/relatorio – relatório do dia\n' +
   '/modo observar | ativo | desligado – muda o modo do robô\n/sniper ligar | desligar';
 
 function reportText(c) {
@@ -79,6 +81,14 @@ export function ruleReply(text, c) {
   if (snp) { const on = /ligar|ligado|on/.test(snp[1]) && !/desl/.test(snp[1]); return { text: `Feito: Sniper ${on ? 'ligado' : 'desligado'}.`, action: { sniper: on } }; }
   if (/^\/(start|ajuda|help)|^ajuda/.test(t)) return { text: HELP };
   if (/relat/.test(t) || /^\/status|como estamos|resumo|status/.test(t)) return { text: reportText(c) };
+  if (/laborat|novas frentes|basis|base|p2p|boros|pendle/.test(t)) { const B = c.laboratorio; if (!B) return { text: 'O laboratório coleta a cada 15 min; a primeira leitura sai na próxima varredura.' };
+    const n = B.now || {}, b = (n.basis || [])[0], p = n.p2p, bo = (n.boros || [])[0], pe = (n.pendle || [])[0];
+    return { text: [`Laboratório de novas frentes (${(B.days || 0).toFixed(1).replace('.', ',')} dias, ${B.samples} leituras; papel, sem capital):`,
+      `• Base (Deribit): melhor agora ${b ? b.inst + ' ' + pc(b.netApr) + ' ao ano líquido' : '—'}; média ${pc(B.avg.basisNetApr)}; acima de 10% em ${B.hitPct.basis !== null ? Math.round(B.hitPct.basis) : '—'}% das leituras.`,
+      `• P2P USDT/BRL (Bybit): compra ${p ? p.ask : '—'}, venda ${p ? p.bid : '—'}, diferença ${p ? pc(p.spreadPct, 2) : '—'}; ágio sobre a PTAX ${p ? pc(p.premPtaxPct, 2) : '—'}. Arbitragem direta (vender acima de onde se compra) apareceu em ${B.hitPct.p2p !== null ? Math.round(B.hitPct.p2p) : '—'}% das leituras.`,
+      `• Boros: ${bo ? bo.sym + ' fixa ' + pc(bo.fixed) + ' × flutuante ' + pc(bo.floating) : '—'}.`,
+      `• Pendle PT (stablecoin): ${pe ? pe.name + ' ' + pc(pe.apy) + ' fixo por ' + pe.days + ' dias' : '—'}; Aave USDC ${pc(n.aaveApy)}; CDI ${pc(n.cdiPct)} (reais).`,
+      `Papel: ${(B.paper.open || []).length} posições abertas, ${money(B.paper.lockedUsd)} travados.`].join('\n') }; }
   if (/placar|lastro|hist[oó]ric/.test(t)) { const S = c.simulacoes, Lm = S.lastro.margemHoraAHora || {}, Hp = S.lastro.precoHashVsAno || {};
     const ln = [`Placar das frentes (real e simulado):`, `• BCH solo, real: gasto ${money(c.dinheiroReal.gastoTotalUsd)}, ${c.dinheiroReal.blocos} blocos. Margem em 7 dias: média ${pc(c.bch.margem7d && c.bch.margem7d.media)}, positiva em ${c.bch.margem7d ? Math.round(c.bch.margem7d.positivaPctDoTempo) : '—'}% do tempo.`];
     if (S.sniper) ln.push(`• Sniper, simulado: gasto ${money(S.sniper.gastoUsd)}, valor esperado ${money(S.sniper.valorEsperadoUsd)}.`);
