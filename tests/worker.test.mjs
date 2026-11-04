@@ -1707,3 +1707,70 @@ test('armazenamento em Durable Object: pedaços de 120 KB, migra do KV na primei
     assert.equal((await ns.get().fetch('https://store/get?k=nada')).status, 404);
   } finally { t.server.close(); }
 });
+
+test('Monero simulado como real: abre com margem ≥ 2%, paga taxa de ordem, acumula XMR no pool, saca no mínimo e fecha abaixo de 0%', async () => {
+  const { xmrPaperStep, xmrSummary } = await import('../worker/src/paperxmr.js');
+  const T = Date.UTC(2026, 10, 4, 12), M = 60e3, btc = 77000, xmr = 300;
+  let r = xmrPaperStep(null, { m: { edgePct: 1.5 }, now: T, btcUsd: btc, xmrUsd: xmr });
+  assert.equal(r.px.on, false);                                           // 1,5% < 2%: não entra
+  r = xmrPaperStep(r.px, { m: { edgePct: 6 }, now: T + 15 * M, btcUsd: btc, xmrUsd: xmr });
+  assert.equal(r.px.on, true); assert.ok(Math.abs(r.px.orderBtc - 0.00199) < 1e-9); assert.ok(Math.abs(r.px.feesBtc - 0.00001) < 1e-12);
+  let p = r.px; for (let i = 2; i <= 40; i++) p = xmrPaperStep(p, { m: { edgePct: 6 }, now: T + i * 15 * M, btcUsd: btc, xmrUsd: xmr }).px;
+  assert.ok(p.revUsd > 0 && p.spentBtc > 0); assert.ok(p.payouts.length >= 1, 'sacou ao passar de 0,01 XMR');
+  r = xmrPaperStep(p, { m: { edgePct: -1 }, now: T + 41 * 15 * M, btcUsd: btc, xmrUsd: xmr });
+  assert.equal(r.px.on, false); assert.match(r.events.join(' '), /encerraria/);
+  const S = xmrSummary(r.px, btc, xmr);
+  assert.ok(S.resultUsd > 0 && S.retPct > 4 && S.retPct < 6, JSON.stringify(S)); // +6% de margem menos a taxa da ordem
+  assert.ok(Math.abs(S.walletBtc + r.px.spentBtc + r.px.feesBtc - 0.002) < 1e-9);  // o dinheiro fecha
+});
+
+test('config: endereço Monero validado e oculto no modo leitura', () => {
+  const cur = Object.assign({}, DEFAULT_CONFIG);
+  assert.equal(sanitizeConfig({ xmrAddress: '88NHX3tNuAQAWoLweDch8PXjNtGhy5H2cJpsLEtEmDP7C4ougSSTtB1fR93kZ87vVm8XB4xVFxvDkSBYhHR2LZ893gkzPSU' }, cur).errors.length, 0);
+  assert.ok(sanitizeConfig({ xmrAddress: 'bitcoincash:qxyz' }, cur).errors.length > 0);
+});
+
+test('Jarbas: comandos, chat autorizado, ações no robô e webhook com segredo', async () => {
+  const { ruleReply, brainContext } = await import('../worker/src/jarbas.js');
+  const ctx = brainContext({ market: { edgeAtBidPct: -2.1 }, lastHeight: 975900, lastBlockT: Date.now() - 300e3, ai: { stats: { fund_go: { n: 8, hits: 2 } } } }, Object.assign({}, DEFAULT_CONFIG, { mode: 'observe', sniper: true }), Date.now());
+  assert.match(ruleReply('/status', ctx).text, /Relatório do Jarbas/);
+  assert.match(ruleReply('como está o bch?', ctx).text, /975900/);
+  assert.deepEqual(ruleReply('/modo observar', ctx).action, { mode: 'observe' });
+  assert.deepEqual(ruleReply('/sniper desligar', ctx).action, { sniper: false });
+  assert.equal(ruleReply('qual a capital da França?', ctx), null); // sem comando: vai para a IA (se houver chave)
+  const t = await setup();
+  try {
+    const sent = [];
+    const env = Object.assign({}, t.env, { TELEGRAM_BOT_TOKEN: 'tg', TELEGRAM_CHAT_ID: '42' });
+    const fetchFn = (u, o) => { if (String(u).includes('api.telegram.org')) { sent.push(JSON.parse(o.body)); return Promise.resolve(new Response(JSON.stringify({ ok: true }))); } return fetch(u, o); };
+    await tick(env, { fetchFn });
+    const call = (path, body, secret) => worker.fetch(new Request('https://api.example' + path, { method: 'POST', headers: { 'content-type': 'application/json', 'x-telegram-bot-api-secret-token': secret || '' }, body: JSON.stringify(body) }), env, {}, fetchFn);
+    assert.equal((await call('/tg/errado', { message: { chat: { id: 42 }, text: '/status' } }, 'errado')).status, 404);
+    // descobre o segredo pela mesma regra do servidor
+    const k = await crypto.subtle.importKey('raw', new TextEncoder().encode(env.PANEL_TOKEN), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    const sec = Array.from(new Uint8Array(await crypto.subtle.sign('HMAC', k, new TextEncoder().encode('funding-desk/telegram/v1'))).slice(0, 16), (b) => b.toString(16).padStart(2, '0')).join('');
+    assert.equal((await call('/tg/' + sec, { message: { chat: { id: 7 }, text: '/status' } }, sec)).status, 200);
+    assert.equal(sent.filter((x) => x.chat_id === 7).length, 0, 'chat de outra pessoa não recebe nada');
+    await call('/tg/' + sec, { message: { chat: { id: 42 }, text: '/status' } }, sec);
+    assert.ok(sent.some((x) => String(x.chat_id) === '42' && /Relatório do Jarbas/.test(x.text)), JSON.stringify(sent.slice(-2)));
+    await call('/tg/' + sec, { message: { chat: { id: 42 }, text: '/sniper ligar' } }, sec);
+    assert.equal((await t.call('GET', '/api/status')).body.config.sniper, true);
+    await call('/tg/' + sec, { message: { chat: { id: 42 }, text: 'me conta uma piada' } }, sec);
+    assert.ok(sent.some((x) => /cadastre a chave da IA/.test(x.text)));
+  } finally { t.server.close(); }
+});
+
+test('Jarbas com IA: chama a API de mensagens com o resumo e devolve o texto; trata recusa e chave errada', async () => {
+  const { aiReply } = await import('../worker/src/jarbas.js');
+  const reqs = [];
+  const ok = async (u, o) => { reqs.push({ u: String(u), body: JSON.parse(o.body), key: (o.headers.get ? o.headers.get('x-api-key') : o.headers['x-api-key']) });
+    return new Response(JSON.stringify({ id: 'm1', type: 'message', role: 'assistant', model: 'm', stop_reason: 'end_turn', content: [{ type: 'text', text: 'Monero segue positivo.' }], usage: { input_tokens: 1, output_tokens: 1 } }), { status: 200, headers: { 'content-type': 'application/json' } }); };
+  const env = { AI_API_KEY: 'sk-ant-teste-00000000000000000000', AI_MODEL: 'modelo-teste' };
+  assert.equal(await aiReply(env, 'como está o monero?', { simulacoes: { monero: { resultadoUsd: 4.2 } } }, ok), 'Monero segue positivo.');
+  assert.match(reqs[0].u, /\/v1\/messages$/); assert.equal(reqs[0].body.model, 'modelo-teste'); assert.match(reqs[0].body.messages[0].content, /resultadoUsd/);
+  const refuse = async () => new Response(JSON.stringify({ id: 'm2', type: 'message', role: 'assistant', model: 'm', stop_reason: 'refusal', content: [], usage: { input_tokens: 1, output_tokens: 0 } }), { status: 200, headers: { 'content-type': 'application/json' } });
+  assert.match(await aiReply(env, 'x', {}, refuse), /Não consigo responder/);
+  const bad = async () => new Response(JSON.stringify({ type: 'error', error: { type: 'authentication_error', message: 'invalid x-api-key' } }), { status: 401, headers: { 'content-type': 'application/json' } });
+  assert.match(await aiReply(env, 'x', {}, bad), /chave da IA foi recusada/);
+  assert.equal(await aiReply({}, 'x', {}, ok), null);
+});

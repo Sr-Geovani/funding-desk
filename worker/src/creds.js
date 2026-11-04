@@ -6,7 +6,7 @@ const b64 = (u8) => btoa(String.fromCharCode(...u8));
 const unb64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 
 // Campos que viram variáveis do backend (e têm prioridade sobre os segredos do Cloudflare).
-export const CRED_FIELDS = ['NH_API_KEY', 'NH_API_SECRET', 'NH_ORG_ID', 'NH_ENV', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID'];
+export const CRED_FIELDS = ['NH_API_KEY', 'NH_API_SECRET', 'NH_ORG_ID', 'NH_ENV', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID', 'AI_API_KEY', 'AI_MODEL'];
 const KV_KEY = 'creds';
 
 function needKey(secret) {
@@ -72,6 +72,7 @@ export function credStatus(env) {
     updatedAt: c.updatedAt,
     nicehash: { set: nhSet, env: env.NH_BASE ? 'personalizado' : (env.NH_ENV === 'prod' ? 'prod' : 'test'), key: tail(env.NH_API_KEY),
       source: !nhSet ? null : (c.panel.includes('NH_API_KEY') ? 'painel' : 'cloudflare') },
+    ai: { set: !!(env.AI_API_KEY && env.AI_MODEL), key: tail(env.AI_API_KEY), model: env.AI_MODEL || null },
     telegram: { set: tgSet, token: !!env.TELEGRAM_BOT_TOKEN, bot: c.botName,
       source: !tgSet ? null : (c.panel.includes('TELEGRAM_BOT_TOKEN') ? 'painel' : 'cloudflare') }
   };

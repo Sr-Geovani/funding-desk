@@ -199,6 +199,7 @@ details.card>summary{color:var(--fg);font-size:15px}
 
   <!-- INÍCIO -->
   <section id="tab-home" class="stack">
+    <div class="card" id="h_brain" hidden></div>
     <div class="card" id="h_fin"></div>
     <div class="card sig" id="h_act" hidden></div>
     <div class="card" id="h_ai" hidden></div>
@@ -429,6 +430,7 @@ details.card>summary{color:var(--fg);font-size:15px}
     <div id="mine-ops" class="stack" hidden>
       <div class="card" id="o_conn"></div>
       <div class="card sig" id="o_live" aria-live="polite"></div>
+      <div class="card" id="o_xmr"></div>
       <div class="card sig" id="o_status"></div>
       <div class="card"><div class="row" style="justify-content:space-between"><h2 style="margin:0">Ordens na NiceHash</h2><button class="sm" id="o_refresh">Atualizar</button></div>
         <div id="o_bal" class="note" style="margin:6px 0 10px"></div><div id="o_orders" style="display:grid;gap:10px"></div></div>
@@ -473,6 +475,14 @@ details.card>summary{color:var(--fg);font-size:15px}
             <label>Potência do tiro (PH/s)<input id="b_sniperPh" type="text" inputmode="decimal" autocomplete="off" autocorrect="off" spellcheck="false"></label>
             <label>Potência de espera (PH/s)<input id="b_sniperIdlePh" type="text" inputmode="decimal" autocomplete="off" autocorrect="off" spellcheck="false"></label>
             <label>Prazo do tiro sem bloco (min)<input id="b_sniperShotMin" type="text" inputmode="decimal" autocomplete="off" autocorrect="off" spellcheck="false"></label>
+          </div>
+        </details>
+        <details style="margin-top:10px"><summary><b>Operação Monero</b> (aluguel de RandomX + pool PPS; simulada como real)</summary>
+          <p class="note" style="margin:6px 0">Roda como se fosse uma operação real: carteira virtual em BTC, ordem com o mínimo da NiceHash e taxa de ordem nova, entra com margem a partir do valor abaixo e sai quando a margem fica negativa, saldo no pool em XMR e saque a partir de 0,01 XMR para o seu endereço. Não gasta nada até você ligar uma operação real.</p>
+          <div class="grid2">
+            <label style="grid-column:1/-1">Endereço Monero para receber (público)<input id="b_xmrAddress" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="4... ou 8..."></label>
+            <label>Carteira virtual (BTC)<input id="b_xmrSimBtc" type="text" inputmode="decimal" autocomplete="off" placeholder="0,002"></label>
+            <label>Entrar com margem a partir de (%)<input id="b_xmrEnterPct" type="text" inputmode="text" autocomplete="off" placeholder="2"></label>
           </div>
         </details>
         <div class="row" style="margin-top:10px"><button class="pri" id="b_save">Salvar robô</button><button id="b_tick">Rodar ciclo agora</button></div>
@@ -694,6 +704,17 @@ details.card>summary{color:var(--fg);font-size:15px}
         <label>Token do bot<input id="ac_tgtok" type="password" autocomplete="new-password" placeholder="123456789:AAH..."></label>
         <div class="row" style="margin-top:10px"><button class="pri" id="ac_tg_go">Conectar</button><button id="ac_tg_del">Desconectar</button></div>
         <p class="note" id="ac_tg_msg" style="margin:8px 0 0"></p>
+      </details>
+      <details id="ac_ai" style="margin-top:8px"><summary>Jarbas – IA para conversar no Telegram <span id="ac_ai_st" class="chip"></span></summary>
+        <p class="note" style="margin:8px 0">Sem chave, o Jarbas já responde no Telegram pelos comandos (/status, /monero, /bch, /funding, /saldo, /copiloto, /relatorio) e manda o relatório do dia às 08h. Com a chave da API da Anthropic, ele conversa livremente usando os dados do servidor. Cada conversa custa alguns centavos.</p>
+        <ol class="note" style="margin:8px 0;padding-left:18px">
+          <li>Em <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a> → API Keys → Create Key (precisa de créditos na conta).</li>
+          <li>Cole a chave e o ID do modelo indicado no chat. Ao salvar, o servidor faz um teste curto.</li>
+        </ol>
+        <label>Chave da API (sk-ant-...)<input id="ac_aikey" type="password" autocomplete="new-password" placeholder="sk-ant-..."></label>
+        <label>ID do modelo<input id="ac_aimodel" autocomplete="off" autocorrect="off" spellcheck="false"></label>
+        <div class="row" style="margin-top:10px"><button class="pri" id="ac_ai_go">Salvar e testar</button><button id="ac_ai_del">Remover</button></div>
+        <p class="note" id="ac_ai_msg" style="margin:8px 0 0"></p>
       </details>
       <p class="note" style="margin:10px 0 0">As chaves saem deste formulário direto para o seu backend (HTTPS) e ficam cifradas lá. O painel não guarda chaves e o backend nunca as devolve.</p>
     </div>

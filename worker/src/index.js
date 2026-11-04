@@ -12,6 +12,8 @@ import { fundPaperStep, fundPaperSummary, alertScoreStep, alertScoreSummary } fr
 import FD from '../../core.js';
 import FDR from '../../radar.js';
 import { algoPaperStep } from './paperalgo.js';
+import { xmrPaperStep, xmrSummary, XMR_RULES } from './paperxmr.js';
+import { brainContext, ruleReply, aiReply, reportText } from './jarbas.js';
 import { braiinsOf, mrrOf, stratumCheck } from './hashmarkets.js';
 import { macroOf, marketPanorama } from './panorama.js';
 import { entryChecklist } from './entry.js';
@@ -483,6 +485,25 @@ export async function tick(env, opts = {}) {
       }
     }
   }
+  // Jarbas: mantém o webhook do Telegram apontado para este servidor e manda o relatório do dia (08h de Brasília).
+  let tgHook = state.tgHook || null, dailyRep = state.dailyRep || null;
+  if (env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID && !opts.watch) {
+    const self = await kvGet(env, 'self', {}), sec = await tgSecret(env);
+    if (self.url && sec) {
+      const tag = self.url + '#' + sec.slice(0, 6);
+      if (!tgHook || tgHook.tag !== tag || (!tgHook.ok && now - tgHook.at > 30 * 60e3) || now - tgHook.at > 24 * 3600e3) {
+        const r = await settle(fetchFn((env.TG_BASE || 'https://api.telegram.org') + '/bot' + env.TELEGRAM_BOT_TOKEN + '/setWebhook', { method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ url: self.url + '/tg/' + sec, secret_token: sec, allowed_updates: ['message', 'edited_message'] }) }).then((x) => x.json()));
+        tgHook = { tag, at: now, ok: !!(r.ok && r.v && r.v.ok), err: r.ok ? (r.v && r.v.description) || null : r.e };
+        if (tgHook.ok && !(state.tgHook && state.tgHook.ok)) await notify(env, 'Jarbas no ar: pode conversar comigo por aqui. Mande /ajuda para ver o que eu sei fazer.', fetchFn);
+      }
+    }
+    const day = new Date(now).toISOString().slice(0, 10);
+    if (new Date(now).getUTCHours() >= 11 && dailyRep !== day) {
+      dailyRep = day;
+      try { const { ctx } = await jarbasContext(env, now); await notify(env, reportText(ctx), fetchFn); } catch (e) { errors.push('relatório do Jarbas: ' + (e.message || e)); }
+    }
+  }
   // Registro de cada tiro (para conferir atraso e entrega): gatilho, horário do bloco, atraso, potência recebida, fim.
   let snLog = Array.isArray(state.snLog) ? state.snLog.slice(-99) : [];
   if (cfg.sniper) {
@@ -624,7 +645,7 @@ export async function tick(env, opts = {}) {
   }
 
   // Outras moedas (simulado, pool PPS): a cada 15 min, com o mapa de mineração (a mesma conta do painel).
-  let algoPaper = state.algoPaper || null, algoTs = state.algoTs || 0, algoMap = state.algoMap || [], algoRan = false;
+  let algoPaper = state.algoPaper || null, algoTs = state.algoTs || 0, algoMap = state.algoMap || [], algoRan = false, paperXmr = state.paperXmr || null, xmrUsd = state.xmrUsd || null;
   if (cfg.algoPaper !== false && prices.ok && now - algoTs >= 15 * 60e3) {
     const pub = (env.NH_BASE || 'https://api2.nicehash.com').replace(/\/$/, '');
     const getJ = (u) => fetchFn(u, { headers: { accept: 'application/json', 'user-agent': 'funding-desk/1.0' } }).then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
@@ -641,6 +662,13 @@ export async function tick(env, opts = {}) {
       const ap = algoPaperStep(algoPaper, { map, now });
       algoPaper = ap.pa; algoTs = now;
       for (const e of ap.events) log.push({ t: now, kind: 'simulado', text: e });
+      // Operação Monero simulada como real (carteira virtual, ordem, pool PPS e saques)
+      const xc = Object.values((res[0].v && res[0].v.coins) || {}).find((c) => c && c.tag === 'XMR');
+      xmrUsd = xc && +xc.exchange_rate > 0 ? +xc.exchange_rate * prices.v.btcUsd : (state.xmrUsd || null);
+      const xr = xmrPaperStep(paperXmr, { m: map.find((x) => x.algo === 'RANDOMXMONERO'), now, btcUsd: prices.v.btcUsd, xmrUsd,
+        rules: Object.assign({}, XMR_RULES, cfg.xmrSimBtc > 0 ? { walletBtc: cfg.xmrSimBtc } : {}, isFinite(cfg.xmrEnterPct) ? { enterPct: cfg.xmrEnterPct } : {}) });
+      paperXmr = xr.px;
+      for (const e of xr.events) { log.push({ t: now, kind: 'simulado', text: e }); if (cfg.xmrAlerts !== false) await notify(env, e, fetchFn); }
     } else errors.push('WhatToMine: ' + res[0].e);
   }
 
@@ -792,7 +820,7 @@ export async function tick(env, opts = {}) {
     sniper: paperSniper ? { shot: paperSniper.shot, reason: paperSniper.reason } : null, fund: { passing: ((funding && funding.best) || []).length, sim: fundPaper ? fundPaperSummary(fundPaper, FD.DEFAULT_FEES) : null } });
 
   const next = Object.assign({}, dec.state, alertState, {
-    lastTick: now, verified: Object.fromEntries(Object.entries(verified).filter(([, x]) => now - x.at <= 6 * 3600e3)), ai: br.ai, aiAnalysis, plan, acct, algoMap, mempool, stable24, pairStats, msig, darr, recentBlocks, nhWeek, paper, paperBurst, paperPlan, paperAlways, paperSniper, dHist, tHist, mpHist, snInfo, snLog, tipSeen, ordSeen, orderEnds, hashMkts, fronts, frontsPaper, ltStreak, fundPaperLT, market2, aiPanorama, entryCheck, calib, robotTest, luck24, balPlan, minEdgeNow: { value: cfg.minEdgePct, relative: !!cfg.minEdgeRel, base: cfg.minEdgeRel ? cfg.minEdgeBase : cfg.minEdgePct, sniper: !!cfg.sniper }, aiReport: aiRep, mktMargin, asertF, execLog, bestScen, paperArchive, paperPriceV: 2, blockBuf, blockFlush, lastBlockT, real, fundPaper, alertScore, algoPaper, algoTs, aiScores, fundPaperAI, fhistHour, lastHeight: state.lastHeight, poolFix1: state.poolFix1, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig, errNotified,
+    lastTick: now, verified: Object.fromEntries(Object.entries(verified).filter(([, x]) => now - x.at <= 6 * 3600e3)), ai: br.ai, aiAnalysis, plan, acct, algoMap, mempool, stable24, pairStats, msig, darr, recentBlocks, nhWeek, paper, paperBurst, paperPlan, paperAlways, paperSniper, dHist, tHist, mpHist, snInfo, snLog, tipSeen, ordSeen, orderEnds, tgHook, dailyRep, hashMkts, fronts, frontsPaper, ltStreak, fundPaperLT, market2, aiPanorama, entryCheck, calib, robotTest, luck24, balPlan, minEdgeNow: { value: cfg.minEdgePct, relative: !!cfg.minEdgeRel, base: cfg.minEdgeRel ? cfg.minEdgeBase : cfg.minEdgePct, sniper: !!cfg.sniper }, aiReport: aiRep, mktMargin, asertF, execLog, bestScen, paperArchive, paperPriceV: 2, blockBuf, blockFlush, lastBlockT, real, fundPaper, alertScore, algoPaper, paperXmr, xmrUsd, algoTs, aiScores, fundPaperAI, fhistHour, lastHeight: state.lastHeight, poolFix1: state.poolFix1, feesBch: state.feesBch, myBlocks: state.myBlocks || [], lastSig: sig, lastErrSig: errSig, errNotified,
     market: mkt.ok ? { breakEvenEH: mkt.breakEvenEH, capEH: mkt.capEH, fillEH: mkt.fillEH, medianEH: mkt.medianEH, bidEH: mkt.bidEH,
       edgeAtBidPct: mkt.edgeAtBidPct, green: mkt.green, D: mkt.D, bookTotalPH: book ? book.totalPH : 0, bchUsd: mkt.bchUsd, btcUsd: mkt.btcUsd, costPerBlockUsd: mkt.costPerBlockUsd,
       hashpriceNet: mkt.hashpriceNet, blockNetUsd: mkt.blockNetUsd, phDaysPerBlock: mkt.phDaysPerBlock, market: mkt.market } : { ok: false, reason: mkt.reason },
@@ -873,6 +901,7 @@ async function connectTelegram(env, body, fetchFn) {
   const bot = me.username || '';
   await saveCreds(env, { TELEGRAM_BOT_TOKEN: token, botName: bot });
   let chat = null;
+  try { await tg('deleteWebhook', {}); } catch (e) { /* sem webhook */ } // o Jarbas recoloca no próximo ciclo
   try { chat = chatFromUpdates(await tg('getUpdates', { limit: 50, timeout: 0 })); } catch (e) { /* sem mensagens ainda */ }
   if (!chat) return json({ connected: false, bot, needMessage: true, link: bot ? 'https://t.me/' + bot : null });
   try { await tg('sendMessage', { chat_id: chat.id, text: 'Funding Desk conectado ✅ Aqui chegam saídas, riscos e blocos na hora; entradas e oportunidades num resumo a cada 30 min.' }); }
@@ -880,6 +909,47 @@ async function connectTelegram(env, body, fetchFn) {
   await saveCreds(env, { TELEGRAM_CHAT_ID: chat.id });
   await appendLog(env, [{ t: Date.now(), kind: 'config', text: `Telegram conectado (@${bot}, conversa com ${chat.name || chat.type})` }]);
   return json({ connected: true, bot, chatName: chat.name });
+}
+
+/* ---------- Jarbas (Telegram) ---------- */
+async function tgSecret(env) {
+  const t = env.PANEL_TOKEN; if (!t || t.length < 24) return null;
+  const k = await crypto.subtle.importKey('raw', new TextEncoder().encode(t), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const sig = new Uint8Array(await crypto.subtle.sign('HMAC', k, new TextEncoder().encode('funding-desk/telegram/v1')));
+  return Array.from(sig.slice(0, 16), (b) => b.toString(16).padStart(2, '0')).join('');
+}
+async function tgSend(env, chatId, text, fetchFn) {
+  const parts = String(text).match(/[\s\S]{1,3800}/g) || [''];
+  for (const p of parts) await (fetchFn || fetch)((env.TG_BASE || 'https://api.telegram.org') + '/bot' + env.TELEGRAM_BOT_TOKEN + '/sendMessage', {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ chat_id: chatId, text: p }) });
+}
+async function jarbasContext(env, now) {
+  const [state, cfg] = await Promise.all([kvGet(env, 'state', {}), getConfig(env)]);
+  const st = Object.assign({}, state, { xmrSum: xmrSummary(state.paperXmr, (state.market || {}).btcUsd, state.xmrUsd),
+    fundPaperSum: state.fundPaper ? fundPaperSummary(state.fundPaper, FD.DEFAULT_FEES) : null, alertScoreSum: state.alertScore ? alertScoreSummary(state.alertScore) : null });
+  return { ctx: brainContext(st, cfg, now), cfg };
+}
+// Mensagem recebida no Telegram (webhook). Só o chat cadastrado conversa e manda ações.
+export async function handleTelegram(env, update, fetchFn) {
+  const msg = update && (update.message || update.edited_message);
+  if (!msg || !msg.chat || !msg.text) return 'ignorado';
+  if (!env.TELEGRAM_CHAT_ID || String(msg.chat.id) !== String(env.TELEGRAM_CHAT_ID)) return 'chat não autorizado';
+  const now = Date.now(), { ctx, cfg } = await jarbasContext(env, now);
+  let r = ruleReply(msg.text, ctx), out;
+  if (r && r.action) {
+    const { config, errors } = sanitizeConfig(r.action, cfg, limitsFromEnv(env));
+    if (errors.length) out = 'Não deu: ' + errors.join('; ');
+    else if (config.mode === 'active' && !hasKeys(env)) out = 'Não dá para ir para Ativo: a NiceHash não está conectada.';
+    else { await kvPut(env, 'config', config); await appendLog(env, [{ t: now, kind: 'config', text: 'Jarbas (Telegram): ' + r.text }]); out = r.text; }
+  } else if (r) {
+    out = r.text;
+    // pergunta que caiu num comando, mas é longa: a IA (se houver) comenta em cima dos números
+    if (msg.text.length > 40 && !/^\//.test(msg.text)) { const a = await aiReply(env, msg.text, ctx, fetchFn); if (a) out = a; }
+  } else {
+    out = (await aiReply(env, msg.text, ctx, fetchFn)) || 'Não entendi. Tente /status, /monero, /bch, /funding, /saldo, /copiloto ou /relatorio. Para conversar livremente, cadastre a chave da IA em Ajustes → Jarbas.';
+  }
+  await tgSend(env, msg.chat.id, out, fetchFn);
+  return 'respondido';
 }
 
 /* ---------- rotas ---------- */
@@ -903,10 +973,10 @@ async function api(req, env, url, fetchFn) {
       telegram: !!(env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHAT_ID), creds: credStatus(env), limits, config: cfg,
       state: { lastTick: state.lastTick, lastHeight: state.lastHeight, market: state.market, myBlocks: state.myBlocks || [], dailyUsd: state.dailyUsd || 0,
         errors: state.errors || [], edgeHist: state.edgeHist || [], alerts: (state.alerts || []).slice(-30).reverse(),
-        paper: state.paper || null, paperBurst: state.paperBurst || null, paperPlan: state.paperPlan || null, paperAlways: state.paperAlways || null, paperSniper: state.paperSniper || null, sniper: state.sniper || null, snInfo: state.snInfo || null, snLog: (state.snLog || []).slice(-40).reverse(), orderEnds: (state.orderEnds || []).slice(-10).reverse(), wallet: state.acct ? { btc: state.acct.balanceBtc, at: state.acct.balAt || state.acct.at } : null, paperArchive: state.paperArchive || null, entryCheck: state.entryCheck || null, calib: state.calib || null, minEdgeNow: state.minEdgeNow || null, luck24: state.luck24 || null, balPlan: state.balPlan || null, planOn: !!state.planBackup, calibPrev: state.calibPrev || null, robotTest: state.robotTest || null, aiReport: state.aiReport || null, mktMargin: state.mktMargin || null, asertF: state.asertF || null, exec: execSummary(state.execLog), bestScen: state.bestScen || null, hashMkts: state.hashMkts || null, fronts: state.fronts || null, frontsPaper: state.frontsPaper || null, market2: state.market2 || null, aiPanorama: state.aiPanorama || null,
+        paper: state.paper || null, paperBurst: state.paperBurst || null, paperPlan: state.paperPlan || null, paperAlways: state.paperAlways || null, paperSniper: state.paperSniper || null, sniper: state.sniper || null, snInfo: state.snInfo || null, snLog: (state.snLog || []).slice(-40).reverse(), jarbas: { telegram: !!(state.tgHook && state.tgHook.ok), hookErr: state.tgHook && !state.tgHook.ok ? state.tgHook.err : null, lastReport: state.dailyRep || null }, orderEnds: (state.orderEnds || []).slice(-10).reverse(), wallet: state.acct ? { btc: state.acct.balanceBtc, at: state.acct.balAt || state.acct.at } : null, paperArchive: state.paperArchive || null, entryCheck: state.entryCheck || null, calib: state.calib || null, minEdgeNow: state.minEdgeNow || null, luck24: state.luck24 || null, balPlan: state.balPlan || null, planOn: !!state.planBackup, calibPrev: state.calibPrev || null, robotTest: state.robotTest || null, aiReport: state.aiReport || null, mktMargin: state.mktMargin || null, asertF: state.asertF || null, exec: execSummary(state.execLog), bestScen: state.bestScen || null, hashMkts: state.hashMkts || null, fronts: state.fronts || null, frontsPaper: state.frontsPaper || null, market2: state.market2 || null, aiPanorama: state.aiPanorama || null,
         fundPaperLT: state.fundPaperLT ? { summary: fundPaperSummary(state.fundPaperLT, LT_FEES), open: state.fundPaperLT.open, closed: state.fundPaperLT.closed.slice(-50).reverse() } : null, opLog: (state.opLog || []).slice(-20).reverse(), real: state.real ? Object.assign({}, state.real, { paid: undefined }) : null,
         fundPaper: state.fundPaper ? { summary: fundPaperSummary(state.fundPaper, FD.DEFAULT_FEES), open: state.fundPaper.open, closed: state.fundPaper.closed.slice(-100).reverse() } : null,
-        algoPaper: state.algoPaper || null,
+        algoPaper: state.algoPaper || null, xmr: xmrSummary(state.paperXmr, (state.market || {}).btcUsd, state.xmrUsd), xmrUsd: state.xmrUsd || null,
         fundPaperAI: state.fundPaperAI ? { summary: fundPaperSummary(state.fundPaperAI, FD.DEFAULT_FEES), open: state.fundPaperAI.open, closed: state.fundPaperAI.closed.slice(-100).reverse() } : null,
         aiScores: state.aiScores || {}, stable24: Object.keys(state.stable24 || {}), pairStats: state.pairStats || {},
         ai: state.ai ? Object.assign({ xp: state.ai.xp, since: state.ai.since, stats: state.ai.stats, ctrl: (state.ai.ctrl || {}).stats || {}, unscoredBy: state.ai.unscored || {}, open: state.ai.open.slice(-30).reverse(), done: state.ai.done.slice(-60).reverse() }, levelOf(state.ai)) : null,
@@ -998,6 +1068,19 @@ async function api(req, env, url, fetchFn) {
   if (p === '/credentials' && m === 'GET') return json(credStatus(env));
   if (p === '/credentials' && m === 'PUT') return putCredentials(env, body, fetchFn);
   if (p === '/telegram' && m === 'POST') return connectTelegram(env, body, fetchFn);
+  if (p === '/ai' && m === 'POST') {
+    // chave e modelo da IA do Jarbas: ficam cifrados junto com as outras credenciais
+    if (body.clear) { await saveCreds(env, { AI_API_KEY: null, AI_MODEL: null }); return json({ ok: true, cleared: true }); }
+    const key = String(body.key || '').trim(), model = String(body.model || '').trim();
+    if (!/^sk-ant-[A-Za-z0-9_-]{20,}$/.test(key)) return json({ error: 'chave inválida: ela começa com sk-ant- (console da Anthropic → API Keys)' }, 400);
+    if (!/^[a-z0-9][a-z0-9.-]{2,60}$/.test(model)) return json({ error: 'informe o ID do modelo (ex.: o indicado no chat)' }, 400);
+    const e2 = Object.assign(Object.create(env), { AI_API_KEY: key, AI_MODEL: model });
+    const test = await aiReply(e2, 'Responda só: ok', { teste: true }, fetchFn);
+    if (!test || /recusad|falhou|Não consegui|limite/.test(test)) return json({ error: 'a IA não respondeu ao teste: ' + (test || 'sem resposta') }, 400);
+    await saveCreds(env, { AI_API_KEY: key, AI_MODEL: model });
+    await appendLog(env, [{ t: Date.now(), kind: 'config', text: 'Jarbas: IA conectada (modelo ' + model + ')' }]);
+    return json({ ok: true, model });
+  }
   if (p === '/log' && m === 'GET') return json({ log: (await kvGet(env, 'log', [])).slice().reverse() });
   if (p === '/kill' && m === 'POST') {
     const cfg = await getConfig(env), done = [], fail = [];
@@ -1215,6 +1298,15 @@ export async function blockWatch(env, opts = {}) {
   return fired ? Object.assign({ fired: true, n: fired, polls }, last) : { fired: false, polls };
 }
 
+// Endereço público do servidor (para o webhook do Telegram): anotado quando o painel chama, sem gravar se não mudou.
+let selfMem = null;
+function selfUrlSeen(env, origin, ctx) {
+  if (!/^https:\/\//.test(origin) || selfMem === origin) return;
+  selfMem = origin;
+  const w = kvGet(env, 'self', {}).then((x) => (x.url !== origin ? kvPut(env, 'self', { url: origin, at: Date.now() }) : null)).catch(() => {});
+  if (ctx && ctx.waitUntil) ctx.waitUntil(w);
+}
+
 export default {
   async fetch(req, env, ctx, fetchFn) {
     const url = new URL(req.url), h = cors(env, req);
@@ -1229,14 +1321,22 @@ export default {
         hh.set('Access-Control-Allow-Origin', '*');
         return new Response(r.body, { status: r.status, headers: hh });
       }
+      if (url.pathname.startsWith('/tg/') && req.method === 'POST') {
+        const e2 = await withCreds(env), sec = await tgSecret(e2);
+        if (!sec || url.pathname !== '/tg/' + sec || req.headers.get('x-telegram-bot-api-secret-token') !== sec) return json({ error: 'não encontrado' }, 404);
+        const upd = await req.json().catch(() => null), work = handleTelegram(e2, upd, fetchFn).catch((er) => appendLog(e2, [{ t: Date.now(), kind: 'erro', text: 'Jarbas: ' + (er.message || er) }]));
+        if (ctx && ctx.waitUntil) ctx.waitUntil(work); else await work;
+        return json({ ok: true });
+      }
       if (url.pathname.startsWith('/api/')) {
+        if (url.pathname === '/api/status' && env.FD_STORE) { const o = url.origin; selfUrlSeen(env, o, ctx); }
         if (!allowedOrigin(env, req.headers.get('Origin')) && req.headers.get('Origin')) return json({ error: 'origem não permitida' }, 403, h);
         const full = authOk(req, env), ro = !full && await readOk(req, env, url);
         if (!full && !ro) return json({ error: 'token inválido ou PANEL_TOKEN não configurado (mínimo 24 caracteres)' }, 401, h);
         let r = await api(req, await withCreds(env), url, fetchFn);
         if (ro && url.pathname === '/api/status') { // leitura: sem endereço, chaves e Telegram
           const j = await r.json();
-          if (j.config) j.config = Object.assign({}, j.config, { payoutAddress: j.config.payoutAddress ? '(oculto)' : '' });
+          if (j.config) j.config = Object.assign({}, j.config, { payoutAddress: j.config.payoutAddress ? '(oculto)' : '', xmrAddress: j.config.xmrAddress ? '(oculto)' : '' });
           j.creds = null; j.readOnly = true;
           r = json(j);
         }

@@ -762,7 +762,7 @@ function freshen(){
   if(settings.apiUrl&&!$('tab-mine').hidden&&!$('mine-net').hidden&&now-blk.at>120000)loadBlocksLog();
 }
 var MODE_TXT={off:'Desligado',observe:'Observando',active:'Ativo'},MODE_CHIP={off:'',observe:'warn',active:'ok'};
-var BOT_FIELDS=['mode','onBlock','payoutAddress','minEdgePct','minEdgeMode','relPct','relFloorPct','sniperDiffDropPct','sniperFeeX','sniperAgeMin','sniperMinEdge','sniperPh','sniperIdlePh','sniperShotMin','bidPremiumPct','targetPh','minPh','sessionBudgetUsd','stopCooldownH','dailyBudgetUsd','weeklyLossUsd','poolFeePct','rentFeePct','poolId','orderAmountBtc'];
+var BOT_FIELDS=['mode','onBlock','payoutAddress','minEdgePct','minEdgeMode','relPct','relFloorPct','sniperDiffDropPct','sniperFeeX','sniperAgeMin','sniperMinEdge','sniperPh','sniperIdlePh','sniperShotMin','bidPremiumPct','targetPh','minPh','sessionBudgetUsd','stopCooldownH','dailyBudgetUsd','weeklyLossUsd','poolFeePct','rentFeePct','poolId','orderAmountBtc','xmrAddress','xmrSimBtc','xmrEnterPct'];
 // Margem em linguagem simples: retorno médio (não é chance) e a chance de achar bloco com a potência alvo em 24 h.
 function robotExplain(m,cfg){
   var ph=+cfg.targetPh||0,pd=m.phDaysPerBlock||(m.D?m.D*4294967296/1e15/86400:0),blk=m.blockNetUsd||(m.bchUsd?3.125*m.bchUsd*(1-(cfg.poolFeePct||2)/100):0);
@@ -1299,6 +1299,20 @@ function renderLuck(){
 }
 document.addEventListener('click',function(e){var b=e.target.closest('#bl_luck [data-luckw]');if(!b)return;luckWin=+b.dataset.luckw;renderLuck()});
 // Faixa "Agora" no topo do Operar: rede, Sniper, ordem e saldo num lugar só (sem trocar de aba para ver o bloco).
+// Operação Monero (simulada como real): o que teria acontecido com dinheiro de verdade, desde o início.
+function renderXmr(){
+  var el=$('o_xmr');if(!el)return;var S=ops.status&&ops.status.state,X=S&&S.xmr,cfg=(ops.status&&ops.status.config)||{};
+  if(!X){el.innerHTML='<h2 style="margin:0">Operação Monero <span class="chip">simulada como real</span></h2><p class="note">Começa no próximo cálculo do mapa de moedas (até 15 min).</p>';return}
+  var res=X.resultUsd||0,cls=res>0?'good':res<0?'bad':'';
+  el.innerHTML='<div class="row between" style="align-items:baseline"><h2 style="margin:0">Operação Monero</h2><span class="chip">simulada como real</span></div>'+
+    '<div class="row" style="margin-top:8px;align-items:baseline"><span class="huge '+cls+'">'+(res>=0?'+':'')+usd(res)+'</span><span class="note">resultado desde '+dt2(X.since)+(X.retPct!==null?' · '+pct(X.retPct,1)+' sobre o gasto':'')+'</span></div>'+
+    '<div class="kv" style="margin-top:6px"><div><small>Agora</small><span style="font-size:15px">'+(X.on?'<span class="good">minerando</span>':'parado')+'</span><div class="note">margem '+(X.edgeNow!==null&&X.edgeNow!==undefined?pct(X.edgeNow,1):'—')+' · entra a partir de '+pct(cfg.xmrEnterPct===undefined?2:cfg.xmrEnterPct,1)+'</div></div>'+
+    '<div><small>Gasto · receita</small><span style="font-size:15px">'+usd(X.spentUsd||0)+' · '+usd(X.revUsd||0)+'</span><div class="note">'+nf(X.hoursOn||0,1)+' h ligado em '+X.runs+' entradas</div></div>'+
+    '<div><small>No pool</small><span style="font-size:15px">'+(X.poolXmr||0).toFixed(4).replace('.',',')+' XMR</span><div class="note">saque a partir de 0,01</div></div>'+
+    '<div><small>Recebido na carteira</small><span style="font-size:15px">'+(X.paidXmr||0).toFixed(4).replace('.',',')+' XMR</span><div class="note">'+(X.paidUsd?usd(X.paidUsd):'—')+' · '+X.payouts+' saques'+(cfg.xmrAddress?' · endereço cadastrado':' · cadastre o endereço no Robô')+'</div></div></div>'+
+    '<p class="note" style="margin:6px 0 0">Ganho médio por dia: '+usd(X.perDayUsd||0)+'. Carteira virtual: '+(X.walletBtc||0).toFixed(6).replace('.',',')+' BTC. Sem sorte de bloco: o pool PPS paga cada share; a margem já desconta 3% da NiceHash, a taxa do pool e perdas de share e de venda.</p>'+
+    (X.lastRuns&&X.lastRuns.length?'<details style="margin-top:6px"><summary>Últimas entradas</summary><div class="stack" style="gap:2px;margin-top:4px">'+X.lastRuns.map(function(r){return '<div class="note">'+dt2(r.start)+' → '+hhmm(new Date(r.end))+' · margem de entrada '+pct(r.edgePct,1)+' · '+esc(r.reason||'')+'</div>'}).join('')+'</div></details>':'');
+}
 function renderLive(){
   var el=$('o_live');if(!el)return;var st=ops.status,S=st&&st.state,cfg=(st&&st.config)||{};
   if(!S){el.hidden=true;return}el.hidden=false;
@@ -1560,7 +1574,7 @@ document.addEventListener('click',function(e){
   go.then(function(){$('cal_msg')&&($('cal_msg').textContent='Feito. Atualizando…');loadOps()},function(er){b.disabled=false;if($('cal_msg'))$('cal_msg').textContent='Não deu: '+er.message});
 });
 function renderOps(){
-  try{renderLive()}catch(e){}
+  try{renderLive();renderXmr()}catch(e){}
   var c=apiCfg(),st=ops.status;
   if(!c.url){
     $('o_conn').innerHTML='<h2>Backend não configurado</h2><p class="note">Para operar (ordens, robô, parada no bloco) é preciso o backend. É só mandar um token do Cloudflare no chat: o passo a passo de 4 itens está em Ajustes.</p><div class="row"><button class="sm" data-go="set" data-focus="#setup">Abrir Ajustes</button></div>';
@@ -1651,7 +1665,7 @@ function renderOps(){
 function opsMsg(id,t,bad){$(id).textContent=t;$(id).className='note'+(bad?' bad':'')}
 function botForm(){
   var o={autoCreate:$('b_autoCreate').checked,orderAmountMax:!!($('b_orderAmountMax')&&$('b_orderAmountMax').checked),sniper:!!($('b_sniper')&&$('b_sniper').checked),sniperUseAge:!!($('b_sniperUseAge')&&$('b_sniperUseAge').checked)};
-  BOT_FIELDS.forEach(function(k){var el=$('b_'+k);if(!el)return;var v=String(el.value==null?'':el.value).trim();if(['mode','onBlock','payoutAddress','poolId','minEdgeMode'].indexOf(k)>=0){o[k]=v;return}
+  BOT_FIELDS.forEach(function(k){var el=$('b_'+k);if(!el)return;var v=String(el.value==null?'':el.value).trim();if(['mode','onBlock','payoutAddress','poolId','minEdgeMode','xmrAddress'].indexOf(k)>=0){if(k==='xmrAddress'&&v==='(oculto)')return;o[k]=v;return}
     // número: aceita vírgula (teclado em português) e ignora campo vazio (mantém o valor salvo)
     if(v==='')return;var n=parseFloat(v.replace(/\s/g,'').replace(/[−–]/g,'-').replace(',','.'));if(isFinite(n))o[k]=n});
   return o;
@@ -1785,7 +1799,26 @@ function renderLink(){
   $('h_link').hidden=!need;
   if(need)$('h_link_txt').textContent=(STANDALONE?'Este atalho do iPhone tem memória separada do Safari. ':'')+(settings.apiUrl?'A conexão com o backend falhou. ':'')+'Copie o link de conexão (o que o Claude mandou) e toque no botão: fica salvo neste aparelho.';
 }
+// Cérebro: cada frente que o Jarbas acompanha, o que está vendo, o que decidiu e quanto rendeu (real e simulado).
+function renderBrain(){
+  var el=$('h_brain');if(!el)return;var st=ops.status,S=st&&st.state,cfg=(st&&st.config)||{};if(!S){el.hidden=true;return}el.hidden=false;
+  var m=S.market||{},X=S.xmr,ps=S.paperSniper||{},fp=S.fundPaper&&S.fundPaper.summary,ai=S.ai||{},J=S.jarbas||{},A=(S.algoPaper&&S.algoPaper.algos)||{};
+  var realSpent=Object.values((S.real&&S.real.days)||{}).reduce(function(a,d){return a+(d.spendUsd||0)},0);
+  var dot=function(c){return '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;background:var(--'+(c==='g'?'good':c==='w'?'warn':c==='b'?'bad':'mut')+',#888)"></span>'};
+  var row=function(c,name,now,res,next){return '<div class="box" style="margin:0"><div class="row between" style="align-items:baseline"><span style="font-weight:600">'+dot(c)+esc(name)+'</span><span class="note">'+res+'</span></div><div class="note" style="margin-top:2px">'+now+'</div>'+(next?'<div class="note">Próximo passo: '+next+'</div>':'')+'</div>'};
+  var others=Object.keys(A).map(function(k){var a=A[k];return {l:a.label||k,r:a.spendUsd>0?(a.revUsd/a.spendUsd-1)*100:null}}).filter(function(x){return x.r!==null}).sort(function(a,b){return b.r-a.r});
+  var weak=Object.keys(ai.stats||{}).filter(function(k){var x=ai.stats[k];return x.n>=8&&x.hits/x.n<0.4}).length;
+  el.innerHTML='<div class="row between" style="align-items:baseline"><h2 style="margin:0">Cérebro</h2><span class="note">Jarbas '+(J.telegram?'<span class="chip ok">no Telegram</span>':'<span class="chip">Telegram: conecte em Ajustes</span>')+'</span></div><div class="stack" style="gap:6px;margin-top:8px">'+
+    row(isFinite(m.edgeAtBidPct)&&m.edgeAtBidPct>=0?'g':'b','Mineração BCH (solo)','Margem agora '+pct(m.edgeAtBidPct,1)+' · robô '+(MODE_TXT[cfg.mode]||cfg.mode)+(cfg.sniper?' · Sniper ligado':''),'real: gasto '+usd(realSpent,0)+' · '+((S.myBlocks||[]).length)+' blocos',isFinite(m.edgeAtBidPct)&&m.edgeAtBidPct>=0?'janela positiva rara: avaliar tiro':'sem vantagem: manter em Observar')+
+    row(X&&X.resultUsd>0?'g':X?'w':'n','Monero (PPS)',X?((X.on?'minerando':'parado')+' · margem '+pct(X.edgeNow,1)+' · '+nf(X.hoursOn||0,1)+' h ligado'):'aguardando o mapa de moedas','simulado: '+(X?((X.resultUsd>=0?'+':'')+usd(X.resultUsd||0)+(X.retPct!==null?' ('+pct(X.retPct,1)+')':'')):'—'),X&&X.resultUsd>0?'teste real pequeno quando houver saldo':'acompanhar')+
+    row(ps.spendUsd&&ps.evUsd>=ps.spendUsd?'g':'w','Sniper (simulado)',(ps.shot?'em tiro':'em espera')+(ps.lambda?' · '+nf(ps.lambda,2)+' bloco esperado':''),'gasto '+usd(ps.spendUsd||0,0)+' · esperado '+usd(ps.evUsd||0,0),'só vale com margem positiva no tiro')+
+    row(fp&&fp.netUsd>0?'g':'b','Funding (simulado)',fp?(fp.closed+' operações, '+fp.wins+' positivas, '+nf(fp.avgHours||0,0)+' h em média'):'sem operações',fp?usd(fp.netUsd):'—','spread de altcoin some em horas: só como sinal')+
+    row(others[0]&&others[0].r>0?'g':'n','Outras moedas (PPS)',others.slice(0,3).map(function(x){return esc(x.l)+' '+pct(x.r,1)}).join(' · ')||'—','simulado',others[0]&&others[0].r>0?esc(others[0].l)+' é o destaque':'')+
+    row(weak?'w':'g','Copiloto',(ai.level&&ai.level.name||'')+' · acerto geral '+(ai.rate?pctp(ai.rate*100,0):'—'),weak?weak+' tipos em revisão':'ok',weak?'tipos que erram não viram sugestão':'')+
+    '</div><p class="note" style="margin:6px 0 0">Converse com o Jarbas no Telegram: /status, /monero, /bch, /funding, /saldo, /copiloto, /relatorio, /modo observar, /sniper desligar.</p>';
+}
 function renderHome(){
+  try{renderBrain()}catch(e){}
   renderLink();
   var rows=VENUES.map(function(v){
     var s=state.src[v];
@@ -1952,7 +1985,15 @@ function renderAcct(){
   $('ac_tg_st').className='chip '+(tg.set?'ok':'');
   $('ac_tg_st').textContent=tg.set?('conectado'+(tg.bot?' · @'+tg.bot:'')):(tg.token?'falta mandar "oi"':'não conectado');
   if(nh.set&&!$('ac_env').dataset.touched)$('ac_env').value=nh.env==='prod'?'prod':'test';
+  var ai=c.ai||{},J=(st.state&&st.state.jarbas)||{};
+  if($('ac_ai_st')){$('ac_ai_st').className='chip '+(ai.set?'ok':'');$('ac_ai_st').textContent=ai.set?'IA ligada · '+(ai.model||''):'só comandos'+(J.telegram?' · Telegram ok':'')}
 }
+document.addEventListener('click',function(e){var id=e.target.id;if(id!=='ac_ai_go'&&id!=='ac_ai_del')return;var b=e.target,m=$('ac_ai_msg');
+  var body=id==='ac_ai_del'?{clear:true}:{key:$('ac_aikey').value.trim(),model:$('ac_aimodel').value.trim()};
+  if(id==='ac_ai_del'&&!confirm('Remover a chave da IA? O Jarbas continua respondendo pelos comandos.'))return;
+  b.disabled=true;m.textContent=id==='ac_ai_go'?'Testando a IA…':'Removendo…';
+  apiCall('POST','/ai',body).then(function(r){b.disabled=false;$('ac_aikey').value='';m.textContent=r.cleared?'Removida.':'IA conectada ('+r.model+'). Mande uma pergunta para o seu bot no Telegram.';loadOps()},function(er){b.disabled=false;m.textContent='Não deu: '+er.message});
+});
 function renderProd(){
   var st=ops.status,cfg=st&&st.config,n=Object.keys(state.src).filter(function(v){return state.src[v]==='api'||state.src[v]==='proxy'}).length;
   var items=[

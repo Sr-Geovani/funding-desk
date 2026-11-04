@@ -21,6 +21,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - run: npm ci
       - run: node --test tests/*.test.js tests/*.test.mjs
   deploy:
     if: github.event_name != 'pull_request'

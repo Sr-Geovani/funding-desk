@@ -17,6 +17,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Dependências
+        run: npm ci
       - name: Testes
         run: node --test tests/*.test.js tests/*.test.mjs
       - name: Conferir credenciais do Cloudflare

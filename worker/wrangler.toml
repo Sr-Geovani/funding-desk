@@ -1,6 +1,7 @@
 name = "funding-desk-api"
 main = "src/index.js"
 compatibility_date = "2026-01-01"
+compatibility_flags = ["nodejs_compat"] # SDK da Anthropic (Jarbas)
 
 # Robô de mineração: um ciclo a cada 3 min (cabe no limite grátis de escritas do KV).
 [triggers]

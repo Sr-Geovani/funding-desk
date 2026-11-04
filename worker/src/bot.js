@@ -80,6 +80,10 @@ export function sanitizeConfig(input = {}, prev = DEFAULT_CONFIG, limits = limit
   num('sessionBudgetUsd', 0, limits.maxDailyUsd); num('dailyBudgetUsd', 0, limits.maxDailyUsd); num('stopCooldownH', 0, 72); num('weeklyLossUsd', 0, limits.maxDailyUsd * 7);
   num('orderAmountBtc', 0, limits.maxOrderBtc);
   if (input.orderAmountMax !== undefined) c.orderAmountMax = !!input.orderAmountMax;
+  // Monero: endereço de recebimento (público; fica só no servidor e aparece oculto no modo leitura) e a simulação
+  if (input.xmrAddress !== undefined) { const a = String(input.xmrAddress || '').trim(); if (a && !/^[48][1-9A-HJ-NP-Za-km-z]{94}([1-9A-HJ-NP-Za-km-z]{11})?$/.test(a)) errors.push('xmrAddress: endereço Monero inválido (começa com 4 ou 8 e tem 95 caracteres)'); else c.xmrAddress = a; }
+  num('xmrSimBtc', 0, 1); num('xmrEnterPct', -5, 50);
+  if (input.xmrAlerts !== undefined) c.xmrAlerts = !!input.xmrAlerts;
   if (input.autoCreate !== undefined) c.autoCreate = !!input.autoCreate;
   if (input.alerts !== undefined) c.alerts = !!input.alerts;
   if (input.fundStable24 !== undefined) c.fundStable24 = !!input.fundStable24;
