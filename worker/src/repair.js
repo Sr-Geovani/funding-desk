@@ -39,3 +39,27 @@ export function repairBookGlitch(state) {
   s.repairs = done.concat(['book-0001']);
   return { state: s, notes };
 }
+
+// 05/11 16:35–17:00: o aluguel do RandomX no mercado subiu 56% e a última leitura da janela foi −36,3%. A conta antiga
+// cobrava esse intervalo como se a ordem pagasse o preço novo (margem média de −17,9%). Uma ordem paga o preço dela: o
+// mercado acima dela tira o hash, não cobra mais caro. O reparo refaz o último intervalo dessas janelas (salto de mais de
+// 20 pontos na última leitura) com metade do hash entregue e a margem pelo preço da ordem (a da leitura anterior).
+export function repairXmrOutbid(p, { btcUsd, xmrUsd }) {
+  if (!p || !p.runs || (p.repairs || []).includes('outbid-1105') || !(btcUsd > 0)) return { p, notes: [] };
+  const notes = [];
+  for (const r of p.runs) {
+    const P = r.path || [];
+    if (P.length < 2 || !(P[P.length - 2] - P[P.length - 1] > 20) || !(r.spentUsd > 0)) continue;
+    const prev = P[P.length - 2], last = P[P.length - 1], s = Math.min(r.spentUsd, (r.rateUsdDay || 300) / 480); // ~3 min do aluguel da janela
+    const dS = -s / 2, dR = (s / 2) * (1 + prev / 100) - s * (1 + (prev + last) / 2 / 100), dBtc = dS / btcUsd;
+    r.spentUsd += dS; r.revUsd += dR; r.spentBtc += dBtc; r.path = P.slice(0, -1); r.repaired = 'ordem ultrapassada pelo mercado (não paga o preço novo)';
+    p.spentUsd += dS; p.revUsd += dR; p.spentBtc += dBtc; p.orderBtc -= dBtc; p.heldBookUsd = (p.heldBookUsd || 0) + dR;
+    const day = new Date(r.end).toISOString().slice(0, 10);
+    if (p.days && p.days[day]) { p.days[day].spentUsd += dS; p.days[day].revUsd += dR; }
+    if (xmrUsd > 0) { const x = dR / xmrUsd; if ((p.poolXmr || 0) + x >= 0) p.poolXmr = (p.poolXmr || 0) + x; else p.krakenXmr = (p.krakenXmr || 0) + x; } else p.coinUsd = (p.coinUsd || 0) + dR;
+    const res = r.revUsd - r.spentUsd;
+    notes.push(`Monero: janela de ${new Date(r.start).toISOString().slice(11, 16)} UTC refeita (o mercado subiu acima da ordem; resultado ${res >= 0 ? '+' : '−'}US$${Math.abs(res).toFixed(2).replace('.', ',')})`);
+  }
+  p.repairs = (p.repairs || []).concat(['outbid-1105']);
+  return { p, notes };
+}

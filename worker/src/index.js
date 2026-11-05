@@ -16,7 +16,7 @@ import { xmrPaperStep, xmrSummary, XMR_RULES } from './paperxmr.js';
 import { brainContext, ruleReply, aiReply, reportText } from './jarbas.js';
 import { runScan, scanHistory } from './scan.js';
 import { labStep, labSummary } from './lab.js';
-import { repairBookGlitch } from './repair.js';
+import { repairBookGlitch, repairXmrOutbid } from './repair.js';
 import { auditState, auditNews } from './audit.js';
 import { braiinsOf, mrrOf, stratumCheck } from './hashmarkets.js';
 import { macroOf, marketPanorama } from './panorama.js';
@@ -651,6 +651,7 @@ export async function tick(env, opts = {}) {
 
   // Outras moedas (simulado, pool PPS): a cada 15 min, com o mapa de mineração (a mesma conta do painel).
   let algoPaper = state.algoPaper || null, algoTs = state.algoTs || 0, algoMap = state.algoMap || [], algoRan = false, paperXmr = state.paperXmr || null, xmrUsd = state.xmrUsd || null, ppsOps = state.ppsOps || null;
+  if (paperXmr && prices.ok) { const rx = repairXmrOutbid(JSON.parse(JSON.stringify(paperXmr)), { btcUsd: prices.v.btcUsd, xmrUsd }); paperXmr = rx.p; for (const n of rx.notes) log.push({ t: now, kind: 'acao', text: 'Correção do histórico: ' + n }); }
   if (cfg.algoPaper !== false && prices.ok && now - algoTs >= 15 * 60e3) {
     const pub = (env.NH_BASE || 'https://api2.nicehash.com').replace(/\/$/, '');
     const getJ = (u) => fetchFn(u, { headers: { accept: 'application/json', 'user-agent': 'funding-desk/1.0' } }).then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });

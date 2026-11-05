@@ -25,6 +25,9 @@ export const XMR_RULES = { walletBtc: 0.002, enterPct: 2, exitPct: 0, budgetUsdD
   // Meta antes de qualquer dinheiro (regra escrita em 05/11, antes dos dados): 30 janelas com a leitura de 3 min e,
   // juntas, (a) lucro depois da taxa de ordem e da espera, (b) margem que rendeu de pelo menos +1% e (c) 70% das janelas positivas.
   goal: { windows: 30, minRealPct: 1, minPosPct: 70 },
+  // Preço da ordem (05/11): a ordem paga o preço que tem, não o do mercado. Se o mercado sobe acima dela (+2%), ela perde o
+  // hash para quem paga mais (não paga mais caro); se o mercado cai, o preço dela só desce ~0,65% a cada 10 min (degrau da NiceHash).
+  outbidPct: 2, downStepPct: 0.65,
   // potência mínima de uma ordem na NiceHash (H/s, de /public/buy/info em 05/11): entre janelas a ordem fica nela e continua
   // gastando e minerando (RandomX: 100 kH/s ≈ US$3,70 por dia de aluguel)
   minLimitH: { RANDOMXMONERO: 1e5, X11: 1e13, EQUIHASH: 3e6, SCRYPT: 5e10, KAWPOW: 1e9, AUTOLYKOS: 3e9, OCTOPUS: 1e9, NEXAPOW: 3e9, FISHHASH: 1e9, BEAMV3: 600,
@@ -51,11 +54,16 @@ export function xmrPaperStep(px, { m, now, btcUsd, xmrUsd, rules = XMR_RULES }) 
   const events = [], tag = 'Monero (simulado)', dt = Math.min(Math.max(0, now - (p.lastTs || now)), rules.maxGap), day = new Date(now).toISOString().slice(0, 10);
   const e = m && isFinite(m.edgePct) && m.edgePct <= 100 ? m.edgePct : null;
   const px2 = xmrUsd > 0 ? xmrUsd : null; // outras moedas PPS: sem preço próprio, o crédito fica em dólar
+  const priced = !!(m && m.rentBtcPerH > 0 && m.revBtcPerH > 0 && p.orderPrice > 0);
+  const eOur = priced ? (m.revBtcPerH / p.orderPrice - 1) * 100 : e, outbid = priced && m.rentBtcPerH > p.orderPrice * (1 + rules.outbidPct / 100);
+  const lower = () => { if (priced && m.rentBtcPerH < p.orderPrice) p.orderPrice = Math.max(m.rentBtcPerH, p.orderPrice * (1 - rules.downStepPct / 100 * dt / 600e3)); };
   if (m && m.fast && !p.fastSince) { p.fastSince = now; p.idleAtFast = (p.idleRevUsd || 0) - (p.idleSpentUsd || 0); } // início da leitura a cada 3 min: começa a contagem das 30 janelas
   // 1) o intervalo que passou, com a decisão anterior
   if (p.on && dt > 0 && btcUsd > 0) {
-    const rate = p.rateUsdDay || rules.budgetUsdDay, want = rate * dt / 864e5 / btcUsd, spend = Math.min(want, p.orderBtc), frac = want > 0 ? spend / want : 0;
-    const eAvg = e !== null ? ((p.edgePct || 0) + e) / 2 : (p.edgePct || 0), spendUsd = spend * btcUsd, revUsd = spendUsd * (1 + eAvg / 100);
+    // hash recebido no intervalo: inteiro enquanto o preço da ordem cobre o mercado; metade no intervalo em que foi ultrapassada
+    const deliv = priced ? ((p.delivPrev === 0 ? 0 : 1) + (outbid ? 0 : 1)) / 2 : 1;
+    const rate = p.rateUsdDay || rules.budgetUsdDay, want = rate * dt / 864e5 / btcUsd * deliv, spend = Math.min(want, p.orderBtc), frac = want > 0 ? spend / want * deliv : 0;
+    const eEnd = eOur !== null ? eOur : (p.edgePct || 0), eAvg = ((p.edgePct || 0) + eEnd) / 2, spendUsd = spend * btcUsd, revUsd = spendUsd * (1 + eAvg / 100);
     p.orderBtc -= spend; p.spentBtc += spend; p.spentUsd += spendUsd; p.revUsd += revUsd; p.hoursOn += dt * frac / 3600e3; p.heldBookUsd += revUsd;
     if (px2) p.poolXmr += revUsd / px2; else p.coinUsd += revUsd;
     if (p.run) { p.run.spentBtc += spend; p.run.spentUsd += spendUsd; p.run.revUsd += revUsd; }
@@ -64,8 +72,9 @@ export function xmrPaperStep(px, { m, now, btcUsd, xmrUsd, rules = XMR_RULES }) 
   }
   // 1b) espera entre janelas: a ordem aberta fica na potência mínima e continua gastando e minerando (com a margem do momento)
   else if (!p.on && p.orderOpen && dt > 0 && btcUsd > 0 && m && m.rentBtcPerH > 0 && rules.minLimitH[m.algo || 'RANDOMXMONERO']) {
-    const want = rules.minLimitH[m.algo || 'RANDOMXMONERO'] * m.rentBtcPerH * dt / 864e5, spend = Math.min(want, p.orderBtc);
-    const e0 = isFinite(p.edgeNow) && p.edgeNow !== null ? p.edgeNow : (e !== null ? e : 0), eAvg = e !== null ? (e0 + e) / 2 : e0, spendUsd = spend * btcUsd, revUsd = spendUsd * (1 + eAvg / 100);
+    const price = priced ? p.orderPrice : m.rentBtcPerH, want = outbid ? 0 : rules.minLimitH[m.algo || 'RANDOMXMONERO'] * price * dt / 864e5, spend = Math.min(want, p.orderBtc);
+    const eI = priced ? eOur : e, e0 = isFinite(p.idleEdge) && p.idleEdge !== null ? p.idleEdge : (eI !== null ? eI : 0), eAvg = eI !== null ? (e0 + eI) / 2 : e0, spendUsd = spend * btcUsd, revUsd = spendUsd * (1 + eAvg / 100);
+    p.idleEdge = eI;
     p.orderBtc -= spend; p.spentBtc += spend; p.idleSpentUsd = (p.idleSpentUsd || 0) + spendUsd; p.idleRevUsd = (p.idleRevUsd || 0) + revUsd; p.idleHours = (p.idleHours || 0) + dt / 3600e3; p.heldBookUsd += revUsd;
     if (px2) p.poolXmr += revUsd / px2; else p.coinUsd += revUsd;
     const d = p.days[day] || (p.days[day] = { spentUsd: 0, revUsd: 0 }); d.spentUsd += spendUsd; d.revUsd += revUsd;
@@ -90,9 +99,12 @@ export function xmrPaperStep(px, { m, now, btcUsd, xmrUsd, rules = XMR_RULES }) 
     }
   }
   // 4) decisão de agora
+  // preço para entrar: ordem nova pode ir direto ao preço do mercado; a já aberta só sobe na hora (descer é em degraus)
+  const entryPrice = m && m.rentBtcPerH > 0 ? (p.orderOpen && p.orderPrice > 0 ? Math.max(p.orderPrice, m.rentBtcPerH) : m.rentBtcPerH) : null;
+  const eIn = entryPrice && m.revBtcPerH > 0 ? (m.revBtcPerH / entryPrice - 1) * 100 : e;
   if (e !== null) {
-    if (!p.on && e >= rules.enterPct && m && m.thin) { if (!p.thinAt || now - p.thinAt > 6 * 3600e3) { p.thinAt = now; events.push(`${tag}: margem de ${e.toFixed(1).replace('.', ',')}%, mas o livro é raso (pouca ordem recebendo hash): não daria para comprar de verdade`); } }
-    else if (!p.on && e >= rules.enterPct) {
+    if (!p.on && eIn >= rules.enterPct && m && m.thin) { if (!p.thinAt || now - p.thinAt > 6 * 3600e3) { p.thinAt = now; events.push(`${tag}: margem de ${eIn.toFixed(1).replace('.', ',')}%, mas o livro é raso (pouca ordem recebendo hash): não daria para comprar de verdade`); } }
+    else if (!p.on && eIn >= rules.enterPct) {
       const mk = m && m.marketUsdDay > 0 ? m.marketUsdDay * rules.marketShare : Infinity;
       p.rateUsdDay = Math.max(1, Math.min(rules.budgetUsdDay, mk));
       // como numa arbitragem: só entra se a janela típica paga a taxa de entrada e sobra lucro
@@ -100,9 +112,9 @@ export function xmrPaperStep(px, { m, now, btcUsd, xmrUsd, rules = XMR_RULES }) 
       // a taxa de ordem nova é paga uma vez e se divide pelas janelas que o valor da ordem cobre (a ordem fica aberta)
       const winSpend = p.rateUsdDay / 1440 * winMin, orderUsd = (p.orderOpen ? p.orderBtc : Math.max(0, p.walletBtc - rules.newOrderFeeBtc)) * (btcUsd || 0);
       const nWin = Math.max(1, orderUsd / Math.max(1e-9, winSpend)), feeAll = p.orderOpen ? 0 : rules.newOrderFeeBtc * (btcUsd || 0), feeUsd = feeAll / nWin;
-      const expUsd = winSpend * e / 100 - feeUsd, beMin = e > 0 && feeAll ? feeAll / (p.rateUsdDay / 1440 * e / 100) : null;
+      const expUsd = winSpend * eIn / 100 - feeUsd, beMin = eIn > 0 && feeAll ? feeAll / (p.rateUsdDay / 1440 * eIn / 100) : null;
       if (expUsd < rules.minExpUsd) {
-        if (!p.skipAt || now - p.skipAt > 3600e3) { p.skipAt = now; events.push(`${tag}: margem de ${e.toFixed(1).replace('.', ',')}%, mas não entra: numa janela típica de ~${Math.round(winMin)} min renderia ~${usd2(expUsd + feeUsd)} (mínimo para valer: ${usd2(rules.minExpUsd + feeUsd)})`); }
+        if (!p.skipAt || now - p.skipAt > 3600e3) { p.skipAt = now; events.push(`${tag}: margem de ${eIn.toFixed(1).replace('.', ',')}%, mas não entra: numa janela típica de ~${Math.round(winMin)} min renderia ~${usd2(expUsd + feeUsd)} (mínimo para valer: ${usd2(rules.minExpUsd + feeUsd)})`); }
       } else {
         p.expect = { usd: expUsd, winMin, beMin };
         let opened = false;
@@ -110,21 +122,27 @@ export function xmrPaperStep(px, { m, now, btcUsd, xmrUsd, rules = XMR_RULES }) 
           const amt = Math.floor((p.walletBtc - rules.newOrderFeeBtc) * 1e8) / 1e8;
           if (amt >= rules.minOrderBtc) {
             p.walletBtc -= amt + rules.newOrderFeeBtc; p.feesBtc += rules.newOrderFeeBtc; p.feesUsd += rules.newOrderFeeBtc * btcUsd; p.feeLog = (p.feeLog || []).concat([{ t: now, usd: rules.newOrderFeeBtc * btcUsd }]).slice(-50); p.orderBtc = amt; p.orderOpen = true; opened = true;
-            events.push(`${tag}: abriria ordem de ${amt.toFixed(6).replace('.', ',')} BTC no RandomX com margem de ${e.toFixed(1).replace('.', ',')}% (taxa de ordem nova de ${usd2(rules.newOrderFeeBtc * btcUsd)}, paga uma vez e que serve para as próximas janelas)`);
+            events.push(`${tag}: abriria ordem de ${amt.toFixed(6).replace('.', ',')} BTC no RandomX com margem de ${eIn.toFixed(1).replace('.', ',')}% (taxa de ordem nova de ${usd2(rules.newOrderFeeBtc * btcUsd)}, paga uma vez e que serve para as próximas janelas)`);
           } else if (!p.noFunds || now - p.noFunds > 6 * 3600e3) { p.noFunds = now; events.push(`${tag}: margem boa, mas a carteira virtual não tem o mínimo de 0,001 BTC (e o que foi minerado ainda não dá para repor)`); }
-        } else events.push(`${tag}: subiria a potência no RandomX com margem de ${e.toFixed(1).replace('.', ',')}% (ordem já aberta, sem taxa nova)`);
+        } else events.push(`${tag}: subiria a potência no RandomX com margem de ${eIn.toFixed(1).replace('.', ',')}% (ordem já aberta, sem taxa nova)`);
         if (p.orderOpen) {
-          p.on = true; p.edgePct = e;
-          p.run = { start: now, edgePct: e, path: [+e.toFixed(1)], spentBtc: 0, spentUsd: 0, revUsd: 0, opened, orderFeeUsd: opened ? rules.newOrderFeeBtc * btcUsd : 0, orderBtc: p.orderBtc, rateUsdDay: p.rateUsdDay };
+          p.on = true; p.edgePct = eIn; if (entryPrice) p.orderPrice = entryPrice;
+          p.run = { start: now, edgePct: eIn, price: p.orderPrice || null, path: [+eIn.toFixed(1)], spentBtc: 0, spentUsd: 0, revUsd: 0, opened, orderFeeUsd: opened ? rules.newOrderFeeBtc * btcUsd : 0, orderBtc: p.orderBtc, rateUsdDay: p.rateUsdDay };
           events[events.length - 1] += `. Lucro esperado ~${usd2(expUsd)} se a janela durar ~${Math.round(winMin)} min${beMin ? `; a taxa de ordem nova se paga em ~${Math.round(beMin)} min de mineração` : ''}; gasto de até ${usd2(p.rateUsdDay / 24)} por hora`;
         }
       }
-    } else if (p.on && (e < rules.exitPct || (m && m.thin))) {
-      const why = m && m.thin ? 'mercado ficou raso (pouca ordem recebendo hash)' : `margem caiu para ${e.toFixed(1).replace('.', ',')}%`;
-      const R0 = p.run; if (R0 && R0.path) R0.path.push(+e.toFixed(1)); close(why);
-      events.push(`${tag}: janela encerrada. Baixaria a potência para o mínimo porque a ${m && m.thin ? 'o mercado ficou raso (pouca ordem recebendo hash)' : `margem caiu para ${e.toFixed(1).replace('.', ',')}%`}; a ordem continua aberta, sem taxa nova na próxima janela.\n${runText(R0)}\n${totText()}`.replace('porque a o mercado', 'porque o mercado'));
-    } else if (p.on) { p.edgePct = e; if (p.run) (p.run.path || (p.run.path = [])).push(+e.toFixed(1)); }
+    } else if (p.on && outbid && e >= rules.enterPct && !(m && m.thin)) {
+      // mercado subiu, mas ainda paga acima da regra: sobe o preço da ordem para o do mercado e continua
+      p.orderPrice = m.rentBtcPerH; p.edgePct = e; if (p.run) { p.run.price = p.orderPrice; (p.run.path || (p.run.path = [])).push(+e.toFixed(1)); }
+    } else if (p.on && ((eOur !== null && eOur < rules.exitPct) || outbid || (m && m.thin))) {
+      const why = m && m.thin ? 'mercado ficou raso (pouca ordem recebendo hash)' : outbid ? `o preço do aluguel no mercado subiu ${((m.rentBtcPerH / p.orderPrice - 1) * 100).toFixed(0)}% acima do da nossa ordem (margem do mercado ${e.toFixed(1).replace('.', ',')}%): ela deixa de receber hash, sem pagar mais caro` : `margem caiu para ${eOur.toFixed(1).replace('.', ',')}%`;
+      if (p.run && p.run.path && outbid) p.run.path.push(+eOur.toFixed(1));
+      const R0 = p.run; if (R0 && R0.path && !outbid) R0.path.push(+(eOur !== null ? eOur : e).toFixed(1)); close(why);
+      events.push(`${tag}: janela encerrada. ${outbid ? 'A ordem para de receber hash porque ' + why : 'Baixaria a potência para o mínimo porque ' + (m && m.thin ? 'o ' + why : 'a ' + why)}; a ordem continua aberta, sem taxa nova na próxima janela.\n${runText(R0)}\n${totText()}`);
+    } else if (p.on) { p.edgePct = eOur; if (p.run) (p.run.path || (p.run.path = [])).push(+eOur.toFixed(1)); }
   }
+  if (p.orderOpen) { lower(); if (p.run) p.run.price = p.orderPrice; }
+  p.delivPrev = outbid ? 0 : 1;
   for (const k of Object.keys(p.days).sort().slice(0, -30)) delete p.days[k];
   p.lastTs = now; p.edgeNow = e;
   return { px: p, events };

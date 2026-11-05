@@ -1951,3 +1951,38 @@ test('Monero: meta de 30 janelas com a leitura de 3 min e veredito pela regra es
   const early = xmrSummary(xmrPaperStep(null, { m: m(5), now: T, btcUsd: 80000, xmrUsd: 600 }).px, 80000, 600).goal;
   assert.equal(early.verdict, 'em teste');
 });
+
+test('Monero: a ordem paga o preço dela — mercado que dispara tira o hash (sem prejuízo); receita que cai dá prejuízo; preço desce em degraus', async () => {
+  const { xmrPaperStep, xmrSummary } = await import('../worker/src/paperxmr.js');
+  const T = Date.UTC(2026, 10, 5, 16, 35), M = 60e3, R = 4.6e-10;
+  const m = (rent, rev) => ({ algo: 'RANDOMXMONERO', rentBtcPerH: rent, revBtcPerH: rev, edgePct: (rev / rent - 1) * 100, marketUsdDay: 5000, fast: true });
+  // caso de 05/11 16:35–17:00: entra a +2%, margem vai a +0,6% e o aluguel do mercado sobe 56% (−36% para o mercado)
+  let r = xmrPaperStep(null, { m: m(R, R * 1.02), now: T, btcUsd: 80000, xmrUsd: 600 }), t = T;
+  for (const k of [1.02, 1.026, 1.015, 1.006]) { t += 3 * M; r = xmrPaperStep(r.px, { m: m(R, R * k), now: t, btcUsd: 80000, xmrUsd: 600 }); }
+  t += 3 * M; r = xmrPaperStep(r.px, { m: m(R * 1.56, R * 1.006), now: t, btcUsd: 80000, xmrUsd: 600 });
+  const ev = r.events.join(' ');
+  assert.match(ev, /subiu 56% acima do da nossa ordem/); assert.match(ev, /lucro de \+US\$/);
+  const run = xmrSummary(r.px, 80000, 600).lastRuns[0];
+  assert.ok(run.resultUsd > 0 && run.realEdgePct > 0.5 && run.realEdgePct < 2.5, JSON.stringify(run));
+  // receita que cai com o preço da ordem parado: prejuízo de verdade no intervalo
+  let q = xmrPaperStep(null, { m: m(R, R * 1.03), now: T, btcUsd: 80000, xmrUsd: 600 });
+  q = xmrPaperStep(q.px, { m: m(R, R * 0.9), now: T + 3 * M, btcUsd: 80000, xmrUsd: 600 });
+  assert.match(q.events.join(' '), /margem caiu para −?-?10,0%/); assert.ok(xmrSummary(q.px, 80000, 600).lastRuns[0].resultUsd < 0);
+  // mercado mais barato depois: o preço da ordem desce ~0,65% a cada 10 min, e a próxima entrada usa esse preço
+  let z = q.px; for (let i = 1; i <= 10; i++) z = xmrPaperStep(z, { m: m(R * 0.9, R * 0.9 * 0.99), now: T + 3 * M + i * 10 * M, btcUsd: 80000, xmrUsd: 600 }).px;
+  assert.ok(z.orderPrice < R && z.orderPrice > R * 0.9, String(z.orderPrice / R));
+  const w = xmrPaperStep(z, { m: m(R * 0.9, R * 0.95), now: T + 120 * M, btcUsd: 80000, xmrUsd: 600 });
+  assert.ok(Math.abs(w.px.run ? w.px.run.edgePct - (0.95 * 0.9 * R / Math.max(z.orderPrice * (1 - 0.0065 * 2.1), R * 0.9) - 1) * 100 : 0) < 1.5 || !w.px.on);
+});
+
+test('reparo: janela em que o mercado ultrapassou a ordem é refeita uma vez e as contas continuam fechando', async () => {
+  const { repairXmrOutbid } = await import('../worker/src/repair.js');
+  const { auditState } = await import('../worker/src/audit.js');
+  const btc = 80000, run = { start: 1, end: Date.UTC(2026, 10, 5, 17), path: [2, 2.6, 1.5, 0.6, -36.3], spentUsd: 5.202, revUsd: 5.166, spentBtc: 5.202 / btc, rateUsdDay: 300, edgePct: 2 };
+  const p = { since: 0, startBtc: 0.002, walletBtc: 0, orderBtc: 0.002 - 0.00001 - 5.202 / btc, feesBtc: 0.00001, spentBtc: 5.202 / btc, spentUsd: 5.202, revUsd: 5.166, poolXmr: 0.01, heldBookUsd: 5.166, runs: [run], days: {} };
+  const r = repairXmrOutbid(p, { btcUsd: btc, xmrUsd: 600 });
+  const R = r.p.runs[0];
+  assert.ok(R.revUsd - R.spentUsd > 0, String(R.revUsd - R.spentUsd)); assert.deepEqual(R.path, [2, 2.6, 1.5, 0.6]);
+  assert.equal(auditState({ paperXmr: r.p, algoTs: 0 }, { now: 1 }).errors, 0);
+  assert.equal(repairXmrOutbid(r.p, { btcUsd: btc, xmrUsd: 600 }).notes.length, 0);
+});
