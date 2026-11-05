@@ -91,6 +91,10 @@ function bookPerHash(d) {
   var withRigs = (s.orders || []).some(function (o) { return live(o) && +o.rigsCount > 0; });
   var paying = (s.orders || []).filter(function (o) { return live(o) && (!withRigs || +o.rigsCount > 0); })
     .map(function (o) { return { p: parseFloat(o.price), v: parseFloat(o.acceptedSpeed) }; }).sort(function (a, b) { return a.p - b.p; });
+  // preço absurdo (abaixo da metade da mediana) fica de fora: não é hash que dá para comprar
+  var t0 = paying.reduce(function (a, o) { return a + o.v; }, 0), a0 = 0, m0 = null;
+  paying.forEach(function (o) { if (m0 === null) { a0 += o.v; if (a0 >= t0 / 2) m0 = o.p; } });
+  if (m0) paying = paying.filter(function (o) { return o.p >= m0 * 0.5; });
   var tot = paying.reduce(function (a, o) { return a + o.v; }, 0), acc = 0, med = null;
   paying.forEach(function (o) { if (med === null) { acc += o.v; if (acc >= tot / 2) med = o.p; } });
   // btcDay: quanto o mercado inteiro gasta por dia (BTC) nas ordens recebendo hash; mede se cabe uma ordem nossa.

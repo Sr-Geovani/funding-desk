@@ -108,6 +108,10 @@ export function parseBook(d) {
   const paying = (s.orders || []).filter((o) => live(o) && (!withRigs || +o.rigsCount > 0))
     .map((o) => ({ price: parseFloat(o.price) * toEH, speed: parseFloat(o.acceptedSpeed) * toPH }))
     .sort((a, b) => a.price - b.price);
+  // Ordem com preço absurdo (04/11 18:06: uma ordem a 0,001 com máquinas, ~450× abaixo do mercado, virou "o preço" e a
+  // margem foi a 40.152%): fica de fora tudo abaixo da metade da mediana. Não existe hash a esse preço para nós.
+  const med0 = (() => { const t0 = paying.reduce((a, o) => a + o.speed, 0); let a0 = 0; for (const o of paying) { a0 += o.speed; if (a0 >= t0 / 2) return o.price; } return null; })();
+  if (med0) for (let i = paying.length - 1; i >= 0; i--) if (paying[i].price < med0 * 0.5) paying.splice(i, 1);
   const tot = paying.reduce((a, o) => a + o.speed, 0);
   let acc = 0, med = null;
   for (const o of paying) { acc += o.speed; if (acc >= tot / 2) { med = o.price; break; } }
@@ -150,6 +154,8 @@ export function sizeMarket(mkt, ph, cfg) {
   m.fillTopEH = top; m.fillEH = lv ? Math.max(top, lv[0]) : top; m.sizePh = size;
   m.bidEH = ceil4(m.fillEH * (1 + cfg.bidPremiumPct / 100));
   m.edgeAtBidPct = (m.breakEvenEH / m.bidEH - 1) * 100;
+  // margem acima de 100% no BCH não existe na prática: leitura do livro com defeito, não decide nada
+  if (!(m.edgeAtBidPct <= 100)) return Object.assign(m, { ok: false, reason: 'leitura suspeita do livro (margem de ' + Math.round(m.edgeAtBidPct) + '%)' });
   m.green = m.bidEH <= m.capEH;
   m.costPerBlockUsd = m.phDaysPerBlock * m.bidEH / 1000 * m.btcUsd * (1 + cfg.rentFeePct / 100);
   return m;

@@ -701,7 +701,7 @@ test('outras moedas (PPS): orçamento fixo enquanto compensa; pausa com o motivo
   r = algoPaperStep(r.pa, { map: mk('maybe', 4, true), now: T0 + 30 * M });
   assert.match(r.events[0], /pausaria Scrypt \(livro raso/);
   const b = r.pa.algos.SCRYPT;
-  assert.equal(b.on, false); assert.equal(b.runs.length, 1); close(b.runs[0].revUsd - b.runs[0].spendUsd, 2 * sp * 0.10, 1e-9);
+  assert.equal(b.on, false); assert.equal(b.runs.length, 1); close(b.runs[0].revUsd - b.runs[0].spendUsd, sp * 0.10 + sp * 0.07, 1e-9); // 2º intervalo: margem média de 10% e 4%
   // parado não gasta; volta com nova operação
   r = algoPaperStep(r.pa, { map: mk('no', -20), now: T0 + 45 * M });
   close(r.pa.algos.SCRYPT.spendUsd, 2 * sp, 1e-9);
@@ -1817,7 +1817,7 @@ test('PPS como arbitragem: só entra se a janela paga a taxa e manda o lucro de 
   assert.equal(r.px.on, true); assert.match(r.events.join(' '), /Lucro esperado/);
   let p = r.px; for (let i = 1; i <= 4; i++) p = xmrPaperStep(p, { m: { edgePct: 6, marketUsdDay: 50000 }, now: T + i * 15 * M, btcUsd: 77000 }).px;
   r = xmrPaperStep(p, { m: { edgePct: -1, marketUsdDay: 50000 }, now: T + 5 * 15 * M, btcUsd: 77000 });
-  assert.match(r.events.join(' '), /Esta janela: gastou US\$[\d,]+ de aluguel e recebeu US\$[\d,]+ em moeda do pool → lucro de \+US\$[\d,]+ em 75 min\.\nA margem foi \+6,0% → −1,0% \(lida a cada 15 min\); na média, rendeu \+5,3%\.\nDesde o início: 1 janela soma \+US\$[\d,]+; abrir a ordem custou US\$0,77 \(paga uma vez por ordem\)\. Saldo: /);
+  assert.match(r.events.join(' '), /Esta janela: gastou US\$[\d,]+ de aluguel e recebeu US\$[\d,]+ em moeda do pool → lucro de \+US\$[\d,]+ em 75 min\.\nA margem foi \+6,0% → −1,0% \(lida a cada 3 min\); na média, rendeu \+5,3%\.\nDesde o início: 1 janela soma \+US\$[\d,]+; abrir a ordem custou US\$0,77 \(paga uma vez por ordem\)\. Saldo: /);
 });
 
 test('lastro: preço do hash de hoje contra o último ano (percentil e mediana)', async () => {
@@ -1894,4 +1894,33 @@ test('Monero auditado: estado gravado antes da auditoria vira as contas novas (c
   assert.ok(S.heldXmr > 0.026 && S.heldNowUsd > 0);
   const r = xmrPaperStep(old, { m: { edgePct: -3 }, now: T, btcUsd: btc, xmrUsd: 633 });
   assert.ok(r.px.migratedAt && r.px.spentUsd > 0 && r.px.runs.every((x) => x.feeBtc === undefined));
+});
+
+test('livro com preço absurdo: fica de fora da leitura e o histórico contaminado é reparado uma vez', async () => {
+  const { repairBookGlitch } = await import('../worker/src/repair.js');
+  const book = { stats: { EU: { priceFactor: '1e18', marketFactor: '1e15', orders: [
+    { price: '0.001', acceptedSpeed: '4000', rigsCount: 5, alive: true }, { price: '0.4265', acceptedSpeed: '12000', rigsCount: 50, alive: true }, { price: '0.43', acceptedSpeed: '11000', rigsCount: 40, alive: true }] } } };
+  const b = parseBook(book); assert.equal(b.fillEH, 0.4265); assert.equal(b.payingOrders, 2);
+  const g = 1793815611698, st = {
+    edgeHist: [[g - 900e3, -5.68, 0.4265], [g, 40152.79, 0.001], [g + 900e3, -5.96, 0.4265]],
+    paper: { spendUsd: 38.2, days: { '2026-11-04': { spendUsd: 33.9 } }, sess: { start: g - 864e5, spendUsd: 38.2 }, runs: [{ start: g, priceEH: 0.001, spendUsd: 0.0038, edgePct: 40152.79 }] },
+    ai: { stats: { mine_wait: { n: 11, hits: 9 } }, done: [{ type: 'mine_wait', t: g - 6 * 3600e3, due: g + 1000, minEdge: -6, maxEdge: 40152.79, value: 40152.79, hit: true, text: 'x' }] } };
+  const r = repairBookGlitch(st);
+  assert.equal(r.state.edgeHist.length, 2);
+  close(r.state.paper.runs[0].spendUsd, 0.0038 * 426.5, 1e-9); close(r.state.paper.spendUsd, 38.2 + 0.0038 * 425.5, 1e-9); close(r.state.paper.days['2026-11-04'].spendUsd, 33.9 + 0.0038 * 425.5, 1e-9);
+  assert.equal(r.state.ai.done[0].maxEdge, -5.68); assert.equal(r.state.ai.done[0].hit, true, '−5,68 passou de −6: continua certa');
+  assert.equal(repairBookGlitch(r.state).notes.length, 0, 'roda uma vez só');
+});
+
+test('Monero: entre janelas a ordem aberta fica na potência mínima e esse custo entra na conta', async () => {
+  const { xmrPaperStep, xmrSummary } = await import('../worker/src/paperxmr.js');
+  const T = Date.UTC(2026, 10, 5, 10), M = 60e3, rent = 4.6e-10, m = (e) => ({ algo: 'RANDOMXMONERO', edgePct: e, rentBtcPerH: rent, marketUsdDay: 50000 });
+  let r = xmrPaperStep(null, { m: m(6), now: T, btcUsd: 80000, xmrUsd: 600 });
+  r = xmrPaperStep(r.px, { m: m(-3), now: T + 15 * M, btcUsd: 80000, xmrUsd: 600 }); // sai
+  const before = r.px.spentBtc;
+  r = xmrPaperStep(r.px, { m: m(-3), now: T + 15 * M + 864e5 / 4, btcUsd: 80000, xmrUsd: 600 }); // 6 h parada (limitado a 3 h)
+  const S = xmrSummary(r.px, 80000, 600);
+  close(r.px.spentBtc - before, 1e5 * rent * 3 / 24, 1e-12, '3 h a 100 kH/s');
+  close(S.idleSpentUsd, 1e5 * rent * 3 / 24 * 80000, 1e-9); assert.ok(S.idleUsd < 0, 'margem negativa na espera: custa');
+  close(S.resultUsd, S.windowsUsd + S.idleUsd - S.orderFeesUsd, 1e-9);
 });

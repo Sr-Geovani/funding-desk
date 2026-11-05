@@ -15,9 +15,12 @@ export function algoPaperStep(pa, { map, now, rules = ALGO_RULES }) {
   // 1) o intervalo que passou, com a decisão anterior (e o total do dia UTC, para a evolução no Início)
   p.days = p.days || {};
   const day = new Date(now).toISOString().slice(0, 10);
-  for (const a of Object.values(p.algos)) {
+  // margem média do intervalo (leitura anterior e a de agora): a do início sozinha exagera quando a margem cai no meio
+  const eNow = {}; for (const m of map || []) if (isFinite(m.edgePct) && m.edgePct <= rules.maxEdgePct) eNow[m.algo] = m.edgePct;
+  for (const [k, a] of Object.entries(p.algos)) {
     if (!a.on || !(dt > 0)) continue;
-    const spend = p.budgetUsdDay * dt / 864e5, rev = spend * (1 + a.edgePct / 100);
+    const eAvg = eNow[k] !== undefined ? (a.edgePct + eNow[k]) / 2 : a.edgePct;
+    const spend = p.budgetUsdDay * dt / 864e5, rev = spend * (1 + eAvg / 100);
     a.spendUsd += spend; a.revUsd += rev; a.hoursOn += dt / 3600e3;
     if (a.run) { a.run.spendUsd += spend; a.run.revUsd += rev; }
     const d = p.days[day] || (p.days[day] = { spendUsd: 0, revUsd: 0 }); d.spendUsd += spend; d.revUsd += rev;

@@ -16,6 +16,7 @@ import { xmrPaperStep, xmrSummary, XMR_RULES } from './paperxmr.js';
 import { brainContext, ruleReply, aiReply, reportText } from './jarbas.js';
 import { runScan, scanHistory } from './scan.js';
 import { labStep, labSummary } from './lab.js';
+import { repairBookGlitch } from './repair.js';
 import { braiinsOf, mrrOf, stratumCheck } from './hashmarkets.js';
 import { macroOf, marketPanorama } from './panorama.js';
 import { entryChecklist } from './entry.js';
@@ -174,6 +175,7 @@ export async function tick(env, opts = {}) {
   const state = await kvGet(env, 'state', {});
   const nh = nhClient(env, fetchFn), chain = chainClient(env, fetchFn);
   const log = [], errors = [];
+  { const rp = repairBookGlitch(state); for (const n of rp.notes) log.push({ t: now, kind: 'acao', text: 'Correção do histórico (livro com preço absurdo em 04/11 18:06): ' + n }); }
 
   const hlUrl = env.HL_URL || 'https://api.hyperliquid.xyz/info';
   const predicted = fetchFn(hlUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ type: 'predictedFundings' }) })
@@ -659,7 +661,7 @@ export async function tick(env, opts = {}) {
       algos.forEach((a, i) => { if (res[i + 1].ok) books[a] = res[i + 1].v; });
       const map = FDR.miningMap(res[0].v, books, { btcUsd: prices.v.btcUsd, minEdgePct: cfg.minEdgeRel ? cfg.minEdgeBase : cfg.minEdgePct, // outras moedas seguem a meta fixa (a regra relativa é só do robô de BCH)
       rentFeePct: cfg.rentFeePct, poolFeePct: cfg.poolFeePct });
-      algoMap = map.map((m) => ({ algo: m.algo, label: m.label, coins: m.coins, edgePct: m.edgePct, level: m.level, capBtcPerUnit: m.capBtcPerUnit, unit: m.unit, rentBtcPerH: m.rentBtcPerH, thin: !!m.thin, marketUsdDay: m.marketUsdDay }));
+      algoMap = map.map((m) => ({ algo: m.algo, label: m.label, coins: m.coins, edgePct: m.edgePct, level: m.level, capBtcPerUnit: m.capBtcPerUnit, unit: m.unit, rentBtcPerH: m.rentBtcPerH, revBtcPerH: m.revBtcPerH, thin: !!m.thin, marketUsdDay: m.marketUsdDay }));
       algoRan = true;
       const ap = algoPaperStep(algoPaper, { map, now });
       algoPaper = ap.pa; algoTs = now;
@@ -686,6 +688,24 @@ export async function tick(env, opts = {}) {
         for (const e of r2.events) { const t2 = e.replace(/^Monero \(simulado\)/, mm.label + ' (' + mm.coins.join('+') + ', simulado)').replace(' no RandomX', ''); log.push({ t: now, kind: 'simulado', text: t2 }); if (cfg.xmrAlerts !== false && /abriria|subiria|baixaria|acabou|venderia/.test(t2)) await notify(env, t2, fetchFn); }
       }
     } else errors.push('WhatToMine: ' + res[0].e);
+  } else if (cfg.algoPaper !== false && prices.ok && paperXmr) {
+    // Monero entre os cálculos do mapa: a receita por hash muda devagar (dificuldade e preço), o aluguel muda rápido.
+    // A cada ciclo (3 min) relê só o livro do RandomX e refaz a margem com a receita do último mapa: entra e sai perto da
+    // hora certa, em vez de esperar até 15 min (a margem caía no meio da janela e a saída vinha tarde).
+    const mx = (algoMap || []).find((x) => x.algo === 'RANDOMXMONERO');
+    if (mx && mx.revBtcPerH > 0) {
+      const pub = (env.NH_BASE || 'https://api2.nicehash.com').replace(/\/$/, '');
+      const bk = await settle(fetchFn(pub + '/main/api/v2/hashpower/orderBook?algorithm=RANDOMXMONERO&size=1000', { headers: { accept: 'application/json', 'user-agent': 'funding-desk/1.0' } }).then((r) => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); }));
+      const b = bk.ok ? FDR.bookPerHash(bk.v) : null, fee = (cfg.rentFeePct === undefined ? 3 : cfg.rentFeePct) / 100;
+      const rent = b && (b.median || b.fill) ? (b.median || b.fill) * (1 + fee) : null;
+      if (rent) {
+        const mkUsd = b.btcDay * prices.v.btcUsd, m3 = Object.assign({}, mx, { edgePct: (mx.revBtcPerH / rent - 1) * 100, rentBtcPerH: rent, marketUsdDay: mkUsd, thin: b.paying < 5 || mkUsd < 1000, fast: true });
+        const xr = xmrPaperStep(paperXmr, { m: m3, now, btcUsd: prices.v.btcUsd, xmrUsd,
+          rules: Object.assign({}, XMR_RULES, cfg.xmrSimBtc > 0 ? { walletBtc: cfg.xmrSimBtc } : {}, isFinite(cfg.xmrEnterPct) ? { enterPct: cfg.xmrEnterPct } : {}) });
+        paperXmr = xr.px;
+        for (const e of xr.events) { log.push({ t: now, kind: 'simulado', text: e }); if (cfg.xmrAlerts !== false) await notify(env, e, fetchFn); }
+      }
+    }
   }
 
   // Outros fornecedores de hash (Braiins Hashpower, MiningRigRentals): preço para receber hash, a cada 15 min, só leitura.

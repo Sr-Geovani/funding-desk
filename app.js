@@ -1310,6 +1310,7 @@ function renderXmr(){
     '<div class="scroll" style="margin-top:6px"><table style="font-size:12px"><tr><th>De onde vem</th><th style="text-align:right">US$</th><th></th></tr>'+
       line('Janelas (receita − aluguel)',X.windowsUsd||0,usd(X.revUsd||0)+' − '+usd(X.rentUsd||0)+' em '+X.runs+' janelas')+
       line('Taxa de ordem nova',-(X.orderFeesUsd||0),'paga uma vez por ordem aberta; serve para as janelas seguintes')+
+      (X.idleSpentUsd?line('Espera na potência mínima',X.idleUsd||0,'entre janelas a ordem fica em 100 kH/s: aluguel '+usd(X.idleSpentUsd)+' em '+nf(X.idleHours||0,0)+' h'):'')+
       (X.convFeesUsd?line('Venda do XMR e envio do BTC',-X.convFeesUsd,'0,4% na venda + envio pela Lightning (estimativas)'):'')+
       (X.fxUsd?line('Variação do XMR vendido',X.fxUsd,'preço da venda contra o da hora da mineração'):'')+
       '<tr><td><b>Resultado</b></td><td class="'+cls+'" style="text-align:right"><b>'+sg(res)+'</b></td><td></td></tr></table></div>'+

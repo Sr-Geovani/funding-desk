@@ -21,7 +21,11 @@
 export const XMR_RULES = { walletBtc: 0.002, enterPct: 2, exitPct: 0, budgetUsdDay: 300, marketShare: 0.1, minOrderBtc: 0.001, newOrderFeeBtc: 0.00001, payoutXmr: 0.01,
   maxGap: 3 * 3600e3, winMin: 30, minExpUsd: 0.05,
   // venda do XMR na Kraken (taxa de quem aceita a oferta) e envio do BTC para a NiceHash pela Lightning: estimativas a confirmar
-  sellFeePct: 0.4, btcSendFeeBtc: 0.00001 };
+  sellFeePct: 0.4, btcSendFeeBtc: 0.00001,
+  // potência mínima de uma ordem na NiceHash (H/s, de /public/buy/info em 05/11): entre janelas a ordem fica nela e continua
+  // gastando e minerando (RandomX: 100 kH/s ≈ US$3,70 por dia de aluguel)
+  minLimitH: { RANDOMXMONERO: 1e5, X11: 1e13, EQUIHASH: 3e6, SCRYPT: 5e10, KAWPOW: 1e9, AUTOLYKOS: 3e9, OCTOPUS: 1e9, NEXAPOW: 3e9, FISHHASH: 1e9, BEAMV3: 600,
+    ETCHASH: 1e9, DAGGERHASHIMOTO: 1e9, KHEAVYHASH: 1e14, ALEPHIUM: 5e12, EAGLESONG: 1e14, ZHASH: 1e3, VERUSHASH: 1e8, NEOSCRYPT: 1e7 } };
 const usd2 = (x) => (x < 0 ? '−' : '') + 'US$' + Math.abs(x).toFixed(2).replace('.', ',');
 const sgn = (x) => (x >= 0 ? '+' : '') + usd2(x);
 const pc1 = (x) => (x >= 0 ? '+' : '−') + Math.abs(x).toFixed(1).replace('.', ',') + '%';
@@ -53,6 +57,15 @@ export function xmrPaperStep(px, { m, now, btcUsd, xmrUsd, rules = XMR_RULES }) 
     if (p.run) { p.run.spentBtc += spend; p.run.spentUsd += spendUsd; p.run.revUsd += revUsd; }
     const d = p.days[day] || (p.days[day] = { spentUsd: 0, revUsd: 0 }); d.spentUsd += spendUsd; d.revUsd += revUsd;
     if (p.orderBtc < 1e-8) { p.orderBtc = 0; const R0 = p.run; close('acabou o valor da ordem'); p.orderOpen = false; events.push(`${tag}: a ordem acabou o valor e foi encerrada.\n${runText(R0)}\n${totText()}`); }
+  }
+  // 1b) espera entre janelas: a ordem aberta fica na potência mínima e continua gastando e minerando (com a margem do momento)
+  else if (!p.on && p.orderOpen && dt > 0 && btcUsd > 0 && m && m.rentBtcPerH > 0 && rules.minLimitH[m.algo || 'RANDOMXMONERO']) {
+    const want = rules.minLimitH[m.algo || 'RANDOMXMONERO'] * m.rentBtcPerH * dt / 864e5, spend = Math.min(want, p.orderBtc);
+    const e0 = isFinite(p.edgeNow) && p.edgeNow !== null ? p.edgeNow : (e !== null ? e : 0), eAvg = e !== null ? (e0 + e) / 2 : e0, spendUsd = spend * btcUsd, revUsd = spendUsd * (1 + eAvg / 100);
+    p.orderBtc -= spend; p.spentBtc += spend; p.idleSpentUsd = (p.idleSpentUsd || 0) + spendUsd; p.idleRevUsd = (p.idleRevUsd || 0) + revUsd; p.idleHours = (p.idleHours || 0) + dt / 3600e3; p.heldBookUsd += revUsd;
+    if (px2) p.poolXmr += revUsd / px2; else p.coinUsd += revUsd;
+    const d = p.days[day] || (p.days[day] = { spentUsd: 0, revUsd: 0 }); d.spentUsd += spendUsd; d.revUsd += revUsd;
+    if (p.orderBtc < 1e-8) { p.orderBtc = 0; p.orderOpen = false; events.push(`${tag}: a ordem acabou o valor na potência mínima e foi encerrada. ${totText()}`); }
   }
   // 2) saque do pool para a carteira (Kraken) quando passa do mínimo
   if (px2 && p.poolXmr >= rules.payoutXmr) {
@@ -124,11 +137,11 @@ export function xmrPaperStep(px, { m, now, btcUsd, xmrUsd, rules = XMR_RULES }) 
     if (P.length > 6) P = P.slice(0, 3).concat(['…'], P.slice(-2));
     const path = P.join(' → ');
     return `Esta janela: gastou ${usd2(R.spentUsd)} de aluguel e recebeu ${usd2(R.revUsd)} em moeda do pool → ${res >= 0 ? 'lucro' : 'prejuízo'} de ${sgn(res)} em ${mins} min.\n` +
-      `A margem foi ${path} (lida a cada 15 min); na média, rendeu ${pc1(eff)}.`;
+      `A margem foi ${path} (lida a cada 3 min); na média, rendeu ${pc1(eff)}.`;
   }
   function totText() {
     const T = totals(p), n = p.runs.length, fee = T.orderFeesUsd + T.convFeesUsd - T.fxUsd;
-    const extra = (T.convFeesUsd ? `; venda e envio custaram ${usd2(T.convFeesUsd)}` : '') + (T.fxUsd ? `; a variação do XMR vendido deu ${sgn(T.fxUsd)}` : '');
+    const extra = (p.idleSpentUsd ? `; a espera na potência mínima entre janelas deu ${sgn(T.idleUsd)} (aluguel ${usd2(p.idleSpentUsd)} em ${Math.round(p.idleHours || 0)} h)` : '') + (T.convFeesUsd ? `; venda e envio custaram ${usd2(T.convFeesUsd)}` : '') + (T.fxUsd ? `; a variação do XMR vendido deu ${sgn(T.fxUsd)}` : '');
     return `Desde o início: ${n} ${n === 1 ? 'janela soma' : 'janelas somam'} ${sgn(T.windowsUsd)}; abrir a ordem custou ${usd2(T.orderFeesUsd)} (paga uma vez por ordem)${extra}. ` +
       `Saldo: ${sgn(T.resultUsd)}${T.resultUsd < 0 && T.windowsUsd > 0 ? ` (faltam ${usd2(-T.resultUsd)} de lucro nas próximas janelas para pagar a abertura)` : T.resultUsd >= 0 && fee > 0 ? ' (a abertura já se pagou)' : ''}.`;
   }
@@ -136,8 +149,8 @@ export function xmrPaperStep(px, { m, now, btcUsd, xmrUsd, rules = XMR_RULES }) 
 
 // Contas do acumulado (todas em dólar do momento em que aconteceram).
 function totals(p) {
-  const windowsUsd = p.revUsd - p.spentUsd, orderFeesUsd = p.feesUsd || 0, convFeesUsd = p.convFeesUsd || 0, fxUsd = p.fxUsd || 0;
-  return { windowsUsd, orderFeesUsd, convFeesUsd, fxUsd, resultUsd: windowsUsd - orderFeesUsd - convFeesUsd + fxUsd };
+  const windowsUsd = p.revUsd - p.spentUsd, orderFeesUsd = p.feesUsd || 0, convFeesUsd = p.convFeesUsd || 0, fxUsd = p.fxUsd || 0, idleUsd = (p.idleRevUsd || 0) - (p.idleSpentUsd || 0);
+  return { windowsUsd, orderFeesUsd, convFeesUsd, fxUsd, idleUsd, resultUsd: windowsUsd + idleUsd - orderFeesUsd - convFeesUsd + fxUsd };
 }
 
 const now0 = (p) => p.lastTs || Date.now();
@@ -159,8 +172,8 @@ export function xmrSummary(p0, btcUsd, xmrUsd) {
   const heldXmr = (p.poolXmr || 0) + (p.krakenXmr || 0), heldNowUsd = xmrUsd > 0 ? heldXmr * xmrUsd : null;
   const run = p.run ? Object.assign({}, p.run, { resultUsd: p.run.revUsd - p.run.spentUsd }) : null;
   return { win, since: p.since, on: p.on, edgeNow: p.edgeNow, hoursOn: p.hoursOn, runs: p.runs.length + (p.run ? 1 : 0),
-    spentUsd: costUsd, rentUsd: p.spentUsd, revUsd: p.revUsd, windowsUsd: T.windowsUsd, orderFeesUsd: T.orderFeesUsd, convFeesUsd: T.convFeesUsd, fxUsd: T.fxUsd, resultUsd: T.resultUsd,
-    retPct: costUsd > 0 ? T.resultUsd / costUsd * 100 : null, perDayUsd: days >= 1 ? T.resultUsd / days : null, // média por dia só depois de 1 dia (antes disso extrapola poucas horas)
+    spentUsd: costUsd + (p.idleSpentUsd || 0), rentUsd: p.spentUsd, idleUsd: T.idleUsd, idleSpentUsd: p.idleSpentUsd || 0, idleRevUsd: p.idleRevUsd || 0, idleHours: p.idleHours || 0, revUsd: p.revUsd, windowsUsd: T.windowsUsd, orderFeesUsd: T.orderFeesUsd, convFeesUsd: T.convFeesUsd, fxUsd: T.fxUsd, resultUsd: T.resultUsd,
+    retPct: costUsd + (p.idleSpentUsd || 0) > 0 ? T.resultUsd / (costUsd + (p.idleSpentUsd || 0)) * 100 : null, perDayUsd: days >= 1 ? T.resultUsd / days : null, // média por dia só depois de 1 dia (antes disso extrapola poucas horas)
      walletBtc: p.walletBtc + p.orderBtc, orderBtc: p.orderBtc, orderOpen: !!p.orderOpen,
     poolXmr: p.poolXmr, paidXmr: p.paidXmr, krakenXmr: p.krakenXmr || 0, paidUsd: xmrUsd ? p.paidXmr * xmrUsd : null, payouts: p.payouts.length, sold: (p.sold || []).slice(-5).reverse(),
     heldXmr, heldBookUsd: p.heldBookUsd, heldNowUsd, heldFxUsd: heldNowUsd !== null ? heldNowUsd - p.heldBookUsd : null, coinUsd: p.coinUsd || 0,
