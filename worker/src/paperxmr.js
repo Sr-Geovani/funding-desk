@@ -54,6 +54,11 @@ export function xmrPaperStep(px, { m, now, btcUsd, xmrUsd, rules = XMR_RULES }) 
   const events = [], tag = 'Monero (simulado)', dt = Math.min(Math.max(0, now - (p.lastTs || now)), rules.maxGap), day = new Date(now).toISOString().slice(0, 10);
   const e = m && isFinite(m.edgePct) && m.edgePct <= 100 ? m.edgePct : null;
   const px2 = xmrUsd > 0 ? xmrUsd : null; // outras moedas PPS: sem preço próprio, o crédito fica em dólar
+  // ordem aberta antes do preço da ordem existir: o preço é o da última leitura da última janela (receita ÷ (1 + margem))
+  if (p.orderOpen && !(p.orderPrice > 0) && m && m.revBtcPerH > 0) {
+    const lr = p.run || p.runs[p.runs.length - 1], le = lr ? (lr.path && lr.path.length ? lr.path[lr.path.length - 1] : lr.edgePct) : null;
+    p.orderPrice = isFinite(le) && le > -20 ? m.revBtcPerH / (1 + le / 100) : (m.rentBtcPerH || null);
+  }
   const priced = !!(m && m.rentBtcPerH > 0 && m.revBtcPerH > 0 && p.orderPrice > 0);
   const eOur = priced ? (m.revBtcPerH / p.orderPrice - 1) * 100 : e, outbid = priced && m.rentBtcPerH > p.orderPrice * (1 + rules.outbidPct / 100);
   const lower = () => { if (priced && m.rentBtcPerH < p.orderPrice) p.orderPrice = Math.max(m.rentBtcPerH, p.orderPrice * (1 - rules.downStepPct / 100 * dt / 600e3)); };
