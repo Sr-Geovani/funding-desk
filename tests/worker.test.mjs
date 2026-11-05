@@ -1924,3 +1924,30 @@ test('Monero: entre janelas a ordem aberta fica na potência mínima e esse cust
   close(S.idleSpentUsd, 1e5 * rent * 3 / 24 * 80000, 1e-9); assert.ok(S.idleUsd < 0, 'margem negativa na espera: custa');
   close(S.resultUsd, S.windowsUsd + S.idleUsd - S.orderFeesUsd, 1e-9);
 });
+
+test('auditor: contas que fecham passam; BTC que some, janela impossível e margem absurda viram erro; avisa só o que é novo', async () => {
+  const { auditState, auditNews } = await import('../worker/src/audit.js');
+  const { xmrPaperStep } = await import('../worker/src/paperxmr.js');
+  const T = Date.UTC(2026, 10, 5, 14), M = 60e3, m = (e) => ({ algo: 'RANDOMXMONERO', edgePct: e, rentBtcPerH: 4.6e-10, marketUsdDay: 50000, fast: true });
+  let p = null; for (let i = 0; i < 12; i++) p = xmrPaperStep(p, { m: m(i % 4 < 2 ? 5 : -2), now: T + i * 3 * M, btcUsd: 80000, xmrUsd: 600 }).px;
+  const ok = auditState({ paperXmr: p, algoTs: T + 33 * M, edgeHist: [[T, -3, 0.43]] }, { now: T + 34 * M });
+  assert.equal(ok.errors, 0, JSON.stringify(ok.findings)); assert.ok(ok.checks > 20);
+  const bad = JSON.parse(JSON.stringify(p)); bad.orderBtc -= 0.0001; bad.runs[0].revUsd *= 5;
+  const r = auditState({ paperXmr: bad, algoTs: T, edgeHist: [[T, 40152, 0.001]] }, { now: T + 40 * M });
+  const txt = r.findings.map((x) => x.text).join(' | ');
+  assert.match(txt, /BTC não fecha/); assert.match(txt, /rendeu \d+%/); assert.match(txt, /acima de 100%/); assert.match(txt, /mapa de moedas não atualiza há 40 min/); assert.match(txt, /soma das janelas/);
+  assert.equal(auditNews(r, r).length, 0, 'o mesmo problema não repete no Telegram');
+  assert.match(auditNews(r, ok)[0], /voltou a fechar/);
+});
+
+test('Monero: meta de 30 janelas com a leitura de 3 min e veredito pela regra escrita antes', async () => {
+  const { xmrPaperStep, xmrSummary } = await import('../worker/src/paperxmr.js');
+  const T = Date.UTC(2026, 10, 6, 0), M = 60e3, m = (e) => ({ algo: 'RANDOMXMONERO', edgePct: e, rentBtcPerH: 4.6e-10, marketUsdDay: 50000, fast: true });
+  let p = null, t = T;
+  for (let w = 0; w < 31; w++) { for (const e of [5, 4, -1]) { p = xmrPaperStep(p, { m: m(e), now: t, btcUsd: 80000, xmrUsd: 600 }).px; t += 3 * M; } t += 30 * M; }
+  const G = xmrSummary(p, 80000, 600).goal;
+  assert.ok(G.n >= 30, String(G.n)); assert.ok(G.readPct > G.realPct, 'a margem lida é maior que a que rende'); close(G.gapPp, G.readPct - G.realPct, 1e-9);
+  assert.equal(G.verdict, G.checks.lucro && G.checks.margem && G.checks.positivas ? 'aprovada para teste real pequeno' : 'reprovada');
+  const early = xmrSummary(xmrPaperStep(null, { m: m(5), now: T, btcUsd: 80000, xmrUsd: 600 }).px, 80000, 600).goal;
+  assert.equal(early.verdict, 'em teste');
+});

@@ -901,7 +901,7 @@ function renderRobo(){
     '<div class="kv"><div><small>Funding fechadas</small><span>'+(fs?fs.closed:0)+'</span></div><div><small>Acerto</small><span>'+(fs&&fs.closed?fs.wins+' de '+fs.closed:'—')+'</span></div><div><small>Funding (fechadas)</small><span class="'+(fs&&fs.netUsd<0?'bad':'good')+'">'+(fs?signUsd(fs.netUsd):'—')+'</span></div>'+
     '<div><small>Mineração: gasto</small><span>'+(mp?usd(mSpend):'—')+'</span></div><div><small>Blocos que seriam seus</small><span>'+(mp?(mp.blocks||0)+' de '+(mp.draws||0):'—')+'</span></div><div><small>Resultado simulado</small><span class="'+(mp&&(mp.wonUsd||0)-mSpend<0?'bad':'good')+'">'+(mp?signUsd((mp.wonUsd||0)-mSpend):'—')+'</span></div></div>';
   // funding
-  var fh='<div class="row between"><h2 style="margin:0">Funding</h2>'+(fs?'<span class="note">desde '+dt2(fs.since)+'</span>':'')+'</div>';
+  var fh='<div class="row between"><h2 style="margin:0">Funding <span class="chip">só medição</span></h2>'+(fs?'<span class="note">desde '+dt2(fs.since)+'</span>':'')+'</div>';
   if(!fp)fh+='<p class="note">Começa no próximo ciclo do servidor (até 3 min).</p>';
   else{
     fh+='<div class="eyebrow" style="margin:10px 0 6px">Abertas agora ('+fp.open.length+')</div>'+(fp.open.length?'<div class="stack" style="gap:8px">'+fp.open.map(function(o){var acc=o.fundingUsd-o.feesUsd;
@@ -1307,6 +1307,7 @@ function renderXmr(){
   var line=function(t,v,n){return '<tr><td>'+t+'</td><td class="'+(v>0?'good':v<0?'bad':'')+'" style="text-align:right;white-space:nowrap">'+sg(v)+'</td><td class="note">'+(n||'')+'</td></tr>'};
   el.innerHTML='<div class="row between" style="align-items:baseline"><h2 style="margin:0">Operação Monero</h2><span class="chip">simulada como real</span></div>'+
     '<div class="row" style="margin-top:8px;align-items:baseline"><span class="huge '+cls+'">'+sg(res)+'</span><span class="note">resultado desde '+dt2(X.since)+(X.retPct!==null?' · '+pct(X.retPct,1)+' sobre o gasto':'')+'</span></div>'+
+    goalHTML(X.goal)+
     '<div class="scroll" style="margin-top:6px"><table style="font-size:12px"><tr><th>De onde vem</th><th style="text-align:right">US$</th><th></th></tr>'+
       line('Janelas (receita − aluguel)',X.windowsUsd||0,usd(X.revUsd||0)+' − '+usd(X.rentUsd||0)+' em '+X.runs+' janelas')+
       line('Taxa de ordem nova',-(X.orderFeesUsd||0),'paga uma vez por ordem aberta; serve para as janelas seguintes')+
@@ -1863,6 +1864,27 @@ function renderBrain(){
     (acts.length?'<details style="margin-top:8px" open><summary>Atividade agora</summary><div class="stack" style="gap:2px;margin-top:4px">'+acts.map(function(x){return '<div class="note">'+hhmm(new Date(x.t))+' · '+esc(x.text)+'</div>'}).join('')+'</div></details>':'')+
     '<p class="note" style="margin:6px 0 0">Converse com o Jarbas no Telegram: /status, /monero, /bch, /funding, /saldo, /copiloto, /laboratorio, /relatorio.</p>';
 }
+// Meta do Monero antes de qualquer dinheiro: 30 janelas com a leitura de 3 min e a regra escrita antes dos dados.
+function goalHTML(G){
+  if(!G)return '';var R=G.rules||{windows:30,minRealPct:1,minPosPct:70},n=G.n||0,w=Math.min(100,n/R.windows*100),ck=G.checks||{};
+  var mark=function(ok,txt){return '<div class="note">'+(n<R.windows?'○':ok?'✓':'✗')+' '+txt+'</div>'};
+  var cls=G.verdict==='reprovada'?'bad':G.verdict==='em teste'?'':'ok';
+  return '<div class="box" style="margin-top:8px"><div class="row between" style="align-items:baseline"><b>Meta antes do dinheiro: '+n+' de '+R.windows+' janelas</b><span class="chip '+cls+'">'+esc(G.verdict)+'</span></div>'+
+    '<div style="height:6px;border-radius:3px;background:var(--line);overflow:hidden;margin:6px 0"><div style="height:100%;width:'+w.toFixed(0)+'%;background:var(--accent)"></div></div>'+
+    '<div class="note" style="margin-bottom:4px">Só contam as janelas com a margem lida a cada 3 min'+(G.since?' (desde '+dt2(G.since)+')':' (começa na próxima leitura)')+'. Margem lida '+(G.readPct!==null?pct(G.readPct,1):'—')+' × que rendeu '+(G.realPct!==null?pct(G.realPct,1):'—')+(G.gapPp!==null&&G.gapPp!==undefined?' (diferença '+nf(G.gapPp,1)+' p.p.)':'')+'.</div>'+
+    mark(ck.lucro,'lucro depois da taxa de ordem e da espera: '+((G.resultUsd>=0?'+':'')+usd(G.resultUsd||0)))+
+    mark(ck.margem,'margem que rendeu de pelo menos '+pct(R.minRealPct,0))+
+    mark(ck.positivas,'pelo menos '+R.minPosPct+'% das janelas positivas'+(G.posPct!==null&&G.posPct!==undefined?' (agora '+G.posPct+'%)':''))+
+    '<div class="note" style="margin-top:4px">Regra escrita em 05/11, antes dos dados. Aprovada = teste real pequeno quando houver capital; reprovada = a frente não vale o risco.</div></div>';
+}
+// Auditor automático: as contas das simulações fecham? (de hora em hora, no servidor)
+function renderAuditor(){
+  var el=$('h_audit');if(!el)return;var S=ops.status&&ops.status.state,A=S&&S.audit;if(!A){el.hidden=true;return}el.hidden=false;
+  var F=A.findings||[],cls=A.errors?'bad':A.warnings?'warn':'ok';
+  el.innerHTML='<div class="row between" style="align-items:baseline"><div class="eyebrow" style="margin:0">Auditor automático</div><span class="chip '+cls+'">'+(A.errors?A.errors+' erro'+(A.errors>1?'s':''):'contas fecham')+'</span></div>'+
+    '<p class="note" style="margin:6px 0 0">'+A.checks+' conferências às '+hhmm(new Date(A.at))+' (de hora em hora): o dinheiro de cada simulação fecha (início = carteira + ordem + gasto + taxas), a soma das janelas bate com o total, nenhuma margem impossível, preços do livro perto do mercado e dados atualizados. Problema novo chega no Telegram; /auditor no Jarbas.</p>'+
+    (F.length?'<div class="stack" style="gap:2px;margin-top:6px">'+F.map(function(x){return '<div class="note"><span class="'+(x.sev==='erro'?'bad':'warn')+'">'+(x.sev==='erro'?'Erro':'Aviso')+':</span> '+esc(x.text)+'</div>'}).join('')+'</div>':'');
+}
 // Laboratório de novas frentes (30 dias, papel): base, P2P USDT/BRL, Boros e Pendle PT × Aave, contra o CDI.
 function renderLab(){
   var el=$('h_lab');if(!el)return;var S=ops.status&&ops.status.state,L=S&&S.lab;if(!L||!L.now){el.hidden=true;return}el.hidden=false;
@@ -1883,7 +1905,7 @@ function renderLab(){
     row('Pendle PT (primeira linha)',peB[0]?p1(peB[0].apy)+' fixo':'—',peB.length?peB.slice(0,3).map(function(x){return esc(x.name)+' '+p1(x.apy)+' por '+x.days+' d ('+esc(x.chain)+')'}).join(' · ')+'. Aave paga '+p1(N.aaveApy)+'. Regra: ≥2 p.p. acima da Aave. Bate '+hit(h.pendle)+(N.pendleAt&&N.at-N.pendleAt>1800e3?' (leitura de '+hhmm(new Date(N.pendleAt))+': a API do Pendle limitou o servidor)':''):'sem leitura agora'+(N.errs&&N.errs.pendle?' (a API do Pendle limitou o servidor: '+esc(N.errs.pendle)+')':''),peB[0]&&peB[0].gapPp>=2?'good':'')
   ];
   var paper=L.paper||{},po=paper.open||[],pc=paper.closed||[];
-  el.innerHTML='<div class="eyebrow">Laboratório de novas frentes · 30 dias, só papel</div><div class="lead">Nenhuma vira operação real por taxa anunciada, só com lucro líquido repetido</div>'+
+  el.innerHTML='<div class="eyebrow">Laboratório de novas frentes · só medição, sem capital</div><div class="lead">Nenhuma vira operação real por taxa anunciada, só com lucro líquido repetido</div>'+
     '<p class="note" style="margin:6px 0 8px">Coleta a cada 15 min desde '+new Date(L.since).toLocaleDateString('pt-BR')+' ('+nf(L.days||0,1)+' dias, '+L.samples+' leituras). Taxas em dólar, ao ano.</p>'+
     '<p class="note" style="margin:0 0 8px"><b>Régua:</b> CDI '+pctp(cdi,2)+'; um CDB 100% CDI rende '+pctp(bar.cdbNetPct,2)+' depois do IR. Em dólar, numa plataforma no exterior (15% de IR), precisa render <b>'+pctp(bar.usdGrossNeedPct,2)+' bruto</b> só para empatar, sem contar o câmbio.</p>'+
     '<div class="scroll"><table style="font-size:12px"><tr><th>Frente</th><th>Agora</th><th>Leitura</th></tr>'+rows.join('')+'</table></div>'+
@@ -2021,6 +2043,7 @@ function thinkStart(){if(thinkT)return;thinkT=setInterval(function(){var el=$('b
 function renderHome(){
   try{renderBrain();thinkStart()}catch(e){console.error('cérebro',e)}
   try{renderLab()}catch(e){console.error('laboratório',e)}
+  try{renderAuditor()}catch(e){console.error('auditor',e)}
   renderLink();
   var rows=VENUES.map(function(v){
     var s=state.src[v];

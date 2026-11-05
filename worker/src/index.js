@@ -17,6 +17,7 @@ import { brainContext, ruleReply, aiReply, reportText } from './jarbas.js';
 import { runScan, scanHistory } from './scan.js';
 import { labStep, labSummary } from './lab.js';
 import { repairBookGlitch } from './repair.js';
+import { auditState, auditNews } from './audit.js';
 import { braiinsOf, mrrOf, stratumCheck } from './hashmarkets.js';
 import { macroOf, marketPanorama } from './panorama.js';
 import { entryChecklist } from './entry.js';
@@ -866,6 +867,14 @@ export async function tick(env, opts = {}) {
   const hist = next.edgeHist = (state.edgeHist || []);
   if (mkt.ok && (!hist.length || now - hist[hist.length - 1][0] >= 15 * 60e3)) hist.push([now, +mkt.edgeAtBidPct.toFixed(2), +mkt.bidEH.toFixed(4), darr ? +darr.v.toFixed(4) : null, book ? Math.round(book.totalPH) : null, book && book.fixedEH ? +book.fixedEH.toFixed(4) : null]);
   next.edgeHist = hist.slice(-672); // 7 dias
+  // Auditor automático, de hora em hora: confere se as contas das simulações fecham; avisa só problema novo
+  if (!state.audit || now - state.audit.at >= 3600e3) {
+    try {
+      const au = auditState(Object.assign({}, next, { scan: await kvGet(env, 'scan', null) }), { now, lab: await kvGet(env, 'lab', null) });
+      for (const msg of auditNews(state.audit, au)) { log.push({ t: now, kind: 'acao', text: msg }); await notify(env, msg, fetchFn); }
+      next.audit = au;
+    } catch (e) { errors.push('auditor: ' + (e.message || e)); }
+  }
   await kvPut(env, 'state', next);
   await appendLog(env, log);
   return { market: next.market, actions: results, notes: dec.notes, errors, blockEvent, mode: cfg.mode, alerts: newAlerts, paper };
@@ -1033,7 +1042,7 @@ async function api(req, env, url, fetchFn) {
         paper: state.paper || null, paperBurst: state.paperBurst || null, paperPlan: state.paperPlan || null, paperAlways: state.paperAlways || null, paperSniper: state.paperSniper || null, sniper: state.sniper || null, snInfo: state.snInfo || null, snLog: (state.snLog || []).slice(-40).reverse(), jarbas: { telegram: !!(state.tgHook && state.tgHook.ok), hookErr: state.tgHook && !state.tgHook.ok ? state.tgHook.err : null, lastReport: state.dailyRep || null }, orderEnds: (state.orderEnds || []).slice(-10).reverse(), wallet: state.acct ? { btc: state.acct.balanceBtc, at: state.acct.balAt || state.acct.at } : null, paperArchive: state.paperArchive || null, entryCheck: state.entryCheck || null, calib: state.calib || null, minEdgeNow: state.minEdgeNow || null, luck24: state.luck24 || null, balPlan: state.balPlan || null, planOn: !!state.planBackup, calibPrev: state.calibPrev || null, robotTest: state.robotTest || null, aiReport: state.aiReport || null, mktMargin: state.mktMargin || null, asertF: state.asertF || null, exec: execSummary(state.execLog), bestScen: state.bestScen || null, hashMkts: state.hashMkts || null, fronts: state.fronts || null, frontsPaper: state.frontsPaper || null, market2: state.market2 || null, aiPanorama: state.aiPanorama || null,
         fundPaperLT: state.fundPaperLT ? { summary: fundPaperSummary(state.fundPaperLT, LT_FEES), open: state.fundPaperLT.open, closed: state.fundPaperLT.closed.slice(-50).reverse() } : null, opLog: (state.opLog || []).slice(-20).reverse(), real: state.real ? Object.assign({}, state.real, { paid: undefined }) : null,
         fundPaper: state.fundPaper ? { summary: fundPaperSummary(state.fundPaper, FD.DEFAULT_FEES), open: state.fundPaper.open, closed: state.fundPaper.closed.slice(-100).reverse() } : null,
-        algoPaper: state.algoPaper || null, xmr: xmrSummary(state.paperXmr, (state.market || {}).btcUsd, state.xmrUsd), xmrUsd: state.xmrUsd || null, ppsOps: Object.fromEntries(Object.entries(state.ppsOps || {}).map(([k, v]) => [k, Object.assign(xmrSummary(v, (state.market || {}).btcUsd, null), { label: v.label, coins: v.coins })])), algoMapNow: state.algoMap || [], lab: labSummary(await kvGet(env, 'lab', null)), marginLastro: marginLastroOf(await kvGet(env, 'marginHist', {})), scan: await (async () => { const sc = await kvGet(env, 'scan', null); return sc ? { at: sc.at, extra: sc.extra, mrr: sc.mrr, err: sc.err, hist: sc.hist || null } : null; })(),
+        algoPaper: state.algoPaper || null, xmr: xmrSummary(state.paperXmr, (state.market || {}).btcUsd, state.xmrUsd), xmrUsd: state.xmrUsd || null, ppsOps: Object.fromEntries(Object.entries(state.ppsOps || {}).map(([k, v]) => [k, Object.assign(xmrSummary(v, (state.market || {}).btcUsd, null), { label: v.label, coins: v.coins })])), algoMapNow: state.algoMap || [], audit: state.audit || null, lab: labSummary(await kvGet(env, 'lab', null)), marginLastro: marginLastroOf(await kvGet(env, 'marginHist', {})), scan: await (async () => { const sc = await kvGet(env, 'scan', null); return sc ? { at: sc.at, extra: sc.extra, mrr: sc.mrr, err: sc.err, hist: sc.hist || null } : null; })(),
         fundPaperAI: state.fundPaperAI ? { summary: fundPaperSummary(state.fundPaperAI, FD.DEFAULT_FEES), open: state.fundPaperAI.open, closed: state.fundPaperAI.closed.slice(-100).reverse() } : null,
         aiScores: state.aiScores || {}, stable24: Object.keys(state.stable24 || {}), pairStats: state.pairStats || {},
         ai: state.ai ? Object.assign({ xp: state.ai.xp, since: state.ai.since, stats: state.ai.stats, ctrl: (state.ai.ctrl || {}).stats || {}, unscoredBy: state.ai.unscored || {}, open: state.ai.open.slice(-30).reverse(), done: state.ai.done.slice(-60).reverse() }, levelOf(state.ai)) : null,

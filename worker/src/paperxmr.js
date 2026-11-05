@@ -22,6 +22,9 @@ export const XMR_RULES = { walletBtc: 0.002, enterPct: 2, exitPct: 0, budgetUsdD
   maxGap: 3 * 3600e3, winMin: 30, minExpUsd: 0.05,
   // venda do XMR na Kraken (taxa de quem aceita a oferta) e envio do BTC para a NiceHash pela Lightning: estimativas a confirmar
   sellFeePct: 0.4, btcSendFeeBtc: 0.00001,
+  // Meta antes de qualquer dinheiro (regra escrita em 05/11, antes dos dados): 30 janelas com a leitura de 3 min e,
+  // juntas, (a) lucro depois da taxa de ordem e da espera, (b) margem que rendeu de pelo menos +1% e (c) 70% das janelas positivas.
+  goal: { windows: 30, minRealPct: 1, minPosPct: 70 },
   // potência mínima de uma ordem na NiceHash (H/s, de /public/buy/info em 05/11): entre janelas a ordem fica nela e continua
   // gastando e minerando (RandomX: 100 kH/s ≈ US$3,70 por dia de aluguel)
   minLimitH: { RANDOMXMONERO: 1e5, X11: 1e13, EQUIHASH: 3e6, SCRYPT: 5e10, KAWPOW: 1e9, AUTOLYKOS: 3e9, OCTOPUS: 1e9, NEXAPOW: 3e9, FISHHASH: 1e9, BEAMV3: 600,
@@ -48,6 +51,7 @@ export function xmrPaperStep(px, { m, now, btcUsd, xmrUsd, rules = XMR_RULES }) 
   const events = [], tag = 'Monero (simulado)', dt = Math.min(Math.max(0, now - (p.lastTs || now)), rules.maxGap), day = new Date(now).toISOString().slice(0, 10);
   const e = m && isFinite(m.edgePct) && m.edgePct <= 100 ? m.edgePct : null;
   const px2 = xmrUsd > 0 ? xmrUsd : null; // outras moedas PPS: sem preço próprio, o crédito fica em dólar
+  if (m && m.fast && !p.fastSince) { p.fastSince = now; p.idleAtFast = (p.idleRevUsd || 0) - (p.idleSpentUsd || 0); } // início da leitura a cada 3 min: começa a contagem das 30 janelas
   // 1) o intervalo que passou, com a decisão anterior
   if (p.on && dt > 0 && btcUsd > 0) {
     const rate = p.rateUsdDay || rules.budgetUsdDay, want = rate * dt / 864e5 / btcUsd, spend = Math.min(want, p.orderBtc), frac = want > 0 ? spend / want : 0;
@@ -79,7 +83,7 @@ export function xmrPaperStep(px, { m, now, btcUsd, xmrUsd, rules = XMR_RULES }) 
     const netUsd = heldUsdNow * (1 - rules.sellFeePct / 100), gotBtc = netUsd / btcUsd - rules.btcSendFeeBtc;
     if (heldUsdNow > 0 && p.walletBtc + gotBtc >= need) {
       const feeUsd = heldUsdNow - netUsd + rules.btcSendFeeBtc * btcUsd, fx = heldUsdNow - heldBook;
-      p.convFeesUsd += feeUsd; p.fxUsd += fx; p.heldBookUsd -= heldBook; p.walletBtc += gotBtc;
+      p.convFeesUsd += feeUsd; p.fxUsd += fx; p.heldBookUsd -= heldBook; p.walletBtc += gotBtc; p.refillBtc = (p.refillBtc || 0) + gotBtc;
       p.sold = (p.sold || []).concat([{ t: now, xmr: px2 ? +p.krakenXmr.toFixed(6) : null, usd: +heldUsdNow.toFixed(2), btc: +gotBtc.toFixed(8), feeUsd: +feeUsd.toFixed(2), fxUsd: +fx.toFixed(2) }]).slice(-20);
       events.push(`${tag}: venderia ${px2 ? p.krakenXmr.toFixed(4).replace('.', ',') + ' XMR' : 'as moedas recebidas'} por ${usd2(heldUsdNow)} e mandaria ${gotBtc.toFixed(6).replace('.', ',')} BTC de volta para a NiceHash (taxas ${usd2(feeUsd)}${px2 ? `; variação do XMR desde a mineração ${sgn(fx)}` : ''})`);
       if (px2) p.krakenXmr = 0; else p.coinUsd = 0; p.noFunds = null;
@@ -105,7 +109,7 @@ export function xmrPaperStep(px, { m, now, btcUsd, xmrUsd, rules = XMR_RULES }) 
         if (!p.orderOpen) {
           const amt = Math.floor((p.walletBtc - rules.newOrderFeeBtc) * 1e8) / 1e8;
           if (amt >= rules.minOrderBtc) {
-            p.walletBtc -= amt + rules.newOrderFeeBtc; p.feesBtc += rules.newOrderFeeBtc; p.feesUsd += rules.newOrderFeeBtc * btcUsd; p.orderBtc = amt; p.orderOpen = true; opened = true;
+            p.walletBtc -= amt + rules.newOrderFeeBtc; p.feesBtc += rules.newOrderFeeBtc; p.feesUsd += rules.newOrderFeeBtc * btcUsd; p.feeLog = (p.feeLog || []).concat([{ t: now, usd: rules.newOrderFeeBtc * btcUsd }]).slice(-50); p.orderBtc = amt; p.orderOpen = true; opened = true;
             events.push(`${tag}: abriria ordem de ${amt.toFixed(6).replace('.', ',')} BTC no RandomX com margem de ${e.toFixed(1).replace('.', ',')}% (taxa de ordem nova de ${usd2(rules.newOrderFeeBtc * btcUsd)}, paga uma vez e que serve para as próximas janelas)`);
           } else if (!p.noFunds || now - p.noFunds > 6 * 3600e3) { p.noFunds = now; events.push(`${tag}: margem boa, mas a carteira virtual não tem o mínimo de 0,001 BTC (e o que foi minerado ainda não dá para repor)`); }
         } else events.push(`${tag}: subiria a potência no RandomX com margem de ${e.toFixed(1).replace('.', ',')}% (ordem já aberta, sem taxa nova)`);
@@ -168,6 +172,17 @@ export function xmrSummary(p0, btcUsd, xmrUsd) {
     // margem que de fato rendeu (receita ÷ aluguel) contra a margem lida na entrada
     realEdgePct: rs > 0 ? (R.reduce((a, r) => a + r.revUsd, 0) / rs - 1) * 100 : null,
     posPct: R.length ? Math.round(R.filter((r) => r.revUsd - (r.spentUsd || 0) > 0).length / R.length * 100) : null };
+  // Meta das 30 janelas (só as da leitura de 3 min): margem lida × que rendeu e o veredito pela regra escrita antes
+  const G = XMR_RULES.goal, GR = p.fastSince ? p.runs.filter((r) => r.start >= p.fastSince) : [], gs = GR.reduce((a, r) => a + (r.spentUsd || 0), 0), gr = GR.reduce((a, r) => a + r.revUsd, 0);
+  const fees = (p.feeLog || []).filter((f) => p.fastSince && f.t >= p.fastSince).reduce((a, f) => a + f.usd, 0);
+  const goal = { since: p.fastSince || null, n: GR.length, target: G.windows, readPct: GR.length ? GR.reduce((a, r) => a + r.edgePct, 0) / GR.length : null,
+    realPct: gs > 0 ? (gr / gs - 1) * 100 : null, posPct: GR.length ? Math.round(GR.filter((r) => r.revUsd > (r.spentUsd || 0)).length / GR.length * 100) : null,
+    windowsUsd: gr - gs, feesUsd: fees, idleUsd: p.fastSince ? (p.idleRevUsd || 0) - (p.idleSpentUsd || 0) - (p.idleAtFast || 0) : 0, rules: G };
+  goal.resultUsd = goal.windowsUsd + goal.idleUsd - fees;
+  goal.gapPp = goal.readPct !== null && goal.realPct !== null ? goal.readPct - goal.realPct : null;
+  const okA = goal.resultUsd > 0, okB = goal.realPct !== null && goal.realPct >= G.minRealPct, okC = goal.posPct !== null && goal.posPct >= G.minPosPct;
+  goal.checks = { lucro: okA, margem: okB, positivas: okC };
+  goal.verdict = goal.n < G.windows ? 'em teste' : okA && okB && okC ? 'aprovada para teste real pequeno' : 'reprovada';
   // XMR guardado (pool + Kraken): pelo preço de quando foi minerado × preço de agora
   const heldXmr = (p.poolXmr || 0) + (p.krakenXmr || 0), heldNowUsd = xmrUsd > 0 ? heldXmr * xmrUsd : null;
   const run = p.run ? Object.assign({}, p.run, { resultUsd: p.run.revUsd - p.run.spentUsd }) : null;
@@ -178,5 +193,5 @@ export function xmrSummary(p0, btcUsd, xmrUsd) {
     poolXmr: p.poolXmr, paidXmr: p.paidXmr, krakenXmr: p.krakenXmr || 0, paidUsd: xmrUsd ? p.paidXmr * xmrUsd : null, payouts: p.payouts.length, sold: (p.sold || []).slice(-5).reverse(),
     heldXmr, heldBookUsd: p.heldBookUsd, heldNowUsd, heldFxUsd: heldNowUsd !== null ? heldNowUsd - p.heldBookUsd : null, coinUsd: p.coinUsd || 0,
     lastRuns: p.runs.slice(-8).reverse().map((r) => Object.assign({}, r, { resultUsd: r.revUsd - (r.spentUsd || 0), realEdgePct: r.spentUsd > 0 ? (r.revUsd / r.spentUsd - 1) * 100 : null })),
-    run, expect: p.expect || null, migratedAt: p.migratedAt || null };
+    run, expect: p.expect || null, migratedAt: p.migratedAt || null, goal };
 }
