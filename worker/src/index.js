@@ -674,7 +674,7 @@ export async function tick(env, opts = {}) {
       const xr = xmrPaperStep(paperXmr, { m: map.find((x) => x.algo === 'RANDOMXMONERO'), now, btcUsd: prices.v.btcUsd, xmrUsd,
         rules: Object.assign({}, XMR_RULES, cfg.xmrSimBtc > 0 ? { walletBtc: cfg.xmrSimBtc } : {}, isFinite(cfg.xmrEnterPct) ? { enterPct: cfg.xmrEnterPct } : {}) });
       paperXmr = xr.px;
-      for (const e of xr.events) { log.push({ t: now, kind: 'simulado', text: e }); if (cfg.xmrAlerts !== false) await notify(env, e, fetchFn); }
+      for (const e of xr.events) { log.push({ t: now, kind: 'simulado', text: e }); if (cfg.xmrAlerts !== false && !/saque de|não entra|livro é raso/.test(e)) await notify(env, e, fetchFn); }
       // Mesma operação "como real" para todos os algoritmos de pool PPS (cada um com a sua carteira virtual): pega toda
       // janela que abre, em qualquer moeda, e mostra quanto teria rendido de verdade.
       ppsOps = Object.assign({}, ppsOps || {});
@@ -705,7 +705,7 @@ export async function tick(env, opts = {}) {
         const xr = xmrPaperStep(paperXmr, { m: m3, now, btcUsd: prices.v.btcUsd, xmrUsd,
           rules: Object.assign({}, XMR_RULES, cfg.xmrSimBtc > 0 ? { walletBtc: cfg.xmrSimBtc } : {}, isFinite(cfg.xmrEnterPct) ? { enterPct: cfg.xmrEnterPct } : {}) });
         paperXmr = xr.px;
-        for (const e of xr.events) { log.push({ t: now, kind: 'simulado', text: e }); if (cfg.xmrAlerts !== false) await notify(env, e, fetchFn); }
+        for (const e of xr.events) { log.push({ t: now, kind: 'simulado', text: e }); if (cfg.xmrAlerts !== false && !/saque de|não entra|livro é raso/.test(e)) await notify(env, e, fetchFn); }
       }
     }
   }

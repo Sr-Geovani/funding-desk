@@ -23,7 +23,7 @@ export const XMR_RULES = { walletBtc: 0.002, enterPct: 2, exitPct: 0, budgetUsdD
   // venda do XMR na Kraken (taxa de quem aceita a oferta) e envio do BTC para a NiceHash pela Lightning: estimativas a confirmar
   sellFeePct: 0.4, btcSendFeeBtc: 0.00001,
   // Meta antes de qualquer dinheiro (regra escrita em 05/11, antes dos dados): 30 janelas com a leitura de 3 min e,
-  // juntas, (a) lucro depois da taxa de ordem e da espera, (b) margem que rendeu de pelo menos +1% e (c) 70% das janelas positivas.
+  // juntas, (a) lucro depois da taxa de ordem e da espera (06/11: também da venda, do envio e da variação do XMR — mais exigente), (b) margem que rendeu de pelo menos +1% e (c) 70% das janelas positivas.
   goal: { windows: 30, minRealPct: 1, minPosPct: 70 },
   // Preço da ordem (05/11): a ordem paga o preço que tem, não o do mercado. Se o mercado sobe acima dela (+2%), ela perde o
   // hash para quem paga mais (não paga mais caro); se o mercado cai, o preço dela só desce ~0,65% a cada 10 min (degrau da NiceHash).
@@ -62,7 +62,8 @@ export function xmrPaperStep(px, { m, now, btcUsd, xmrUsd, rules = XMR_RULES }) 
   const priced = !!(m && m.rentBtcPerH > 0 && m.revBtcPerH > 0 && p.orderPrice > 0);
   const eOur = priced ? (m.revBtcPerH / p.orderPrice - 1) * 100 : e, outbid = priced && m.rentBtcPerH > p.orderPrice * (1 + rules.outbidPct / 100);
   const lower = () => { if (priced && m.rentBtcPerH < p.orderPrice) p.orderPrice = Math.max(m.rentBtcPerH, p.orderPrice * (1 - rules.downStepPct / 100 * dt / 600e3)); };
-  if (m && m.fast && !p.fastSince) { p.fastSince = now; p.idleAtFast = (p.idleRevUsd || 0) - (p.idleSpentUsd || 0); } // início da leitura a cada 3 min: começa a contagem das 30 janelas
+  if (m && m.fast && !p.fastSince) { p.fastSince = now; p.idleAtFast = (p.idleRevUsd || 0) - (p.idleSpentUsd || 0); }
+  if (p.fastSince && !p.goalCF) p.goalCF = { at: now, conv: p.convFeesUsd || 0, fx: p.fxUsd || 0 }; // venda, envio e variação do XMR entram na meta a partir de 06/11 // início da leitura a cada 3 min: começa a contagem das 30 janelas
   // 1) o intervalo que passou, com a decisão anterior
   if (p.on && dt > 0 && btcUsd > 0) {
     // hash recebido no intervalo: inteiro enquanto o preço da ordem cobre o mercado; metade no intervalo em que foi ultrapassada
@@ -85,14 +86,25 @@ export function xmrPaperStep(px, { m, now, btcUsd, xmrUsd, rules = XMR_RULES }) 
     const d = p.days[day] || (p.days[day] = { spentUsd: 0, revUsd: 0 }); d.spentUsd += spendUsd; d.revUsd += revUsd;
     if (p.orderBtc < 1e-8) { p.orderBtc = 0; p.orderOpen = false; events.push(`${tag}: a ordem acabou o valor na potência mínima e foi encerrada. ${totText()}`); }
   }
-  // 2) saque do pool para a carteira (Kraken) quando passa do mínimo
-  if (px2 && p.poolXmr >= rules.payoutXmr) {
-    p.payouts.push({ t: now, xmr: +p.poolXmr.toFixed(6), usd: +(p.poolXmr * px2).toFixed(2) }); p.paidXmr += p.poolXmr; p.krakenXmr += p.poolXmr;
-    events.push(`${tag}: saque de ${p.poolXmr.toFixed(4).replace('.', ',')} XMR do pool para a carteira`); p.poolXmr = 0; p.payouts = p.payouts.slice(-30);
+  // 2) saque do pool para a carteira (Kraken) quando passa do mínimo e venda NA HORA por BTC (06/11): guardar XMR até a
+  // ordem acabar deixava o resultado à mercê do preço do Monero (−US$2,32 na venda de 06/11); vendendo a cada saque, a
+  // exposição fica só no tempo em que o XMR está no pool. O BTC fica na Kraken até a próxima reposição.
+  if (px2 && p.poolXmr >= rules.payoutXmr && btcUsd > 0) {
+    const q = p.poolXmr + (p.krakenXmr || 0), book = p.heldBookUsd, usd = q * px2, fee = usd * rules.sellFeePct / 100, fx = usd - book, got = (usd - fee) / btcUsd;
+    p.payouts.push({ t: now, xmr: +p.poolXmr.toFixed(6), usd: +(p.poolXmr * px2).toFixed(2) }); p.paidXmr += p.poolXmr; p.payouts = p.payouts.slice(-30);
+    p.convFeesUsd += fee; p.fxUsd += fx; p.heldBookUsd = 0; p.krakenBtc = (p.krakenBtc || 0) + got;
+    p.sold = (p.sold || []).concat([{ t: now, xmr: +q.toFixed(6), usd: +usd.toFixed(2), btc: +got.toFixed(8), feeUsd: +fee.toFixed(2), fxUsd: +fx.toFixed(2) }]).slice(-20);
+    events.push(`${tag}: saque de ${q.toFixed(4).replace('.', ',')} XMR do pool e venda na hora por ${usd2(usd)} (taxa ${usd2(fee)}; variação do XMR desde a mineração ${sgn(fx)}); o BTC fica na Kraken até a próxima reposição`);
+    p.poolXmr = 0; p.krakenXmr = 0;
   }
-  // 3) reabastecer: sem ordem e sem o mínimo na carteira, vende o que foi minerado e manda o BTC de volta para a NiceHash
+  // 3) reabastecer: sem ordem e sem o mínimo na carteira, manda o BTC da Kraken (Monero) ou vende o que foi minerado (outras)
   const need = rules.minOrderBtc + rules.newOrderFeeBtc;
-  if (!p.orderOpen && !p.on && p.walletBtc < need && btcUsd > 0) {
+  if (px2 && !p.orderOpen && !p.on && p.walletBtc < need && btcUsd > 0 && (p.krakenBtc || 0) > rules.btcSendFeeBtc && p.walletBtc + p.krakenBtc - rules.btcSendFeeBtc >= need) {
+    const got = p.krakenBtc - rules.btcSendFeeBtc, feeUsd = rules.btcSendFeeBtc * btcUsd;
+    p.convFeesUsd += feeUsd; p.walletBtc += got; p.refillBtc = (p.refillBtc || 0) + got; p.krakenBtc = 0; p.noFunds = null;
+    events.push(`${tag}: mandaria ${got.toFixed(6).replace('.', ',')} BTC da Kraken para a NiceHash pela Lightning (envio ${usd2(feeUsd)}) para abrir a próxima ordem`);
+  }
+  if (!px2 && !p.orderOpen && !p.on && p.walletBtc < need && btcUsd > 0) {
     const heldUsdNow = px2 ? p.krakenXmr * px2 : p.coinUsd, heldBook = px2 ? (p.krakenXmr + p.poolXmr > 0 ? p.heldBookUsd * p.krakenXmr / (p.krakenXmr + p.poolXmr) : 0) : p.coinUsd;
     const netUsd = heldUsdNow * (1 - rules.sellFeePct / 100), gotBtc = netUsd / btcUsd - rules.btcSendFeeBtc;
     if (heldUsdNow > 0 && p.walletBtc + gotBtc >= need) {
@@ -201,7 +213,8 @@ export function xmrSummary(p0, btcUsd, xmrUsd) {
   const goal = { since: p.fastSince || null, n: GR.length, target: G.windows, readPct: GR.length ? GR.reduce((a, r) => a + r.edgePct, 0) / GR.length : null,
     realPct: gs > 0 ? (gr / gs - 1) * 100 : null, posPct: GR.length ? Math.round(GR.filter((r) => r.revUsd > (r.spentUsd || 0)).length / GR.length * 100) : null,
     windowsUsd: gr - gs, feesUsd: fees, idleUsd: p.fastSince ? (p.idleRevUsd || 0) - (p.idleSpentUsd || 0) - (p.idleAtFast || 0) : 0, rules: G };
-  goal.resultUsd = goal.windowsUsd + goal.idleUsd - fees;
+  goal.convUsd = p.goalCF ? (p.convFeesUsd || 0) - p.goalCF.conv : 0; goal.fxUsd = p.goalCF ? (p.fxUsd || 0) - p.goalCF.fx : 0; goal.cfSince = p.goalCF ? p.goalCF.at : null;
+  goal.resultUsd = goal.windowsUsd + goal.idleUsd - fees - goal.convUsd + goal.fxUsd;
   goal.gapPp = goal.readPct !== null && goal.realPct !== null ? goal.readPct - goal.realPct : null;
   const okA = goal.resultUsd > 0, okB = goal.realPct !== null && goal.realPct >= G.minRealPct, okC = goal.posPct !== null && goal.posPct >= G.minPosPct;
   goal.checks = { lucro: okA, margem: okB, positivas: okC };
@@ -213,7 +226,7 @@ export function xmrSummary(p0, btcUsd, xmrUsd) {
     spentUsd: costUsd + (p.idleSpentUsd || 0), rentUsd: p.spentUsd, idleUsd: T.idleUsd, idleSpentUsd: p.idleSpentUsd || 0, idleRevUsd: p.idleRevUsd || 0, idleHours: p.idleHours || 0, revUsd: p.revUsd, windowsUsd: T.windowsUsd, orderFeesUsd: T.orderFeesUsd, convFeesUsd: T.convFeesUsd, fxUsd: T.fxUsd, resultUsd: T.resultUsd,
     retPct: costUsd + (p.idleSpentUsd || 0) > 0 ? T.resultUsd / (costUsd + (p.idleSpentUsd || 0)) * 100 : null, perDayUsd: days >= 1 ? T.resultUsd / days : null, // média por dia só depois de 1 dia (antes disso extrapola poucas horas)
      walletBtc: p.walletBtc + p.orderBtc, orderBtc: p.orderBtc, orderOpen: !!p.orderOpen,
-    poolXmr: p.poolXmr, paidXmr: p.paidXmr, krakenXmr: p.krakenXmr || 0, paidUsd: xmrUsd ? p.paidXmr * xmrUsd : null, payouts: p.payouts.length, sold: (p.sold || []).slice(-5).reverse(),
+    poolXmr: p.poolXmr, paidXmr: p.paidXmr, krakenXmr: p.krakenXmr || 0, krakenBtc: p.krakenBtc || 0, paidUsd: xmrUsd ? p.paidXmr * xmrUsd : null, payouts: p.payouts.length, sold: (p.sold || []).slice(-5).reverse(),
     heldXmr, heldBookUsd: p.heldBookUsd, heldNowUsd, heldFxUsd: heldNowUsd !== null ? heldNowUsd - p.heldBookUsd : null, coinUsd: p.coinUsd || 0,
     lastRuns: p.runs.slice(-8).reverse().map((r) => Object.assign({}, r, { resultUsd: r.revUsd - (r.spentUsd || 0), realEdgePct: r.spentUsd > 0 ? (r.revUsd / r.spentUsd - 1) * 100 : null })),
     run, expect: p.expect || null, migratedAt: p.migratedAt || null, goal };

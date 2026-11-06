@@ -38,6 +38,8 @@ export function auditState(state, { now = Date.now(), lab = null } = {}) {
       if (!(r.spentUsd > 0)) continue;
       const e = (r.revUsd / r.spentUsd - 1) * 100;
       chk(e > -50 && e < 100, 'erro', area, 'edge:' + r.start, `${area}: janela de ${new Date(r.start).toISOString().slice(5, 16).replace('T', ' ')} UTC rendeu ${e.toFixed(0)}% (impossível: dado com defeito)`);
+      // margem alta demais para durar horas: aluguel de hash é mercado aberto; acima de 15% por janela pede conferência antes de contar como lucro
+      if (e >= 15 && e < 100) { checks++; add('aviso', area, 'high:' + r.start, `${area}: janela de ${new Date(r.start).toISOString().slice(5, 16).replace('T', ' ')} UTC rendeu ${e.toFixed(0)}%: alto demais para ser comum; não contar como lucro até conferir a receita (preço da moeda e dificuldade)`); }
     }
     // 5) uma ordem aberta por vez e sem janela ligada com a ordem fechada
     chk(!(p.on && !p.orderOpen), 'erro', area, 'on', `${area}: janela ligada sem ordem aberta`);

@@ -1870,13 +1870,13 @@ test('Monero auditado: preço do BTC mudando sem minerar não mexe no resultado;
   r = xmrPaperStep(r.px, { m: { edgePct: -2, marketUsdDay: 50000 }, now: T + 30 * M, btcUsd: 80000, xmrUsd: 600 });
   const a = xmrSummary(r.px, 80000, 600), b = xmrSummary(r.px, 60000, 600);
   close(a.resultUsd, b.resultUsd, 1e-9, 'BTC caiu 25% e nada foi minerado: o resultado não muda');
-  close(a.resultUsd, a.windowsUsd - 0.8, 1e-9); assert.equal(a.lastRuns[0].resultUsd, a.windowsUsd);
+  close(a.resultUsd, a.windowsUsd - 0.8 - a.convFeesUsd + a.fxUsd, 1e-9); assert.equal(a.lastRuns[0].resultUsd, a.windowsUsd); // o saque já é vendido na hora (0,4%)
   // ciclo: minera até a ordem acabar, saca, vende o XMR e abre ordem nova
   const rules = Object.assign({}, XMR_RULES, { budgetUsdDay: 5000 });
   let p = r.px, t = T + 45 * M, evs = [];
   for (let i = 0; i < 400 && !evs.some((x) => /abriria ordem/.test(x)); i++, t += 15 * M) { const s = xmrPaperStep(p, { m: { edgePct: 6, marketUsdDay: 1e6 }, now: t, btcUsd: 80000, xmrUsd: 600, rules }); p = s.px; evs = evs.concat(s.events); }
   const all = evs.join(' | ');
-  assert.match(all, /acabou o valor/); assert.match(all, /saque de/); assert.match(all, /venderia [\d,]+ XMR por US\$[\d,]+ e mandaria/); assert.match(all, /abriria ordem/);
+  assert.match(all, /acabou o valor/); assert.match(all, /saque de [\d,]+ XMR do pool e venda na hora/); assert.match(all, /mandaria [\d,]+ BTC da Kraken para a NiceHash/); assert.match(all, /abriria ordem/);
   const S = xmrSummary(p, 80000, 600);
   assert.equal(S.orderFeesUsd.toFixed(2), '1.60', 'duas ordens = duas taxas'); assert.ok(S.convFeesUsd > 0);
   close(S.resultUsd, S.windowsUsd - S.orderFeesUsd - S.convFeesUsd + S.fxUsd, 1e-9);
