@@ -30,7 +30,8 @@ const cowBody = (sell, buy, amt) => ({ sellToken: sell, buyToken: buy, from: '0x
   sellAmountBeforeFee: amt.toString(), appData: '0x' + '0'.repeat(64), signingScheme: 'eip712', partiallyFillable: false });
 // Fontes: um pedido em lote ao nó (todas as taxas de resgate) + duas cotações por token (vender e comprar) + USDC/USDT.
 export function defiSources() {
-  const rpc = { k: 'rpc', url: 'https://ethereum-rpc.publicnode.com', body: DEFI_TOKENS.filter((t) => t.call).map((t, i) => ({ jsonrpc: '2.0', id: i, method: 'eth_call', params: [{ to: t.addr, data: t.call }, 'latest'] })) };
+  // nós públicos em ordem: se um recusar (limite por IP, comum na Cloudflare), tenta o próximo
+  const rpc = { k: 'rpc', url: 'https://ethereum-rpc.publicnode.com', urls: ['https://ethereum-rpc.publicnode.com', 'https://eth.drpc.org', 'https://1rpc.io/eth', 'https://rpc.mevblocker.io', 'https://eth-mainnet.public.blastapi.io', 'https://mainnet.gateway.tenderly.co'], body: DEFI_TOKENS.filter((t) => t.call).map((t, i) => ({ jsonrpc: '2.0', id: i, method: 'eth_call', params: [{ to: t.addr, data: t.call }, 'latest'] })) };
   const cow = [];
   for (const t of DEFI_TOKENS) { cow.push({ k: t.k + ':sell', url: 'https://api.cow.fi/mainnet/api/v1/quote', body: cowBody(t.addr, t.baseAddr, t.amt) }); cow.push({ k: t.k + ':buy', url: 'https://api.cow.fi/mainnet/api/v1/quote', body: cowBody(t.baseAddr, t.addr, t.amt) }); }
   cow.push({ k: 'USDC:sell', url: 'https://api.cow.fi/mainnet/api/v1/quote', body: cowBody(T.USDC, T.USDT, 10000n * 10n ** 6n) }, { k: 'USDC:buy', url: 'https://api.cow.fi/mainnet/api/v1/quote', body: cowBody(T.USDT, T.USDC, 10000n * 10n ** 6n) });

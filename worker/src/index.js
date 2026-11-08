@@ -180,8 +180,15 @@ export async function defiScan(env, opts = {}) {
     try {
       const init = { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(src.body) };
       if (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) init.signal = AbortSignal.timeout(8000);
-      const r = await fetchFn(src.url, init); if (!r.ok) return { src, ok: false, err: 'HTTP ' + r.status };
-      return { src, ok: true, json: await r.json() };
+      let last = 'sem resposta';
+      for (const u of src.urls || [src.url]) {
+        const r = await fetchFn(u, init).catch((e) => ({ ok: false, status: String(e.message || e).slice(0, 40) }));
+        if (!r.ok) { last = 'HTTP ' + r.status; continue; }
+        const j = await r.json().catch(() => null);
+        if (src.k === 'rpc' && !(Array.isArray(j) && j.some((x) => x && x.result))) { last = 'resposta sem resultado'; continue; }
+        return { src, ok: true, json: j, via: u };
+      }
+      return { src, ok: false, err: last };
     } catch (e) { return { src, ok: false, err: String(e.message || e).slice(0, 60) }; }
   };
   const res = await Promise.all(defiSources().map(get)), errs = {};
