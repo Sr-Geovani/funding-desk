@@ -85,3 +85,23 @@ test('arbitragem no servidor: varredura grava o mapa e manda só a primeira conf
   assert.ok(A.now.quotes.length >= 6); assert.ok(A.now.errs.okx, 'fonte que falhou fica registrada');
   assert.ok(A.paper.trades >= 1); assert.ok(!A.exec || !A.exec.runs || A.exec.runs.length === 0, 'robô desligado por padrão');
 });
+
+test('DeFi: valor de resgate do contrato × preço da DEX — prêmio dá "cunhar e vender"; desconto com fila vira taxa ao ano; papel só no que é na hora e se repete', async () => {
+  const { defiSources, defiStep, DEFI_TOKENS } = await import('../worker/src/defi.js');
+  const src = defiSources(), hexOf = (x) => '0x' + BigInt(Math.round(x * 1e18)).toString(16);
+  const nav = { weETH: 1.1, wstETH: 1.25, rETH: 1.17, sUSDe: 1.25, sUSDS: 1.11, sDAI: 1.18 };
+  const rpcJson = DEFI_TOKENS.filter((t) => t.call).map((t, i) => ({ id: i, result: hexOf(nav[t.k]) }));
+  const quote = (k, side) => { const t = DEFI_TOKENS.find((x) => x.k === k), a = Number(t.amt), v = t.fixed || nav[k];
+    // weETH com prêmio de 0,5% na venda; sUSDe com desconto de 0,2% na compra (fila de 7 dias); o resto no valor
+    const px = k === 'weETH' && side === 'sell' ? v * 1.005 : k === 'sUSDe' && side === 'buy' ? v * 0.998 : v;
+    return { quote: { buyAmount: BigInt(Math.round(side === 'sell' ? a * px : a / px)).toString() } }; };
+  const res = src.map((s) => ({ src: s, ok: true, json: s.k === 'rpc' ? rpcJson : s.k.startsWith('USDC') ? { quote: { buyAmount: s.k === 'USDC:sell' ? '10011000000' : '9988000000' } } : quote(s.k.split(':')[0], s.k.split(':')[1]) }));
+  let r = defiStep(null, { now: 1, results: res });
+  const w = r.defi.now.rows.find((x) => x.k === 'weETH'), e = r.defi.now.rows.find((x) => x.k === 'sUSDe');
+  close(w.premPct, 0.5, 1e-6); assert.equal(w.act, 'cunhar e vender agora');
+  close(e.discPct, 0.2, 1e-6); close(e.annualPct, 0.2 * 365 / 7, 0.01); assert.equal(e.act, null, '10,4% ao ano não passa da régua de 13,25%');
+  assert.equal(r.defi.paper.trades, 0, 'primeira leitura não conta');
+  r = defiStep(r.defi, { now: 2, results: res });
+  assert.equal(r.defi.paper.trades, 1); close(r.defi.paper.netUsd, 50, 0.01); assert.match(r.events[0], /weETH \(ether\.fi\) — cunhar e vender agora/);
+  close(r.defi.now.quote.bid, 1.0011, 1e-9);
+});

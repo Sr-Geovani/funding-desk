@@ -36,12 +36,14 @@ export const VENUES = {
   jupiter: { name: 'Jupiter (Solana)', kind: 'dex', fee: 0 },
   kyberArb: { name: 'KyberSwap (Arbitrum)', kind: 'dex', fee: 0 },
   kyberBase: { name: 'KyberSwap (Base)', kind: 'dex', fee: 0 },
-  paraswap: { name: 'ParaSwap (Ethereum)', kind: 'dex', fee: 0 }
+  paraswap: { name: 'ParaSwap (Ethereum)', kind: 'dex', fee: 0 },
+  cow: { name: 'CoW Swap (Ethereum)', kind: 'dex', fee: 0 }
 };
-export const ARB_RULES = { sizeUsd: 1000, minNetPct: 0.05, paperTradeUsd: 200, paperStockUsd: 1000, rebalanceUsd: 1, rebalanceLowPct: 20, keepSeries: 2000, maxStaleMs: 5 * 60e3 };
+export const ARB_RULES = { lowFeePct: 0.02, sizeUsd: 1000, minNetPct: 0.05, paperTradeUsd: 200, paperStockUsd: 1000, rebalanceUsd: 1, rebalanceLowPct: 20, keepSeries: 2000, maxStaleMs: 5 * 60e3 };
 
+// q(): cotação cruzada (compra mais barata que a venda na mesma plataforma) não é preço firme e fica de fora.
 const n = (x) => (x === null || x === undefined || x === '' ? NaN : +x);
-const q = (v, pair, bid, ask, bq, aq, extra) => { const b = n(bid), a = n(ask); return b > 0 && a > 0 && a >= b * 0.97 && a <= b * 1.03 ? Object.assign({ v, pair, bid: b, ask: a, bq: n(bq) || null, aq: n(aq) || null }, extra || {}) : null; };
+const q = (v, pair, bid, ask, bq, aq, extra) => { const b = n(bid), a = n(ask); return b > 0 && a > 0 && a >= b && a <= b * 1.03 ? Object.assign({ v, pair, bid: b, ask: a, bq: n(bq) || null, aq: n(aq) || null }, extra || {}) : null; };
 const inv = (x) => (x > 0 ? 1 / x : NaN);
 
 // Fontes públicas: url (+ corpo para POST) e como ler. Cada uma pode falhar sozinha; o erro fica registrado por fonte.
@@ -120,7 +122,7 @@ export function arbOpportunities(quotes, { brlUsd = null, fees = null, rules = A
     if (a === b || a.v === b.v) continue;
     const gross = (b.bid / a.ask - 1) * 100, cost = feeOf(a.v, fees) + feeOf(b.v, fees) + gasPct(a) + gasPct(b);
     const liq = Math.min(usdOf(pair, a.ask, a.aq, brlUsd) || rules.sizeUsd, usdOf(pair, b.bid, b.bq, brlUsd) || rules.sizeUsd);
-    ops.push({ id: `dir:${pair}:${a.v}>${b.v}`, type: 'direta', pair, buy: a.v, sell: b.v, buyPx: a.ask, sellPx: b.bid, grossPct: +gross.toFixed(4), costPct: +cost.toFixed(4), netPct: +(gross - cost).toFixed(4), liqUsd: Math.round(liq), dex: !!(a.dex || b.dex) });
+    ops.push({ id: `dir:${pair}:${a.v}>${b.v}`, type: 'direta', pair, buy: a.v, sell: b.v, buyPx: a.ask, sellPx: b.bid, grossPct: +gross.toFixed(4), costPct: +cost.toFixed(4), netPct: +(gross - cost).toFixed(4), liqUsd: Math.round(liq), dex: !!(a.dex || b.dex), beFeePct: +(gross / 2).toFixed(4) });
   }
   // 2) triangulares: moeda X (BRL ou USD) → USDT → USDC → X e o inverso, em qualquer combinação de plataformas
   for (const X of ['BRL', 'USD']) {
@@ -129,8 +131,9 @@ export function arbOpportunities(quotes, { brlUsd = null, fees = null, rules = A
       const f = feeOf(t.v, fees) + feeOf(c.v, fees) + feeOf(cu.v, fees) + gasPct(cu), one = t.v === c.v && c.v === cu.v;
       const gA = (c.bid / (t.ask * cu.ask) - 1) * 100, gB = (t.bid * cu.bid / c.ask - 1) * 100;
       const base = { type: one ? 'triangular (uma corretora)' : 'triangular', pair: X + '→USDT→USDC→' + X, legs: [t.v, cu.v, c.v], dex: !!cu.dex };
-      ops.push(Object.assign({}, base, { id: `tri:${X}:A:${t.v}:${cu.v}:${c.v}`, route: `compra USDT (${t.v}), troca por USDC (${cu.v}), vende USDC (${c.v})`, grossPct: +gA.toFixed(4), costPct: +f.toFixed(4), netPct: +(gA - f).toFixed(4) }));
-      ops.push(Object.assign({}, base, { id: `tri:${X}:B:${c.v}:${cu.v}:${t.v}`, pair: X + '→USDC→USDT→' + X, route: `compra USDC (${c.v}), troca por USDT (${cu.v}), vende USDT (${t.v})`, grossPct: +gB.toFixed(4), costPct: +f.toFixed(4), netPct: +(gB - f).toFixed(4) }));
+      const be = (g) => +(g / 3).toFixed(4);
+      ops.push(Object.assign({}, base, { id: `tri:${X}:A:${t.v}:${cu.v}:${c.v}`, route: `compra USDT (${t.v}), troca por USDC (${cu.v}), vende USDC (${c.v})`, grossPct: +gA.toFixed(4), costPct: +f.toFixed(4), netPct: +(gA - f).toFixed(4), beFeePct: be(gA) }));
+      ops.push(Object.assign({}, base, { id: `tri:${X}:B:${c.v}:${cu.v}:${t.v}`, pair: X + '→USDC→USDT→' + X, route: `compra USDC (${c.v}), troca por USDT (${cu.v}), vende USDT (${t.v})`, grossPct: +gB.toFixed(4), costPct: +f.toFixed(4), netPct: +(gB - f).toFixed(4), beFeePct: be(gB) }));
     }
   }
   return ops.sort((x, y) => y.netPct - x.netPct);
@@ -156,6 +159,13 @@ export function arbStep(prev, { now, quotes, errs = {}, brlUsd = null, fees = nu
   if (A.series.length > rules.keepSeries) A.series.splice(0, A.series.length - rules.keepSeries);
   // papel: executa só o que continuou positivo (preço desta leitura), com estoque por plataforma e custo de reequilíbrio
   A.paper = paperStep(A.paper, conf.filter((o) => o.netPct >= rules.minNetPct), now, rules, events);
+  // Segundo papel: a mesma coisa com taxa de nível VIP / ordem que espera no livro (0,02% por perna em corretora). Mostra se
+  // o que falta é só taxa. Não manda aviso: é comparação.
+  const low = Object.fromEntries(Object.entries(VENUES).map(([k, v]) => [k, v.kind === 'dex' && k !== 'hyperliquid' ? 0 : Math.min(v.fee, rules.lowFeePct)]));
+  const opsL = arbOpportunities(quotes, { brlUsd, fees: low, rules }), prevL = new Set(A.lastPosLow || []), posL = opsL.filter((o) => o.netPct > 0);
+  A.lastPosLow = posL.map((o) => o.id);
+  A.paperLow = paperStep(A.paperLow, posL.filter((o) => prevL.has(o.id) && o.netPct >= rules.minNetPct), now, rules, []);
+  A.lowNow = { pos: posL.length, best: opsL[0] || null, fee: rules.lowFeePct };
   A.now = { at: now, quotes, ops: ops.slice(0, 40), pos: pos.length, conf: conf.length, errs, best: { direta: bDir, triangular: bTri, dex: bDex } };
   A.lastTs = now;
   return { arb: A, events, confirmed: conf.filter((o) => o.netPct >= rules.minNetPct) };
@@ -186,6 +196,6 @@ export function arbSummary(A) {
   const S = A.series || [], col = (i) => S.map((r) => r[i]).filter((x) => x !== null && isFinite(x));
   const share = (i) => { const v = col(i); return v.length ? Math.round(v.filter((x) => x > 0).length / v.length * 100) : null; };
   const routes = Object.entries(A.routes || {}).map(([id, r]) => Object.assign({ id }, r, { posPct: r.n ? Math.round(r.pos / r.n * 100) : 0 })).sort((a, b) => b.conf - a.conf || b.pos - a.pos).slice(0, 15);
-  return { since: A.since, scans: A.scans, lastTs: A.lastTs, now: A.now, routes, paper: A.paper,
+  return { since: A.since, scans: A.scans, lastTs: A.lastTs, now: A.now, routes, paper: A.paper, paperLow: A.paperLow || null, lowNow: A.lowNow || null,
     posPct: { direta: share(1), triangular: share(2), dex: share(3) }, maxNet: { direta: col(1).length ? Math.max(...col(1)) : null, triangular: col(2).length ? Math.max(...col(2)) : null, dex: col(3).length ? Math.max(...col(3)) : null } };
 }

@@ -16,6 +16,34 @@ Tipos de oportunidade:
 2. **Triangular:** BRL → USDT → USDC → BRL, ou o inverso, numa corretora só ou combinando várias. O mesmo vale com USD.
 3. **Com DEX:** quando uma das pernas é uma DEX. Exige saldo na carteira da rede (Solana, Arbitrum, Base ou Ethereum).
 
+## DeFi: valor de resgate × preço na DEX (08/11)
+Tokens de rendimento têm um **valor de resgate** lido no próprio contrato (por um nó público da Ethereum) e um **preço na
+DEX** (CoW Swap, já com taxa e gás). O módulo lê nos minutos 4, 7, 10… de cada hora.
+- **Prêmio:** a DEX paga acima do valor. Cunha no protocolo pelo valor (depósito, na hora) e vende na DEX: o ganho é na hora.
+- **Desconto:** a DEX vende abaixo do valor. Compra e resgata no protocolo: o ganho vem depois da fila de resgate e é
+  comparado com o CDI pelo tempo parado.
+
+| Token | Protocolo | Resgate |
+|---|---|---|
+| weETH | ether.fi | fila de saque, dias |
+| wstETH | Lido | 1 a 5 dias |
+| rETH | Rocket Pool | depende da liquidez do pool |
+| sUSDe | Ethena | 7 dias; USDe por dólar só para participantes autorizados |
+| sUSDS, sDAI | Sky | na hora |
+| DAI ↔ USDS | Sky | conversor 1:1, na hora |
+
+Regra: com ganho na hora, a partir de 0,1% depois do custo. Com espera, só se o desconto ao ano passar da régua do CDI
+em dólar (13,25%). O papel conta só o ganho na hora e só se ele se repetir na leitura seguinte.
+
+O USDC/USDT do CoW Swap também entra no mapa de stablecoins. Cotação cruzada (comprar mais barato do que vender na mesma
+plataforma) é estimativa, não preço firme, e fica de fora.
+
+Primeira leitura (08/11): todos os tokens entre −0,05% e +0,02% do valor de resgate. É mercado muito eficiente.
+
+## Comparação com taxa menor
+Uma segunda simulação em papel usa 0,02% por perna nas corretoras (nível VIP por volume, ou ordem que espera no livro).
+Cada rota mostra a **taxa máxima por perna que empata**. Se só esta simulação der lucro, o que falta é taxa, não oportunidade.
+
 ## Regras para não enganar a gente
 - **Fantasma:** uma diferença que aparece numa leitura e some na seguinte não conta. O papel só executa o que continua
   positivo na leitura seguinte, pelo preço dessa leitura (o que daria para pegar de verdade).

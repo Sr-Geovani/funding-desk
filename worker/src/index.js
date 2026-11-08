@@ -19,6 +19,7 @@ import { labStep, labSummary } from './lab.js';
 import { repairBookGlitch, repairXmrOutbid } from './repair.js';
 import { auditState, auditNews } from './audit.js';
 import { arbSources, arbQuotes, arbStep, arbSummary, VENUES as ARB_VENUES } from './arb.js';
+import { defiSources, defiStep } from './defi.js';
 import { execStep as arbExecStep, checkKey, ADAPTERS as ARB_ADAPTERS, EXEC_VENUES } from './arbexec.js';
 import { braiinsOf, mrrOf, stratumCheck } from './hashmarkets.js';
 import { macroOf, marketPanorama } from './panorama.js';
@@ -171,6 +172,27 @@ async function notify(env, text, fetchFn) {
 const settle = (p) => p.then((v) => ({ ok: true, v }), (e) => ({ ok: false, e: String(e.message || e) }));
 
 /* ---------- ciclo do robô ---------- */
+// DeFi (resgate × DEX): taxas de resgate lidas no contrato e preços do CoW Swap. Minutos 4, 7, 10... (fora da varredura).
+export async function defiScan(env, opts = {}) {
+  env = await withCreds(env);
+  const fetchFn = opts.fetchFn || fetch, now = opts.now || Date.now();
+  const get = async (src) => {
+    try {
+      const init = { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(src.body) };
+      if (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) init.signal = AbortSignal.timeout(8000);
+      const r = await fetchFn(src.url, init); if (!r.ok) return { src, ok: false, err: 'HTTP ' + r.status };
+      return { src, ok: true, json: await r.json() };
+    } catch (e) { return { src, ok: false, err: String(e.message || e).slice(0, 60) }; }
+  };
+  const res = await Promise.all(defiSources().map(get)), errs = {};
+  for (const r of res) if (!r.ok) errs[r.src.k] = r.err;
+  const d = defiStep(await kvGet(env, 'defi', null), { now, results: res, errs });
+  await kvPut(env, 'defi', d.defi);
+  for (const e of d.events.slice(0, 2)) await notify(env, e, fetchFn);
+  if (d.events.length) await appendLog(env, d.events.map((text) => ({ t: now, kind: 'simulado', text })));
+  return d.defi;
+}
+
 // Arbitragem de stablecoins: lê ~30 fontes públicas, calcula as oportunidades líquidas, simula em papel e, se o robô
 // estiver em ensaio ou real, passa a melhor oportunidade direta confirmada para o executor. Roda nos minutos 2, 5, 8...
 export async function arbScan(env, opts = {}) {
@@ -186,6 +208,7 @@ export async function arbScan(env, opts = {}) {
   };
   const res = await Promise.all(arbSources().map(get)), errs = {};
   const quotes = arbQuotes(res); for (const r of res) if (!r.ok) errs[r.src.v.split(':')[0]] = r.err;
+  { const D = await kvGet(env, 'defi', null), cq = D && D.now && D.now.quote; if (cq && now - cq.at < 4 * 60e3) quotes.push(cq); }
   const brl = st.fronts && st.fronts.brl && st.fronts.brl.ptax, prev = await kvGet(env, 'arb', null);
   const r = arbStep(prev, { now, quotes, errs, brlUsd: brl || null });
   const A = r.arb, events = [];
@@ -1078,7 +1101,7 @@ async function api(req, env, url, fetchFn) {
         paper: state.paper || null, paperBurst: state.paperBurst || null, paperPlan: state.paperPlan || null, paperAlways: state.paperAlways || null, paperSniper: state.paperSniper || null, sniper: state.sniper || null, snInfo: state.snInfo || null, snLog: (state.snLog || []).slice(-40).reverse(), jarbas: { telegram: !!(state.tgHook && state.tgHook.ok), hookErr: state.tgHook && !state.tgHook.ok ? state.tgHook.err : null, lastReport: state.dailyRep || null }, orderEnds: (state.orderEnds || []).slice(-10).reverse(), wallet: state.acct ? { btc: state.acct.balanceBtc, at: state.acct.balAt || state.acct.at } : null, paperArchive: state.paperArchive || null, entryCheck: state.entryCheck || null, calib: state.calib || null, minEdgeNow: state.minEdgeNow || null, luck24: state.luck24 || null, balPlan: state.balPlan || null, planOn: !!state.planBackup, calibPrev: state.calibPrev || null, robotTest: state.robotTest || null, aiReport: state.aiReport || null, mktMargin: state.mktMargin || null, asertF: state.asertF || null, exec: execSummary(state.execLog), bestScen: state.bestScen || null, hashMkts: state.hashMkts || null, fronts: state.fronts || null, frontsPaper: state.frontsPaper || null, market2: state.market2 || null, aiPanorama: state.aiPanorama || null,
         fundPaperLT: state.fundPaperLT ? { summary: fundPaperSummary(state.fundPaperLT, LT_FEES), open: state.fundPaperLT.open, closed: state.fundPaperLT.closed.slice(-50).reverse() } : null, opLog: (state.opLog || []).slice(-20).reverse(), real: state.real ? Object.assign({}, state.real, { paid: undefined }) : null,
         fundPaper: state.fundPaper ? { summary: fundPaperSummary(state.fundPaper, FD.DEFAULT_FEES), open: state.fundPaper.open, closed: state.fundPaper.closed.slice(-100).reverse() } : null,
-        algoPaper: state.algoPaper || null, xmr: xmrSummary(state.paperXmr, (state.market || {}).btcUsd, state.xmrUsd), xmrUsd: state.xmrUsd || null, ppsOps: Object.fromEntries(Object.entries(state.ppsOps || {}).map(([k, v]) => [k, Object.assign(xmrSummary(v, (state.market || {}).btcUsd, null), { label: v.label, coins: v.coins })])), algoMapNow: state.algoMap || [], audit: state.audit || null, arb: await (async () => { const A = await kvGet(env, 'arb', null); const S = arbSummary(A); return S ? Object.assign(S, { exec: A.exec || null }) : null; })(), lab: labSummary(await kvGet(env, 'lab', null)), marginLastro: marginLastroOf(await kvGet(env, 'marginHist', {})), scan: await (async () => { const sc = await kvGet(env, 'scan', null); return sc ? { at: sc.at, extra: sc.extra, mrr: sc.mrr, err: sc.err, hist: sc.hist || null } : null; })(),
+        algoPaper: state.algoPaper || null, xmr: xmrSummary(state.paperXmr, (state.market || {}).btcUsd, state.xmrUsd), xmrUsd: state.xmrUsd || null, ppsOps: Object.fromEntries(Object.entries(state.ppsOps || {}).map(([k, v]) => [k, Object.assign(xmrSummary(v, (state.market || {}).btcUsd, null), { label: v.label, coins: v.coins })])), algoMapNow: state.algoMap || [], audit: state.audit || null, arb: await (async () => { const A = await kvGet(env, 'arb', null); const S = arbSummary(A); return S ? Object.assign(S, { exec: A.exec || null }) : null; })(), defi: await (async () => { const D = await kvGet(env, 'defi', null); return D ? { since: D.since, scans: D.scans, now: D.now, counts: D.counts, paper: D.paper, lastTs: D.lastTs } : null; })(), lab: labSummary(await kvGet(env, 'lab', null)), marginLastro: marginLastroOf(await kvGet(env, 'marginHist', {})), scan: await (async () => { const sc = await kvGet(env, 'scan', null); return sc ? { at: sc.at, extra: sc.extra, mrr: sc.mrr, err: sc.err, hist: sc.hist || null } : null; })(),
         fundPaperAI: state.fundPaperAI ? { summary: fundPaperSummary(state.fundPaperAI, FD.DEFAULT_FEES), open: state.fundPaperAI.open, closed: state.fundPaperAI.closed.slice(-100).reverse() } : null,
         aiScores: state.aiScores || {}, stable24: Object.keys(state.stable24 || {}), pairStats: state.pairStats || {},
         ai: state.ai ? Object.assign({ xp: state.ai.xp, since: state.ai.since, stats: state.ai.stats, ctrl: (state.ai.ctrl || {}).stats || {}, unscoredBy: state.ai.unscored || {}, open: state.ai.open.slice(-30).reverse(), done: state.ai.done.slice(-60).reverse() }, levelOf(state.ai)) : null,
@@ -1505,5 +1528,6 @@ export default {
     };
     ctx.waitUntil(min % 3 === 0 ? full().catch(fail('ciclo')) : min % 15 === 1 ? scan().catch(fail('varredura')) : blockWatch(env).catch(fail('vigia de bloco')));
     if (min % 3 === 2) ctx.waitUntil(arbScan(env).catch(fail('arbitragem')));
+    if (min % 3 === 1 && min % 15 !== 1) ctx.waitUntil(defiScan(env).catch(fail('defi')));
   }
 };
