@@ -17,7 +17,7 @@ export function brainContext(state, cfg, now) {
   const fp = s.fundPaperSum || null, sc = s.alertScoreSum || null, mm = s.mktMargin || {};
   return {
     agora: new Date(now).toISOString(),
-    robo: { modo: cfg.mode, sniper: !!cfg.sniper, potenciaTiro: cfg.sniperPh, travaMargemTiro: cfg.sniperMinEdge, gatilhoDificuldade: cfg.sniperDiffDropPct, gatilhoMempool: cfg.sniperFeeX,
+    robo: { modo: cfg.mode, arbitragem: cfg.arbMode === 'real' ? 'REAL' : cfg.arbMode === 'ensaio' ? 'em ensaio' : 'desligado', sniper: !!cfg.sniper, potenciaTiro: cfg.sniperPh, travaMargemTiro: cfg.sniperMinEdge, gatilhoDificuldade: cfg.sniperDiffDropPct, gatilhoMempool: cfg.sniperFeeX,
       gatilhoAtrasoMin: cfg.sniperUseAge ? cfg.sniperAgeMin : null, prazoTiroMin: cfg.sniperShotMin, stopLossUsd: cfg.sessionBudgetUsd, limiteDiarioUsd: cfg.dailyBudgetUsd, planoParaOSaldo: !!s.planBackup },
     bch: { ultimoBloco: s.lastHeight, blocoHa: ago(s.lastBlockT, now), margemAgoraPct: isFinite(m.edgeAtBidPct) ? +m.edgeAtBidPct.toFixed(2) : null, lance: m.bidEH, empate: m.breakEvenEH,
       margem24h: mm.h24 ? { media: mm.h24.avg, positivaPctDoTempo: mm.h24.pctPos } : null, margem7d: mm.d7 ? { media: mm.d7.avg, positivaPctDoTempo: mm.d7.pctPos, max: mm.d7.max } : null,
@@ -41,6 +41,7 @@ export function brainContext(state, cfg, now) {
       outrasMoedas: Object.entries((s.algoPaper && s.algoPaper.algos) || {}).filter(([, a]) => a.spendUsd > 0).map(([k, a]) => ({ algo: a.label || k, gastoUsd: +a.spendUsd.toFixed(2), retornoPct: +((a.revUsd / a.spendUsd - 1) * 100).toFixed(1), margemAgoraPct: isFinite(a.edgeNow) ? +a.edgeNow.toFixed(1) : null }))
     },
     laboratorio: s.lab || null,
+    arbitragem: s.arb || null,
     auditor: s.audit ? { conferencias: s.audit.checks, erros: s.audit.errors, avisos: s.audit.warnings, achados: (s.audit.findings || []).slice(0, 6).map((x) => x.text) } : null,
     copiloto: { nivel: ai.level && ai.level.name, acertoGeralPct: ai.rate ? Math.round(ai.rate * 100) : null, porTipo: stats, manchete: s.aiReport && s.aiReport.headline },
     erros: (s.errors || []).slice(0, 3)
@@ -48,7 +49,7 @@ export function brainContext(state, cfg, now) {
 }
 
 const HELP = 'Sou o Jarbas, o sócio que acompanha a operação. Pergunte do jeito que quiser ou use:\n' +
-  '/status – resumo de tudo\n/auditor – as contas fecham?\n/laboratorio – novas frentes (base, P2P, Boros, Pendle, Bitfinex)\n/placar – resultado e lastro de cada frente\n/oportunidades – onde entrar agora\n/rendimentos – juros e CDI\n/mrr – preços da MiningRigRentals\n/bch – mineração BCH e Sniper\n/monero – operação Monero (PPS)\n/funding – funding e placar dos sinais\n/saldo – dinheiro real e carteira\n/copiloto – onde a IA acerta e erra\n/relatorio – relatório do dia\n' +
+  '/status – resumo de tudo\n/arbitragem – stablecoins entre corretoras e DEX\n/auditor – as contas fecham?\n/laboratorio – novas frentes (base, P2P, Boros, Pendle, Bitfinex)\n/placar – resultado e lastro de cada frente\n/oportunidades – onde entrar agora\n/rendimentos – juros e CDI\n/mrr – preços da MiningRigRentals\n/bch – mineração BCH e Sniper\n/monero – operação Monero (PPS)\n/funding – funding e placar dos sinais\n/saldo – dinheiro real e carteira\n/copiloto – onde a IA acerta e erra\n/relatorio – relatório do dia\n' +
   '/modo observar | ativo | desligado – muda o modo do robô\n/sniper ligar | desligar';
 
 function reportText(c) {
@@ -85,6 +86,11 @@ export function ruleReply(text, c) {
   if (snp) { const on = /ligar|ligado|on/.test(snp[1]) && !/desl/.test(snp[1]); return { text: `Feito: Sniper ${on ? 'ligado' : 'desligado'}.`, action: { sniper: on } }; }
   if (/^\/(start|ajuda|help)|^ajuda/.test(t)) return { text: HELP };
   if (/relat/.test(t) || /^\/status|como estamos|resumo|status/.test(t)) return { text: reportText(c) };
+  if (/arbitragem|stablecoin|spread|usdt|usdc/.test(t)) { const A = c.arbitragem; if (!A || !A.now) return { text: 'A arbitragem de stablecoins lê o mercado a cada 3 min; a primeira leitura sai em instantes.' };
+    const B = A.now.best || {}, f = (o) => (o ? `${pc(o.netPct, 3)} líquido (bruto ${pc(o.grossPct, 3)}): ${o.route || 'compra ' + o.buy + ', vende ' + o.sell} (${o.pair})` : '—');
+    return { text: [`Arbitragem de stablecoins (${A.scans} leituras; ${(A.now.quotes || []).length} cotações agora):`, `• Direta entre corretoras: ${f(B.direta)}`, `• Triangular: ${f(B.triangular)}`, `• Com DEX: ${f(B.dex)}`,
+      `Positivas no período: direta ${A.posPct.direta}% das leituras, triangular ${A.posPct.triangular}%, DEX ${A.posPct.dex}%.`,
+      `Papel: ${A.paper ? A.paper.trades + ' operações, ' + money(A.paper.netUsd) : 'nenhuma operação'}. Robô: ${c.robo.arbitragem}.`].join('\n') }; }
   if (/auditor|audit|contas fecham|conferi/.test(t)) { const A = c.auditor; return { text: !A ? 'O auditor roda de hora em hora; a primeira conferência sai no próximo ciclo.' : [`Auditor (de hora em hora): ${A.conferencias} conferências, ${A.erros} ${A.erros === 1 ? 'erro' : 'erros'}, ${A.avisos} ${A.avisos === 1 ? 'aviso' : 'avisos'}.`].concat(A.achados.map((x) => '• ' + x)).concat(A.achados.length ? [] : ['Tudo fecha: dinheiro de cada simulação (início = carteira + ordem + gasto + taxas), soma das janelas, margens dentro do possível, preços do livro e dados atualizados.']).join('\n') }; }
   if (/laborat|novas frentes|basis|base|p2p|boros|pendle|bitfinex/.test(t)) { const B = c.laboratorio; if (!B) return { text: 'O laboratório coleta a cada 15 min; a primeira leitura sai na próxima varredura.' };
     const n = B.now || {}, b = (n.basis || [])[0], p = n.p2p, bo = (n.boros || [])[0], pe = (n.pendle || [])[0];

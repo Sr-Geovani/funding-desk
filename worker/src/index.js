@@ -18,6 +18,8 @@ import { runScan, scanHistory } from './scan.js';
 import { labStep, labSummary } from './lab.js';
 import { repairBookGlitch, repairXmrOutbid } from './repair.js';
 import { auditState, auditNews } from './audit.js';
+import { arbSources, arbQuotes, arbStep, arbSummary, VENUES as ARB_VENUES } from './arb.js';
+import { execStep as arbExecStep, checkKey, ADAPTERS as ARB_ADAPTERS, EXEC_VENUES } from './arbexec.js';
 import { braiinsOf, mrrOf, stratumCheck } from './hashmarkets.js';
 import { macroOf, marketPanorama } from './panorama.js';
 import { entryChecklist } from './entry.js';
@@ -30,7 +32,7 @@ import { blockRecord, blockSummary, poolOf, luckBoard, needPH } from './blocks.j
 import { darrOf, retargetOf, momentumOf, windowMeter, weekAdd, marginStats, asertForecast, relativeMinEdge, nextDifficulty, diffVsAvg, triggerFreq } from './signals.js';
 import { brainStep, analysis, levelOf, TYPES, actionPlan, bandThreshold, plain, balancePlan } from './brain.js';
 import FDI from '../../insights.js';
-import { withCreds, reloadCreds, saveCreds, credStatus, parseNiceHash, TG_TOKEN_RE, chatFromUpdates } from './creds.js';
+import { withCreds, reloadCreds, saveCreds, credStatus, parseNiceHash, TG_TOKEN_RE, chatFromUpdates, arbKeys } from './creds.js';
 
 export const VERSION = '1.0.0';
 const UPSTREAM = { binance: 'https://fapi.binance.com', bybit: 'https://api.bybit.com', nicehash: 'https://api2.nicehash.com', wtm: 'https://whattomine.com' };
@@ -169,6 +171,38 @@ async function notify(env, text, fetchFn) {
 const settle = (p) => p.then((v) => ({ ok: true, v }), (e) => ({ ok: false, e: String(e.message || e) }));
 
 /* ---------- ciclo do robô ---------- */
+// Arbitragem de stablecoins: lê ~30 fontes públicas, calcula as oportunidades líquidas, simula em papel e, se o robô
+// estiver em ensaio ou real, passa a melhor oportunidade direta confirmada para o executor. Roda nos minutos 2, 5, 8...
+export async function arbScan(env, opts = {}) {
+  env = await withCreds(env);
+  const fetchFn = opts.fetchFn || fetch, now = opts.now || Date.now(), cfg = await getConfig(env), st = await kvGet(env, 'state', {});
+  const get = async (src) => {
+    try {
+      const init = src.body ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(src.body) } : { headers: { accept: 'application/json', 'user-agent': 'funding-desk/1.0' } };
+      if (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) init.signal = AbortSignal.timeout(8000);
+      const r = await fetchFn(src.url, init); if (!r.ok) return { src, ok: false, err: 'HTTP ' + r.status };
+      return { src, ok: true, json: await r.json() };
+    } catch (e) { return { src, ok: false, err: String(e.message || e).slice(0, 60) }; }
+  };
+  const res = await Promise.all(arbSources().map(get)), errs = {};
+  const quotes = arbQuotes(res); for (const r of res) if (!r.ok) errs[r.src.v.split(':')[0]] = r.err;
+  const brl = st.fronts && st.fronts.brl && st.fronts.brl.ptax, prev = await kvGet(env, 'arb', null);
+  const r = arbStep(prev, { now, quotes, errs, brlUsd: brl || null });
+  const A = r.arb, events = [];
+  // Telegram: só a primeira vez em 6 h que uma rota se confirma acima da margem mínima (o resto fica no painel)
+  A.told = A.told || {};
+  for (const o of r.confirmed.slice(0, 3)) if (!A.told[o.id] || now - A.told[o.id] > 6 * 3600e3) { A.told[o.id] = now; events.push(`Arbitragem: ${o.type} ${o.pair} — ${o.route || `compra na ${(ARB_VENUES[o.buy] || {}).name || o.buy} a ${o.buyPx}, vende na ${(ARB_VENUES[o.sell] || {}).name || o.sell} a ${o.sellPx}`}: ${o.netPct.toFixed(3).replace('.', ',')}% líquido de taxas (bruto ${o.grossPct.toFixed(3).replace('.', ',')}%), confirmada em duas leituras.`); }
+  for (const k of Object.keys(A.told)) if (now - A.told[k] > 864e5) delete A.told[k];
+  // robô: a melhor direta confirmada entre corretoras que ele sabe operar
+  const cand = r.confirmed.find((o) => o.type === 'direta' && !o.dex && EXEC_VENUES.includes(o.buy) && EXEC_VENUES.includes(o.sell)) || null;
+  try { const x = await arbExecStep(A.exec, { opp: cand, cfg, keys: arbKeys(env), fetchFn, now }); A.exec = x.exec; events.push(...x.events); }
+  catch (e) { A.exec = Object.assign({}, A.exec, { lastErr: { t: now, msg: String(e.message || e).slice(0, 120) } }); }
+  await kvPut(env, 'arb', A);
+  for (const e of events) await notify(env, e, fetchFn);
+  if (events.length) await appendLog(env, events.map((text) => ({ t: now, kind: /REAL|ensaio/.test(text) ? 'acao' : 'simulado', text })));
+  return A;
+}
+
 export async function tick(env, opts = {}) {
   env = await withCreds(env);
   const fetchFn = opts.fetchFn || fetch, now = opts.now || Date.now();
@@ -871,7 +905,7 @@ export async function tick(env, opts = {}) {
   // Auditor automático, de hora em hora: confere se as contas das simulações fecham; avisa só problema novo
   if (!state.audit || now - state.audit.at >= 3600e3) {
     try {
-      const au = auditState(Object.assign({}, next, { scan: await kvGet(env, 'scan', null) }), { now, lab: await kvGet(env, 'lab', null) });
+      const au = auditState(Object.assign({}, next, { scan: await kvGet(env, 'scan', null) }), { now, lab: await kvGet(env, 'lab', null), arb: await kvGet(env, 'arb', null) });
       for (const msg of auditNews(state.audit, au)) { log.push({ t: now, kind: 'acao', text: msg }); await notify(env, msg, fetchFn); }
       next.audit = au;
     } catch (e) { errors.push('auditor: ' + (e.message || e)); }
@@ -984,6 +1018,7 @@ async function jarbasContext(env, now) {
   const [state, cfg] = await Promise.all([kvGet(env, 'state', {}), getConfig(env)]);
   const st = Object.assign({}, state, { xmrSum: xmrSummary(state.paperXmr, (state.market || {}).btcUsd, state.xmrUsd),
     fundPaperSum: state.fundPaper ? fundPaperSummary(state.fundPaper, FD.DEFAULT_FEES) : null, ppsSum: Object.entries(state.ppsOps || {}).map(([k, v]) => Object.assign(xmrSummary(v, (state.market || {}).btcUsd, null), { label: v.label })), alertScoreSum: state.alertScore ? alertScoreSummary(state.alertScore) : null });
+  st.arb = arbSummary(await kvGet(env, 'arb', null));
   st.lab = labSummary(await kvGet(env, 'lab', null)); st.scan = await kvGet(env, 'scan', null); st.marginLastro = marginLastroOf(await kvGet(env, 'marginHist', {}));
   return { ctx: brainContext(st, cfg, now), cfg };
 }
@@ -1043,7 +1078,7 @@ async function api(req, env, url, fetchFn) {
         paper: state.paper || null, paperBurst: state.paperBurst || null, paperPlan: state.paperPlan || null, paperAlways: state.paperAlways || null, paperSniper: state.paperSniper || null, sniper: state.sniper || null, snInfo: state.snInfo || null, snLog: (state.snLog || []).slice(-40).reverse(), jarbas: { telegram: !!(state.tgHook && state.tgHook.ok), hookErr: state.tgHook && !state.tgHook.ok ? state.tgHook.err : null, lastReport: state.dailyRep || null }, orderEnds: (state.orderEnds || []).slice(-10).reverse(), wallet: state.acct ? { btc: state.acct.balanceBtc, at: state.acct.balAt || state.acct.at } : null, paperArchive: state.paperArchive || null, entryCheck: state.entryCheck || null, calib: state.calib || null, minEdgeNow: state.minEdgeNow || null, luck24: state.luck24 || null, balPlan: state.balPlan || null, planOn: !!state.planBackup, calibPrev: state.calibPrev || null, robotTest: state.robotTest || null, aiReport: state.aiReport || null, mktMargin: state.mktMargin || null, asertF: state.asertF || null, exec: execSummary(state.execLog), bestScen: state.bestScen || null, hashMkts: state.hashMkts || null, fronts: state.fronts || null, frontsPaper: state.frontsPaper || null, market2: state.market2 || null, aiPanorama: state.aiPanorama || null,
         fundPaperLT: state.fundPaperLT ? { summary: fundPaperSummary(state.fundPaperLT, LT_FEES), open: state.fundPaperLT.open, closed: state.fundPaperLT.closed.slice(-50).reverse() } : null, opLog: (state.opLog || []).slice(-20).reverse(), real: state.real ? Object.assign({}, state.real, { paid: undefined }) : null,
         fundPaper: state.fundPaper ? { summary: fundPaperSummary(state.fundPaper, FD.DEFAULT_FEES), open: state.fundPaper.open, closed: state.fundPaper.closed.slice(-100).reverse() } : null,
-        algoPaper: state.algoPaper || null, xmr: xmrSummary(state.paperXmr, (state.market || {}).btcUsd, state.xmrUsd), xmrUsd: state.xmrUsd || null, ppsOps: Object.fromEntries(Object.entries(state.ppsOps || {}).map(([k, v]) => [k, Object.assign(xmrSummary(v, (state.market || {}).btcUsd, null), { label: v.label, coins: v.coins })])), algoMapNow: state.algoMap || [], audit: state.audit || null, lab: labSummary(await kvGet(env, 'lab', null)), marginLastro: marginLastroOf(await kvGet(env, 'marginHist', {})), scan: await (async () => { const sc = await kvGet(env, 'scan', null); return sc ? { at: sc.at, extra: sc.extra, mrr: sc.mrr, err: sc.err, hist: sc.hist || null } : null; })(),
+        algoPaper: state.algoPaper || null, xmr: xmrSummary(state.paperXmr, (state.market || {}).btcUsd, state.xmrUsd), xmrUsd: state.xmrUsd || null, ppsOps: Object.fromEntries(Object.entries(state.ppsOps || {}).map(([k, v]) => [k, Object.assign(xmrSummary(v, (state.market || {}).btcUsd, null), { label: v.label, coins: v.coins })])), algoMapNow: state.algoMap || [], audit: state.audit || null, arb: await (async () => { const A = await kvGet(env, 'arb', null); const S = arbSummary(A); return S ? Object.assign(S, { exec: A.exec || null }) : null; })(), lab: labSummary(await kvGet(env, 'lab', null)), marginLastro: marginLastroOf(await kvGet(env, 'marginHist', {})), scan: await (async () => { const sc = await kvGet(env, 'scan', null); return sc ? { at: sc.at, extra: sc.extra, mrr: sc.mrr, err: sc.err, hist: sc.hist || null } : null; })(),
         fundPaperAI: state.fundPaperAI ? { summary: fundPaperSummary(state.fundPaperAI, FD.DEFAULT_FEES), open: state.fundPaperAI.open, closed: state.fundPaperAI.closed.slice(-100).reverse() } : null,
         aiScores: state.aiScores || {}, stable24: Object.keys(state.stable24 || {}), pairStats: state.pairStats || {},
         ai: state.ai ? Object.assign({ xp: state.ai.xp, since: state.ai.since, stats: state.ai.stats, ctrl: (state.ai.ctrl || {}).stats || {}, unscoredBy: state.ai.unscored || {}, open: state.ai.open.slice(-30).reverse(), done: state.ai.done.slice(-60).reverse() }, levelOf(state.ai)) : null,
@@ -1132,6 +1167,23 @@ async function api(req, env, url, fetchFn) {
     await appendLog(env, [{ t: Date.now(), kind: 'config', text: 'simulação reiniciada (' + ({ funding: 'funding', algos: 'outras moedas', all: 'tudo' }[body.what] || 'mineração') + ')' }]);
     return json({ ok: true });
   }
+  if (p === '/arb/keys' && m === 'POST') {
+    // chave de negociação de uma corretora (sem saque): testa lendo o saldo e guarda cifrada; nada volta para o painel
+    const v = String(body.venue || ''), A = ARB_ADAPTERS[v];
+    if (!A) return json({ error: 'corretora sem robô (disponíveis: ' + EXEC_VENUES.join(', ') + ')' }, 400);
+    const k = { key: String(body.key || '').trim(), secret: String(body.secret || '').trim(), passphrase: String(body.passphrase || '').trim() || undefined, at: Date.now() };
+    const t = await checkKey(v, k, fetchFn);
+    if (!t.ok) return json({ error: t.error }, 400);
+    const all = arbKeys(env); all[v] = k; await saveCreds(env, { ARB_KEYS: JSON.stringify(all) });
+    await appendLog(env, [{ t: Date.now(), kind: 'config', text: 'Arbitragem: chave da ' + v + ' conectada (só negociação)' }]);
+    return json({ ok: true, venue: v, saldo: Object.fromEntries(Object.entries(t.bal || {}).filter(([c]) => ['USDT', 'USDC', 'BRL'].includes(c))) });
+  }
+  if (p === '/arb/keys' && m === 'DELETE') {
+    const v = String(url.searchParams.get('venue') || ''), all = arbKeys(env); delete all[v];
+    await saveCreds(env, { ARB_KEYS: Object.keys(all).length ? JSON.stringify(all) : null });
+    return json({ ok: true });
+  }
+  if (p === '/arb/reset' && m === 'POST') { const A = await kvGet(env, 'arb', null); if (A && A.exec) { A.exec.halted = null; await kvPut(env, 'arb', A); } return json({ ok: true }); }
   if (p === '/credentials' && m === 'GET') return json(credStatus(env));
   if (p === '/credentials' && m === 'PUT') return putCredentials(env, body, fetchFn);
   if (p === '/telegram' && m === 'POST') return connectTelegram(env, body, fetchFn);
@@ -1452,5 +1504,6 @@ export default {
       } catch (e) { await appendLog(e2, [{ t: Date.now(), kind: 'erro', text: 'laboratório: ' + (e.message || e) }]); }
     };
     ctx.waitUntil(min % 3 === 0 ? full().catch(fail('ciclo')) : min % 15 === 1 ? scan().catch(fail('varredura')) : blockWatch(env).catch(fail('vigia de bloco')));
+    if (min % 3 === 2) ctx.waitUntil(arbScan(env).catch(fail('arbitragem')));
   }
 };

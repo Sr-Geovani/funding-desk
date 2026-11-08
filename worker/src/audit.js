@@ -5,7 +5,7 @@
 const fin = (x) => typeof x === 'number' && isFinite(x);
 const money = (x) => (x < 0 ? '−' : '') + 'US$' + Math.abs(x).toFixed(2).replace('.', ',');
 
-export function auditState(state, { now = Date.now(), lab = null } = {}) {
+export function auditState(state, { now = Date.now(), lab = null, arb = null } = {}) {
   const s = state || {}, out = [];
   let checks = 0;
   const add = (sev, area, key, text) => out.push({ sev, area, key: area + ':' + key, text });
@@ -68,6 +68,13 @@ export function auditState(state, { now = Date.now(), lab = null } = {}) {
   // 9) laboratório: posições em papel com valor travado não negativo
   if (lab && lab.paper) for (const o of (lab.paper.open || [])) { checks++; if (!(o.lockedUsd >= 0)) add('erro', 'Laboratório', 'locked:' + o.key, `Laboratório: posição ${o.kind} com valor travado inválido`); }
 
+  // 9b) arbitragem: papel sem valor inválido, nenhuma oportunidade acima de 3% (cotação com defeito) e dados atualizados
+  if (arb) {
+    if (arb.paper) scanNum('Arbitragem', { netUsd: arb.paper.netUsd, grossUsd: arb.paper.grossUsd, feesUsd: arb.paper.feesUsd });
+    for (const o of ((arb.now && arb.now.ops) || []).slice(0, 5)) { checks++; if (o.netPct > 3) add('aviso', 'Arbitragem', 'sus:' + o.id, `Arbitragem: ${o.id} com ${o.netPct.toFixed(2)}% líquido — alto demais para stablecoin (cotação parada ou com defeito?)`); }
+    chk((now - (arb.lastTs || 0)) / 60e3 < 12, 'aviso', 'Dados', 'arb', `Dados: a arbitragem não lê o mercado há ${Math.round((now - (arb.lastTs || 0)) / 60e3)} min`);
+    if (arb.exec && arb.exec.halted) add('erro', 'Arbitragem', 'halted', `Arbitragem: o robô se desligou sozinho — ${arb.exec.halted.why}`);
+  }
   // 10) dados parados (sem leitura nova, a simulação decide com dado velho)
   const age = (t) => (t ? (now - t) / 60e3 : Infinity);
   chk(age(s.algoTs) < 35, 'aviso', 'Dados', 'map', `Dados: o mapa de moedas não atualiza há ${Math.round(age(s.algoTs))} min`);

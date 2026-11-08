@@ -3,6 +3,10 @@
 // Parar no bloco e stop-loss controlam risco e caixa; não mudam o retorno esperado por dólar.
 
 export const DEFAULT_CONFIG = {
+  // Arbitragem de stablecoins (08/11): o robô nasce desligado. 'ensaio' monta e assina as ordens e confere saldo, sem enviar;
+  // 'real' envia as duas pernas (ordem limite que executa na hora ou cancela). Travas: valor por operação, limite do dia e
+  // margem líquida mínima; se uma perna sair e a outra não, o robô se desliga sozinho.
+  arbMode: 'off', arbMaxTradeUsd: 50, arbMaxDayUsd: 200, arbMinNetPct: 0.1,
   mode: 'observe',          // 'off' | 'observe' (calcula e registra, não executa) | 'active'
   payoutAddress: '',        // endereço BCH que recebe a recompensa (coinbase)
   poolId: '',               // pool cadastrado na NiceHash para ordens novas
@@ -84,6 +88,9 @@ export function sanitizeConfig(input = {}, prev = DEFAULT_CONFIG, limits = limit
   if (input.xmrAddress !== undefined) { const a = String(input.xmrAddress || '').trim(); if (a && !/^[48][1-9A-HJ-NP-Za-km-z]{94}([1-9A-HJ-NP-Za-km-z]{11})?$/.test(a)) errors.push('xmrAddress: endereço Monero inválido (começa com 4 ou 8 e tem 95 caracteres)'); else c.xmrAddress = a; }
   num('xmrSimBtc', 0, 1); num('xmrEnterPct', -5, 50);
   if (input.xmrAlerts !== undefined) c.xmrAlerts = !!input.xmrAlerts;
+  if (input.arbMode !== undefined) { if (['off', 'ensaio', 'real'].includes(input.arbMode)) c.arbMode = input.arbMode; else errors.push('arbMode inválido'); }
+  num('arbMaxTradeUsd', 10, 2000); num('arbMaxDayUsd', 10, 10000); num('arbMinNetPct', 0.02, 5);
+  if (c.arbMaxDayUsd < c.arbMaxTradeUsd) errors.push('o limite do dia da arbitragem não pode ser menor que o valor por operação');
   if (input.autoCreate !== undefined) c.autoCreate = !!input.autoCreate;
   if (input.alerts !== undefined) c.alerts = !!input.alerts;
   if (input.fundStable24 !== undefined) c.fundStable24 = !!input.fundStable24;

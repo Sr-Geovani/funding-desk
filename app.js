@@ -1585,6 +1585,7 @@ document.addEventListener('click',function(e){
 });
 function renderOps(){
   try{renderLive();renderXmr();renderPps()}catch(e){}
+  try{renderArb()}catch(e){console.error('arbitragem',e)}
   var c=apiCfg(),st=ops.status;
   if(!c.url){
     $('o_conn').innerHTML='<h2>Backend não configurado</h2><p class="note">Para operar (ordens, robô, parada no bloco) é preciso o backend. É só mandar um token do Cloudflare no chat: o passo a passo de 4 itens está em Ajustes.</p><div class="row"><button class="sm" data-go="set" data-focus="#setup">Abrir Ajustes</button></div>';
@@ -2563,6 +2564,68 @@ function renderAlgos(){
   }).join('')+'<p class="note">Fonte: WhatToMine e NiceHash ('+esc(market.src||'')+(market.dataAt?', '+ago(market.dataAt)+' atrás':'')+').</p>';
 }
 
+
+/* ---------- arbitragem de stablecoins (servidor, a cada 3 min) ---------- */
+var ARB_NAME={binance:'Binance',okx:'OKX',bybit:'Bybit',kucoin:'KuCoin',gate:'Gate',mexc:'MEXC',bitget:'Bitget',htx:'HTX',kraken:'Kraken',coinbase:'Coinbase',bitstamp:'Bitstamp',foxbit:'Foxbit',mb:'Mercado Bitcoin',bitso:'Bitso',ripio:'Ripio',bitpreco:'BitPreço',novadax:'NovaDAX',hyperliquid:'Hyperliquid',jupiter:'Jupiter (Solana)',kyberArb:'KyberSwap (Arbitrum)',kyberBase:'KyberSwap (Base)',paraswap:'ParaSwap (Ethereum)'};
+var ARB_EXEC=['binance','okx','bybit','kucoin','foxbit'];
+function arbN(v){return ARB_NAME[v]||v}
+function arbPx(pair,x){return (+x).toFixed(String(pair).indexOf('BRL')>=0?4:5)}
+function arbPct(x,d){return x===null||x===undefined||!isFinite(x)?'—':pct(x,d===undefined?3:d)}
+function renderArb(){
+  var S=ops.status&&ops.status.state,A=S&&S.arb,cfg=(ops.status&&ops.status.config)||{},cr=(ops.status&&ops.status.creds)||{};
+  if(!$('arb_head'))return;
+  if(!A||!A.now){$('arb_head').innerHTML='<div class="eyebrow">Arbitragem de stablecoins</div><p class="note">'+(S?'A primeira leitura sai nos próximos 3 min (o servidor lê nos minutos 2, 5, 8…).':'Conecte o backend em Ajustes para ver o mapa.')+'</p>';['arb_ops','arb_paper','arb_robot','arb_quotes'].forEach(function(i){$(i).hidden=true});return}
+  var N=A.now,B=N.best||{},P=A.paper||{},E=A.exec||{},keys=cr.arb||{};
+  var bx=function(t,o){return '<div><small>'+t+'</small><span style="font-size:15px" class="'+(o&&o.netPct>0?'good':'bad')+'">'+(o?arbPct(o.netPct):'—')+'</span><div class="note">'+(o?esc(o.route||('compra '+arbN(o.buy)+' → vende '+arbN(o.sell)))+' · bruto '+arbPct(o.grossPct)+'':'')+'</div></div>'};
+  $('arb_head').innerHTML='<div class="row between" style="align-items:baseline"><div class="eyebrow" style="margin:0">Arbitragem de stablecoins · mapa global</div><span class="chip">'+(cfg.arbMode==='real'?'robô REAL':cfg.arbMode==='ensaio'?'robô em ensaio':'robô desligado')+'</span></div>'+
+    '<div class="lead">'+(N.conf?N.conf+' oportunidade'+(N.conf>1?'s':'')+' confirmada'+(N.conf>1?'s':'')+' agora':N.pos?N.pos+' positiva'+(N.pos>1?'s':'')+' nesta leitura (falta confirmar na próxima)':'Nenhuma diferença paga as taxas agora')+'</div>'+
+    '<p class="note" style="margin:6px 0 8px">Leitura de '+hhmm(new Date(N.at))+' · '+(N.quotes||[]).length+' cotações de '+Object.keys((N.quotes||[]).reduce(function(a,q){a[q.v]=1;return a},{})).length+' plataformas (corretoras globais, brasileiras e DEX) · '+A.scans+' leituras desde '+dt2(A.since)+'. Tudo já líquido das taxas de balcão de cada perna e do gás das DEX; oportunidade só conta se continuar na leitura seguinte (a primeira pode ser fantasma).</p>'+
+    '<div class="kv">'+bx('Melhor direta (corretoras)',B.direta)+bx('Melhor triangular',B.triangular)+bx('Melhor com DEX',B.dex)+'</div>'+
+    '<p class="note" style="margin:6px 0 0">Positivas no período: direta '+(A.posPct.direta!==null?A.posPct.direta+'%':'—')+' das leituras · triangular '+(A.posPct.triangular!==null?A.posPct.triangular+'%':'—')+' · com DEX '+(A.posPct.dex!==null?A.posPct.dex+'%':'—')+'. Máximo visto: '+arbPct(A.maxNet.direta)+' · '+arbPct(A.maxNet.triangular)+' · '+arbPct(A.maxNet.dex)+'.</p>';
+  // oportunidades agora e rotas que mais se repetem
+  var O=(N.ops||[]).slice(0,12),R=(A.routes||[]).slice(0,10);
+  $('arb_ops').hidden=false;
+  $('arb_ops').innerHTML='<div class="eyebrow">As 12 melhores agora (líquido de taxa)</div><div class="scroll"><table style="font-size:12px"><tr><th>Líquido</th><th>Bruto</th><th>Tipo</th><th>Rota</th><th>Cabe</th></tr>'+
+    O.map(function(o){return '<tr><td class="'+(o.netPct>0?'good':'bad')+'">'+arbPct(o.netPct)+'</td><td>'+arbPct(o.grossPct)+'</td><td>'+esc(o.type)+'<div class="note">'+esc(o.pair)+'</div></td><td>'+esc(o.route||('compra '+arbN(o.buy)+' a '+arbPx(o.pair,o.buyPx)+' → vende '+arbN(o.sell)+' a '+arbPx(o.pair,o.sellPx)))+'</td><td>'+(o.liqUsd?'US$'+nf(o.liqUsd,0):'—')+'</td></tr>'}).join('')+'</table></div>'+
+    (R.length?'<div class="eyebrow" style="margin:10px 0 4px">Rotas que já foram positivas (frequência)</div><div class="stack" style="gap:2px">'+R.map(function(r){return '<div class="note"><b>'+esc(r.label)+'</b> ('+esc(r.pair)+'): positiva '+r.pos+' de '+r.n+' leituras, confirmada '+r.conf+' vez'+(r.conf===1?'':'es')+', máximo '+arbPct(r.maxNet)+'</div>'}).join('')+'</div>':'')+
+    '<p class="note" style="margin:8px 0 0">Para pegar de verdade: a direta e a triangular entre corretoras precisam de saldo parado nas duas (ou três) pontas; de tempos em tempos é preciso reequilibrar (transferir stable, ~US$1, ou BRL por Pix). Taxas usadas: padrão de balcão de cada plataforma (estimativa; promoções de stable podem zerar).</p>';
+  // papel
+  $('arb_paper').hidden=false;
+  $('arb_paper').innerHTML='<div class="eyebrow">Simulação em papel (como real)</div><div class="lead">'+(P.trades?P.trades+' operaç'+(P.trades>1?'ões':'ão')+' · resultado '+((P.netUsd>=0?'+':'')+usd(P.netUsd||0)):'Nenhuma operação ainda')+'</div>'+
+    '<p class="note" style="margin:6px 0">Regras: executa só o que ficou positivo por duas leituras e passa de '+pct(0.05,2)+' líquido; US$200 por operação (ou o que o livro aguenta); estoque de US$1.000 por plataforma e reequilíbrio de ~US$1 quando 80% dele foi usado.'+(P.trades?' Bruto '+usd(P.grossUsd||0)+' − taxas '+usd(P.feesUsd||0)+' − reequilíbrio '+usd(P.rebalUsd||0)+'.':'')+'</p>'+
+    ((P.last||[]).length?'<div class="stack" style="gap:2px">'+P.last.slice(0,8).map(function(x){return '<div class="note">'+hhmm(new Date(x.t))+' · '+esc(x.label)+' ('+esc(x.pair)+') · '+arbPct(x.netPct)+' em US$'+nf(x.sizeUsd,0)+' → <b class="'+(x.netUsd>=0?'good':'bad')+'">'+(x.netUsd>=0?'+':'')+usd(x.netUsd)+'</b>'+(x.rebUsd?' (reequilíbrio)':'')+'</div>'}).join('')+'</div>':'');
+  // robô
+  var kv=ARB_EXEC.map(function(v){return '<div class="row between" style="align-items:center;gap:6px;margin:3px 0"><span>'+arbN(v)+'</span>'+(keys[v]?'<span class="chip ok">chave '+esc(keys[v].key||'')+'</span> <button class="sm" data-arbdel="'+v+'">tirar</button>':'<button class="sm" data-arbkey="'+v+'">Conectar chave</button>')+'</div>'}).join('');
+  var runs=(E.runs||[]).slice(0,6);
+  $('arb_robot').hidden=false;
+  $('arb_robot').innerHTML='<div class="eyebrow">Robô de arbitragem</div><div class="lead">'+(E.halted?'<span class="bad">Desligado sozinho: '+esc(E.halted.why)+'</span>':cfg.arbMode==='real'?'Ligado: envia ordens de verdade':cfg.arbMode==='ensaio'?'Em ensaio: confere saldo e monta as ordens, sem enviar':'Desligado (pronto para validar)')+'</div>'+
+    '<p class="note" style="margin:6px 0">O que ele faz: pega a melhor arbitragem <b>direta</b> confirmada entre duas corretoras que ele sabe operar ('+ARB_EXEC.map(arbN).join(', ')+'), confere o saldo nas duas, e manda as duas ordens ao mesmo tempo como limite "executa na hora ou cancela" no preço visto. Se só uma perna sair, ele se desliga e avisa no Telegram. Travas: até '+usd(cfg.arbMaxTradeUsd||50,0)+' por operação, '+usd(cfg.arbMaxDayUsd||200,0)+' por dia e margem líquida mínima de '+pct(cfg.arbMinNetPct||0.1,2)+'. Triangular e DEX ficam só no mapa e no papel.</p>'+
+    '<div class="seg" style="margin:6px 0"><button data-arbmode="off" aria-pressed="'+(cfg.arbMode!=='ensaio'&&cfg.arbMode!=='real')+'">Desligado</button><button data-arbmode="ensaio" aria-pressed="'+(cfg.arbMode==='ensaio')+'">Ensaio</button><button data-arbmode="real" aria-pressed="'+(cfg.arbMode==='real')+'">Real</button></div>'+
+    (E.halted?'<button class="sm" id="arb_reset">Conferi as ordens: liberar o robô</button>':'')+
+    '<div class="eyebrow" style="margin:10px 0 4px">Chaves das corretoras (só negociar, nunca saque)</div>'+kv+
+    '<p class="note" style="margin:6px 0 0">Crie a chave na corretora com permissão de <b>negociar spot</b> e <b>sem saque</b> (o servidor recusa chave com saque onde a corretora informa). Ela fica cifrada no seu backend e nunca volta para o painel. Para reequilibrar o saldo entre corretoras, a transferência é sua, à mão.</p>'+
+    (E.lastSkip?'<p class="note" style="margin:6px 0 0">Última oportunidade que ele deixou passar ('+hhmm(new Date(E.lastSkip.t))+'): '+esc(E.lastSkip.why)+'.</p>':'')+
+    (runs.length?'<div class="stack" style="gap:2px;margin-top:6px">'+runs.map(function(r){return '<div class="note">'+hhmm(new Date(r.t))+' · '+esc(r.mode)+' · '+r.qty+' '+esc(r.pair.split('/')[0])+' '+arbN(r.buy)+' → '+arbN(r.sell)+' · '+arbPct(r.netPct)+' · '+esc(typeof r.result==='string'?r.result:('compra '+(r.result.buy.ok?'aceita':'recusada')+', venda '+(r.result.sell.ok?'aceita':'recusada')))+'</div>'}).join('')+'</div>':'')+
+    '<p class="note" style="margin:6px 0 0" id="arb_msg"></p>';
+  // cotações e fontes
+  var Q=(N.quotes||[]).slice().sort(function(a,b){return a.pair<b.pair?-1:a.pair>b.pair?1:a.ask-b.ask}),er=N.errs||{};
+  $('arb_quotes').hidden=false;
+  $('arb_quotes').innerHTML='<details><summary>Cotações de agora e fontes ('+Q.length+' cotações'+(Object.keys(er).length?', '+Object.keys(er).length+' fonte'+(Object.keys(er).length>1?'s':'')+' sem resposta':'')+')</summary><div class="scroll"><table style="font-size:12px"><tr><th>Dupla</th><th>Plataforma</th><th>Compra (bid)</th><th>Venda (ask)</th></tr>'+
+    Q.map(function(q){return '<tr><td>'+esc(q.pair)+'</td><td>'+arbN(q.v)+(q.dex?' <span class="chip">DEX</span>':'')+'</td><td>'+(+q.bid).toFixed(q.pair.indexOf('BRL')>0?4:5)+'</td><td>'+(+q.ask).toFixed(q.pair.indexOf('BRL')>0?4:5)+'</td></tr>'}).join('')+'</table></div>'+
+    (Object.keys(er).length?'<p class="note">Sem resposta nesta leitura: '+Object.keys(er).map(function(k){return arbN(k)+' ('+esc(er[k])+')'}).join(' · ')+'. Algumas corretoras bloqueiam a região de onde o servidor sai; não contornamos bloqueio.</p>':'')+'</details>';
+}
+document.addEventListener('click',function(e){
+  var m=e.target.closest('[data-arbmode]'),k=e.target.closest('[data-arbkey]'),d=e.target.closest('[data-arbdel]'),rs=e.target.closest('#arb_reset');
+  if(m){var md=m.dataset.arbmode;if(md==='real'&&!confirm('Ligar o robô de arbitragem em modo REAL? Ele vai mandar ordens de verdade nas corretoras conectadas, dentro das travas (valor por operação, limite do dia e margem mínima).'))return;
+    apiCall('PUT','/config',{arbMode:md}).then(function(){loadOps()},function(er){alert('Não deu: '+er.message)});return}
+  if(k){var v=k.dataset.arbkey,key=prompt('Chave da API da '+arbN(v)+' (só negociar, sem saque):');if(!key)return;var sec=prompt('Segredo (secret) da API da '+arbN(v)+':');if(!sec)return;
+    var pass=(v==='okx'||v==='kucoin')?prompt('Senha da API (passphrase) da '+arbN(v)+':'):'';
+    $('arb_msg').textContent='Testando a chave na '+arbN(v)+'…';
+    apiCall('POST','/arb/keys',{venue:v,key:key,secret:sec,passphrase:pass}).then(function(r){$('arb_msg').textContent='Chave conectada. Saldo lido: '+Object.keys(r.saldo||{}).map(function(c){return c+' '+r.saldo[c]}).join(' · ');loadOps()},function(er){$('arb_msg').textContent='Não conectou: '+er.message});return}
+  if(d){if(!confirm('Tirar a chave da '+arbN(d.dataset.arbdel)+'?'))return;apiCall('DELETE','/arb/keys?venue='+encodeURIComponent(d.dataset.arbdel)).then(function(){loadOps()});return}
+  if(rs){apiCall('POST','/arb/reset',{}).then(function(){loadOps()});return}
+});
+
 /* ---------- navegação ---------- */
 var TABS=['home','radar','fund','mine','diary','set'];
 function tab(t,sub){
@@ -2575,9 +2638,10 @@ function tab(t,sub){
   if(settings.apiUrl&&Date.now()-(ops.at||0)>60000)loadOps();
   window.scrollTo(0,0);
 }
-var SUBS={fund:['fundSeg',['scan','journey','calc']],mine:['mineSeg',['now','journey','plan','algos','pps','ops','net']],diary:['diarySeg',['pos','mine','robo']]};
+var SUBS={fund:['fundSeg',['stable','scan','journey','calc']],mine:['mineSeg',['now','journey','plan','algos','pps','ops','net']],diary:['diarySeg',['pos','mine','robo']]};
 function subTab(t,sub){
   var cfg=SUBS[t];
+  if(t==='fund'&&sub==='stable'){try{renderArb()}catch(e){console.error('arbitragem',e)}if(settings.apiUrl&&Date.now()-(ops.at||0)>30000)loadOps()}
   if(t==='mine'&&sub==='algos'){loadMarketMap();renderAlgos()}
   if(t==='mine'&&sub==='ops')loadOps();
   if(t==='mine'&&sub==='pps'){try{renderPps()}catch(e){console.error(e)}if(settings.apiUrl&&Date.now()-(ops.at||0)>30000)loadOps()}

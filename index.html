@@ -270,9 +270,17 @@ details.card>summary{color:var(--fg);font-size:15px}
   <!-- FUNDING -->
   <section id="tab-fund" hidden>
     <div class="seg" id="fundSeg" style="margin-bottom:12px">
-      <button data-sub="scan" aria-pressed="true">Oportunidades</button>
+      <button data-sub="stable" aria-pressed="false">Stablecoins</button>
+      <button data-sub="scan" aria-pressed="true">Funding</button>
       <button data-sub="journey" aria-pressed="false">Jornada</button>
       <button data-sub="calc" aria-pressed="false">Calculadora</button>
+    </div>
+    <div id="fund-stable" class="stack" hidden>
+      <div class="card" id="arb_head"><p class="note">Conecte o backend para ver o mapa de arbitragem (atualiza a cada 3 min no servidor).</p></div>
+      <div class="card" id="arb_ops" hidden></div>
+      <div class="card" id="arb_paper" hidden></div>
+      <div class="card" id="arb_robot" hidden></div>
+      <div class="card" id="arb_quotes" hidden></div>
     </div>
     <div id="fund-scan">
       <div class="card" style="margin-bottom:12px">
@@ -787,7 +795,7 @@ details.card>summary{color:var(--fg);font-size:15px}
 <nav translate="no">
   <button data-tab="home" aria-current="true">Início</button>
   <button data-tab="radar" aria-current="false">Radar<span class="badge" id="r_badge" hidden></span></button>
-  <button data-tab="fund" aria-current="false">Funding</button>
+  <button data-tab="fund" aria-current="false">Arbitragem</button>
   <button data-tab="mine" aria-current="false">Mineração</button>
   <button data-tab="diary" aria-current="false">Diário</button>
   <button data-tab="set" aria-current="false">Ajustes</button>
