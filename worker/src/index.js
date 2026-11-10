@@ -935,7 +935,7 @@ export async function tick(env, opts = {}) {
   // Auditor automático, de hora em hora: confere se as contas das simulações fecham; avisa só problema novo
   if (!state.audit || now - state.audit.at >= 3600e3) {
     try {
-      const au = auditState(Object.assign({}, next, { scan: await kvGet(env, 'scan', null) }), { now, lab: await kvGet(env, 'lab', null), arb: await kvGet(env, 'arb', null) });
+      const au = auditState(Object.assign({}, next, { scan: await kvGet(env, 'scan', null) }), { now, lab: await kvGet(env, 'lab', null), arb: await kvGet(env, 'arb', null), defi: await kvGet(env, 'defi', null) });
       for (const msg of auditNews(state.audit, au)) { log.push({ t: now, kind: 'acao', text: msg }); await notify(env, msg, fetchFn); }
       next.audit = au;
     } catch (e) { errors.push('auditor: ' + (e.message || e)); }

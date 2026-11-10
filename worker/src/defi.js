@@ -61,15 +61,30 @@ export function defiRead(results, { rules = DEFI_RULES, now = Date.now() } = {})
 export function defiStep(prev, { now, results, errs = {}, rules = DEFI_RULES }) {
   const D = prev && prev.since ? JSON.parse(JSON.stringify(prev)) : { since: now, scans: 0, counts: {}, series: [], paper: { trades: 0, netUsd: 0, last: [] } };
   const { rows, quote } = defiRead(results, { rules, now }), events = [];
+  if (!(D.repairs || []).includes('cap-1110')) { // tira do papel o que passou do plausível antes da trava
+    const bad = (D.paper.last || []).filter((x) => x.pct > 1);
+    for (const x of bad) { D.paper.trades--; D.paper.netUsd -= x.usd; }
+    D.paper.last = (D.paper.last || []).filter((x) => !(x.pct > 1));
+    for (const c of Object.values(D.counts)) { c.maxPrem = Math.min(c.maxPrem, 3); c.maxDisc = Math.min(c.maxDisc, 3); }
+    D.repairs = (D.repairs || []).concat(['cap-1110']); if (bad.length) D.repaired = { at: now, removed: bad };
+  }
   D.scans++;
+  // Plausível (10/11): stable contra stable não se afasta mais de 1% do valor de resgate sem notícia; token de ETH, 3%.
+  // Acima disso é cotação com defeito (08/11: o CoW cotou USDS 4% acima do DAI, que se converte 1:1, e o papel contou
+  // +US$401,73). Confirmação = a leitura anterior do mesmo token perto do mesmo valor (até 0,25 ponto), não só "positiva".
+  const prevVals = D.lastVals || {}; D.lastVals = {};
   for (const r of rows) {
     if (r.err) continue;
-    const c = D.counts[r.k] || (D.counts[r.k] = { n: 0, prem: 0, disc: 0, maxPrem: -Infinity, maxDisc: -Infinity });
+    const cap = r.base === 'WETH' ? 3 : 1, dev = Math.max(r.premPct, r.discPct);
+    if (dev > cap) { r.suspect = true; r.act = null; }
+    D.lastVals[r.k] = dev;
+    const c = D.counts[r.k] || (D.counts[r.k] = { n: 0, prem: 0, disc: 0, maxPrem: -Infinity, maxDisc: -Infinity, suspect: 0 });
+    if (r.suspect) { c.suspect = (c.suspect || 0) + 1; continue; }
     c.n++; if (r.premPct >= rules.minInstantPct) c.prem++; if (r.act && r.act.startsWith('comprar')) c.disc++;
     c.maxPrem = Math.max(c.maxPrem, r.premPct); c.maxDisc = Math.max(c.maxDisc, r.discPct);
     // papel: só o ganho na hora (cunhar e vender, ou comprar e resgatar sem espera), US$10.000 por vez, confirmado na leitura anterior
     const instant = r.premPct >= rules.minInstantPct ? r.premPct : r.days === 0 && r.discPct >= rules.minInstantPct ? r.discPct : null;
-    if (instant !== null && (D.lastAct || []).includes(r.k)) {
+    if (instant !== null && (D.lastAct || []).includes(r.k) && prevVals[r.k] !== undefined && Math.abs(prevVals[r.k] - dev) <= 0.25) {
       const usd = 10000 * instant / 100; D.paper.trades++; D.paper.netUsd += usd;
       D.paper.last = [{ t: now, k: r.k, act: r.act, pct: instant, usd: +usd.toFixed(2) }].concat(D.paper.last).slice(0, 30);
       events.push(`DeFi (papel): ${r.k} (${r.proto}) — ${r.act}: ${instant.toFixed(3).replace('.', ',')}% em US$10.000 → +US$${usd.toFixed(2).replace('.', ',')}`);

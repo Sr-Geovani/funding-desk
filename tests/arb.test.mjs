@@ -105,3 +105,15 @@ test('DeFi: valor de resgate do contrato × preço da DEX — prêmio dá "cunha
   assert.equal(r.defi.paper.trades, 1); close(r.defi.paper.netUsd, 50, 0.01); assert.match(r.events[0], /weETH \(ether\.fi\) — cunhar e vender agora/);
   close(r.defi.now.quote.bid, 1.0011, 1e-9);
 });
+
+test('DeFi: desvio impossível (USDS 4% acima do DAI) é cotação com defeito: não entra no papel, e o papel antigo é reparado', async () => {
+  const { defiStep } = await import('../worker/src/defi.js');
+  const src = (k) => ({ k });
+  const usds = (px) => [{ src: src('USDS:sell'), ok: true, json: { quote: { buyAmount: String(BigInt(Math.round(1e22 * px))) } } }, { src: src('USDS:buy'), ok: true, json: { quote: { buyAmount: String(BigInt(Math.round(1e22 / 1.0001))) } } }];
+  const old = { since: 0, scans: 5, counts: { USDS: { n: 5, prem: 2, disc: 0, maxPrem: 4.0173, maxDisc: 0 } }, series: [], paper: { trades: 1, netUsd: 401.73, last: [{ t: 1, k: 'USDS', act: 'cunhar e vender agora', pct: 4.0173, usd: 401.73 }] } };
+  let r = defiStep(old, { now: 10, results: usds(1.04) });
+  assert.equal(r.defi.paper.trades, 0); assert.equal(r.defi.paper.netUsd, 0, 'reparo tirou os US$401,73');
+  assert.ok(r.defi.now.rows.find((x) => x.k === 'USDS').suspect);
+  r = defiStep(r.defi, { now: 20, results: usds(1.04) });
+  assert.equal(r.defi.paper.trades, 0, 'repetir o defeito não vira operação');
+});

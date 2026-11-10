@@ -5,7 +5,8 @@
 const fin = (x) => typeof x === 'number' && isFinite(x);
 const money = (x) => (x < 0 ? '−' : '') + 'US$' + Math.abs(x).toFixed(2).replace('.', ',');
 
-export function auditState(state, { now = Date.now(), lab = null, arb = null } = {}) {
+export function auditState(state, opts = {}) {
+  const { now = Date.now(), lab = null, arb = null } = opts;
   const s = state || {}, out = [];
   let checks = 0;
   const add = (sev, area, key, text) => out.push({ sev, area, key: area + ':' + key, text });
@@ -75,6 +76,8 @@ export function auditState(state, { now = Date.now(), lab = null, arb = null } =
     chk((now - (arb.lastTs || 0)) / 60e3 < 12, 'aviso', 'Dados', 'arb', `Dados: a arbitragem não lê o mercado há ${Math.round((now - (arb.lastTs || 0)) / 60e3)} min`);
     if (arb.exec && arb.exec.halted) add('erro', 'Arbitragem', 'halted', `Arbitragem: o robô se desligou sozinho — ${arb.exec.halted.why}`);
   }
+  // 9c) DeFi: papel sem operação com ganho impossível (acima de 1% em stable / 3% em ETH)
+  if (opts.defi && opts.defi.paper) for (const x of (opts.defi.paper.last || []).slice(0, 10)) { checks++; if (x.pct > 1) add('erro', 'DeFi', 'pct:' + x.t, `DeFi: operação em papel de ${x.k} com ${x.pct.toFixed(2)}% (impossível para resgate: cotação com defeito)`); }
   // 10) dados parados (sem leitura nova, a simulação decide com dado velho)
   const age = (t) => (t ? (now - t) / 60e3 : Infinity);
   chk(age(s.algoTs) < 35, 'aviso', 'Dados', 'map', `Dados: o mapa de moedas não atualiza há ${Math.round(age(s.algoTs))} min`);
